@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.2
-Date: ????
+Date: 2024-10-22
   Changes:
     - Hide categories with less than one element in machine presets.
   Bugfixes:
