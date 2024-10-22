@@ -9,9 +9,11 @@ Calculate quantities of machine and ingredient required in a factory to achieve 
 - Generators and boilers etc. are treated as virtual recipes. (still incomplete)
 - Set limited machine and material constraints for calculations.
 
+Warning: Multiplayer games have not been tested. Note that solution data may be lost if used.
+
 ## How to use
 
-1. Click the green '+' button to create a new solution.
+1. Click the blue '+' button to create a new solution.
 2. Choose the material to target for production speed.
 3. Choose a recipe to product or ingredient that material.
 4. Click on a material button in "Products" column or "Ingredients" column to add a recipe.
