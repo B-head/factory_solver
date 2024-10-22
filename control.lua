@@ -113,6 +113,7 @@ local function toggle_main_window(player_index)
     local window = player.gui.screen["factory_solver_main_window"]
     if window == nil then
         common.open_gui(player_index, false, main_window)
+        player.set_shortcut_toggled("factory-solver-toggle-main-window", true)
     else
         common.on_close_self {
             element = window,
@@ -121,11 +122,18 @@ local function toggle_main_window(player_index)
             tick = game.tick,
             mod_name = window.get_mod()
         }
+        player.set_shortcut_toggled("factory-solver-toggle-main-window", false)
     end
 end
 
 script.on_event("factory-solver-toggle-main-window", function(event)
     toggle_main_window(event.player_index)
+end)
+
+script.on_event(defines.events.on_lua_shortcut, function(event)
+    if event.prototype_name == "factory-solver-toggle-main-window" then
+        toggle_main_window(event.player_index)
+    end
 end)
 
 flib_dictionary.handle_events()

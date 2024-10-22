@@ -36,6 +36,16 @@ data:extend({
         key_sequence = "CONTROL + R",
         order = "a"
     },
+    {
+        type = "shortcut",
+        name = "factory-solver-toggle-main-window",
+        order = "c",
+        action = "lua",
+        icon = "__core__/graphics/questionmark.png",
+        small_icon = "__core__/graphics/questionmark.png",
+        toggleable = true,
+        associated_control_input = "factory-solver-toggle-main-window",
+    },
 })
 
 local styles = data.raw["gui-style"].default
