@@ -138,7 +138,7 @@ function handlers.on_make_constraint_picker(event)
                 if not value.parameter then
                     local is_hidden = info.is_hidden(value)
                     local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                    local typed_name = { type = filter_type, name = value.name }
+                    local typed_name = info.craft_to_typed_name(value)
                     add(typed_name, is_hidden, is_unresearched)
                 end
             end
@@ -152,7 +152,7 @@ function handlers.on_make_constraint_picker(event)
                 if not value.parameter then
                     local is_hidden = info.is_hidden(value)
                     local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                    local typed_name = { type = filter_type, name = value.name }
+                    local typed_name = info.craft_to_typed_name(value)
                     add(typed_name, is_hidden, is_unresearched)
                 end
             end
@@ -169,7 +169,7 @@ function handlers.on_make_constraint_picker(event)
                 if not prototypes.recipe[value.name].parameter then
                     local is_hidden = info.is_hidden(value)
                     local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                    local typed_name = { type = filter_type, name = value.name }
+                    local typed_name = info.craft_to_typed_name(value)
                     add(typed_name, is_hidden, is_unresearched)
                 end
             end
@@ -191,7 +191,7 @@ function handlers.on_make_constraint_picker(event)
             for _, value in pairs(sorted) do
                 local is_hidden = info.is_hidden(value)
                 local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                local typed_name = { type = value.type, name = value.name }
+                local typed_name = info.craft_to_typed_name(value)
                 add(typed_name, is_hidden, is_unresearched)
             end
         else

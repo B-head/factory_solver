@@ -466,10 +466,13 @@ function M.typed_name_to_elem_id(typed_name, quality)
 end
 
 ---comment
----@param filter_type FilterType 
+---@param filter_type FilterType | "research-progress"
 ---@param name string
 ---@return TypedName
 function M.create_typed_name(filter_type, name)
+    if filter_type == "research-progress" then
+        filter_type = "virtual_material"
+    end
     return { type = filter_type, name = name }
 end
 

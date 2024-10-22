@@ -37,7 +37,7 @@ function handlers.on_make_fuel_presets(event)
 
             local def_buttons = {}
             for _, value in pairs(fuels) do
-                local typed_name = info.create_typed_name(value.type, value.name)
+                local typed_name = info.craft_to_typed_name(value)
                 local is_hidden = info.is_hidden(value)
                 local is_unresearched = info.is_unresearched(value, relation_to_recipes)
 
