@@ -39,6 +39,8 @@ function M.reinit_player_data(player_index)
     if player_data then
         player_data.fuel_presets = M.init_fuel_presets(player_data.fuel_presets)
         player_data.machine_presets = M.init_machine_presets(player_data.machine_presets)
+    else
+        M.init_player_data(player_index)
     end
 end
 
@@ -139,6 +141,8 @@ function M.reinit_force_data(force_index)
     local force_data = storage.forces[force_index]
     if force_data then
         force_data.relation_to_recipes_needs_updating = true
+    else
+        M.init_force_data(force_index)
     end
 end
 
@@ -349,7 +353,8 @@ function M.get_total_pollution(solution)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        local pollution = info.raw_emission_to_pollution(machine, "pollution", effectivity.consumption, effectivity.pollution)
+        local pollution = info.raw_emission_to_pollution(machine, "pollution",
+            effectivity.consumption, effectivity.pollution)
         pollution = pollution * quantity_of_machines_required
 
         if line.fuel_typed_name then

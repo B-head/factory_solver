@@ -12,9 +12,17 @@ local main_window = require "ui/main_window"
 script.on_init(function()
     flib_dictionary.on_init()
 
-    storage.players = {}
-    storage.forces = {}
     storage.virtuals = virtual.create_virtuals()
+
+    storage.players = {}
+    for _, player in pairs(game.players) do
+        save.init_player_data(player.index)
+    end
+
+    storage.forces = {}
+    for _, force in pairs(game.forces) do
+        save.init_force_data(force.index)
+    end
 
     if __DebugAdapter then
         if remote.interfaces["freeplay"] then
@@ -35,6 +43,8 @@ end)
 script.on_configuration_changed(function(event)
     flib_dictionary.on_configuration_changed()
 
+    storage.virtuals = virtual.create_virtuals()
+
     for _, player in pairs(game.players) do
         save.reinit_player_data(player.index)
         -- TODO reset gui
@@ -43,17 +53,11 @@ script.on_configuration_changed(function(event)
     for _, force in pairs(game.forces) do
         save.reinit_force_data(force.index)
     end
-
-    storage.virtuals = virtual.create_virtuals()
 end)
 
 
 script.on_event(defines.events.on_player_created, function(event)
     save.init_player_data(event.player_index)
-
-    local force_index = game.players[event.player_index].force_index
-    save.init_force_data(force_index)
-    
     if __DebugAdapter then
         game.players[event.player_index].cheat_mode = true
     end
@@ -65,6 +69,10 @@ end)
 
 script.on_event(defines.events.on_player_removed, function(event)
     storage.players[event.player_index] = nil
+end)
+
+script.on_event(defines.events.on_force_created, function(event)
+    save.init_force_data(event.force.index)
 end)
 
 script.on_event(defines.events.on_force_reset, function(event)
