@@ -11,15 +11,15 @@ local M = {}
 ---@return boolean
 function M.is_virtual(typed_name)
     local t = typed_name.type
-    return t == "virtual-object" or t == "virtual-recipe" or t == "virtual-machine"
+    return t == "virtual_material" or t == "virtual_recipe" or t == "virtual_machine"
 end
 
 ---@return Virtuals
 function M.create_virtuals()
-    ---@type table<string, VirtualObject>
-    local objects = {
+    ---@type table<string, VirtualMaterial>
+    local materials = {
         ["<heat>"] = {
-            type = "virtual-object",
+            type = "virtual_material",
             name = "<heat>",
             localised_name = "Heat", --TODO
             sprite_path = "utility/heat_exchange_indication",
@@ -32,7 +32,7 @@ function M.create_virtuals()
     ---@type table<string, VirtualRecipe>
     local recipes = {
         ["<solar-power>"] = {
-            type = "virtual-recipe",
+            type = "virtual_recipe",
             name = "<solar-power>",
             localised_name = "Solar power", --TODO
             sprite_path = "factory-solver-solar-panel",
@@ -96,7 +96,7 @@ function M.create_virtuals()
     end
 
     return {
-        object = objects,
+        material = materials,
         recipe = recipes,
         machine = machines,
         crafting_categories = crafting_categories,
@@ -112,16 +112,16 @@ function M.get_craft_order(typed_name)
         return "", "other", "other"
     end
 
-    local object_prototype
+    local prototype
     if typed_name.type == "item" then
-        object_prototype = prototypes.item[typed_name.name]
+        prototype = prototypes.item[typed_name.name]
     elseif typed_name.type == "fluid" then
-        object_prototype = prototypes.fluid[typed_name.name]
+        prototype = prototypes.fluid[typed_name.name]
     else
         return assert(nil)
     end
 
-    return object_prototype.order, object_prototype.group.name, object_prototype.subgroup.name
+    return prototype.order, prototype.group.name, prototype.subgroup.name
 end
 
 ---@param rocket_silo_prototype LuaEntityPrototype
@@ -147,7 +147,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
 
     ---@type VirtualRecipe
     local recipe = {
-        type = "virtual-recipe",
+        type = "virtual_recipe",
         name = "<space-science-pack>" .. rocket_silo_prototype.name,
         localised_name = { "item-name.space-science-pack" },
         sprite_path = "item/space-science-pack",
@@ -168,7 +168,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
 
     ---@type VirtualMachine
     local machine = {
-        type = "virtual-machine",
+        type = "virtual_machine",
         name = rocket_silo_prototype.name,
         localised_name = rocket_silo_prototype.localised_name,
         sprite_path = "entity/" .. rocket_silo_prototype.name,
@@ -213,7 +213,7 @@ function M.create_boiler_virtual(boiler_prototype)
 
         ---@type VirtualRecipe
         local recipe = {
-            type = "virtual-recipe",
+            type = "virtual_recipe",
             name = "<run>" .. boiler_prototype.name,
             localised_name = "<run>" .. boiler_prototype.name, --TODO
             sprite_path = "entity/" .. boiler_prototype.name,
@@ -240,7 +240,7 @@ function M.create_boiler_virtual(boiler_prototype)
 
         ---@type VirtualMachine
         local machine = {
-            type = "virtual-machine",
+            type = "virtual_machine",
             name = boiler_prototype.name,
             localised_name = boiler_prototype.localised_name,
             sprite_path = "entity/" .. boiler_prototype.name,
@@ -273,7 +273,7 @@ function M.create_boiler_virtual(boiler_prototype)
 
         ---@type VirtualRecipe
         local recipe = {
-            type = "virtual-recipe",
+            type = "virtual_recipe",
             name = "<run>" .. boiler_prototype.name,
             localised_name = "<run>" .. boiler_prototype.name, --TODO
             sprite_path = "entity/" .. boiler_prototype.name,
@@ -300,7 +300,7 @@ function M.create_boiler_virtual(boiler_prototype)
 
         ---@type VirtualMachine
         local machine = {
-            type = "virtual-machine",
+            type = "virtual_machine",
             name = boiler_prototype.name,
             localised_name = boiler_prototype.localised_name,
             sprite_path = "entity/" .. boiler_prototype.name,
@@ -352,7 +352,7 @@ function M.create_generator_virtual(generator_prototype)
 
     ---@type VirtualRecipe
     local recipe = {
-        type = "virtual-recipe",
+        type = "virtual_recipe",
         name = "<run>" .. generator_prototype.name,
         localised_name = "<run>" .. generator_prototype.name, --TODO
         sprite_path = "entity/" .. generator_prototype.name,
@@ -367,7 +367,7 @@ function M.create_generator_virtual(generator_prototype)
 
     ---@type VirtualMachine
     local machine = {
-        type = "virtual-machine",
+        type = "virtual_machine",
         name = generator_prototype.name,
         localised_name = generator_prototype.localised_name,
         sprite_path = "entity/" .. generator_prototype.name,
@@ -401,7 +401,7 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
 
     ---@type VirtualRecipe
     local recipe = {
-        type = "virtual-recipe",
+        type = "virtual_recipe",
         name = "<run>" .. burner_generator_prototype.name,
         localised_name = "<run>" .. burner_generator_prototype.name, --TODO
         sprite_path = "entity/" .. burner_generator_prototype.name,
@@ -416,7 +416,7 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
 
     ---@type VirtualMachine
     local machine = {
-        type = "virtual-machine",
+        type = "virtual_machine",
         name = burner_generator_prototype.name,
         localised_name = burner_generator_prototype.localised_name,
         sprite_path = "entity/" .. burner_generator_prototype.name,
@@ -449,14 +449,14 @@ function M.create_reactor_virtual(reactor_prototype)
 
     ---@type VirtualRecipe
     local recipe = {
-        type = "virtual-recipe",
+        type = "virtual_recipe",
         name = "<run>" .. reactor_prototype.name,
         localised_name = "<run>" .. reactor_prototype.name, --TODO
         sprite_path = "entity/" .. reactor_prototype.name,
         energy = 1,
         products = {
             {
-                type = "virtual-object",
+                type = "virtual_material",
                 name = "<heat>",
                 amount_per_second = reactor_prototype.get_max_energy_usage() * info.ticks_per_second,
             },
@@ -470,7 +470,7 @@ function M.create_reactor_virtual(reactor_prototype)
 
     ---@type VirtualMachine
     local machine = {
-        type = "virtual-machine",
+        type = "virtual_machine",
         name = reactor_prototype.name,
         localised_name = reactor_prototype.localised_name,
         sprite_path = "entity/" .. reactor_prototype.name,
@@ -499,7 +499,7 @@ function M.create_solar_panel_virtual(solar_panel_prototype)
 
     ---@type VirtualMachine
     local machine = {
-        type = "virtual-machine",
+        type = "virtual_machine",
         name = solar_panel_prototype.name,
         localised_name = solar_panel_prototype.localised_name,
         sprite_path = "entity/" .. solar_panel_prototype.name,
@@ -537,7 +537,7 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
 
     ---@type VirtualRecipe
     local recipe = {
-        type = "virtual-recipe",
+        type = "virtual_recipe",
         name = "<run>" .. offshore_pump_prototype.name,
         localised_name = "<run>" .. offshore_pump_prototype.name, --TODO
         sprite_path = "entity/" .. offshore_pump_prototype.name,
@@ -559,7 +559,7 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
 
     ---@type VirtualMachine
     local machine = {
-        type = "virtual-machine",
+        type = "virtual_machine",
         name = offshore_pump_prototype.name,
         localised_name = offshore_pump_prototype.localised_name,
         sprite_path = "entity/" .. offshore_pump_prototype.name,
@@ -609,7 +609,7 @@ function M.create_resource_virtual(resource_prototype)
 
     ---@type VirtualRecipe
     local recipe = {
-        type = "virtual-recipe",
+        type = "virtual_recipe",
         name = "<minable>" .. resource_prototype.name,
         localised_name = "<minable>" .. resource_prototype.name, --TODO
         sprite_path = "entity/" .. main_product.name,
@@ -635,7 +635,7 @@ function M.create_mining_drill_virtual(mining_drill_prototype)
 
     ---@type VirtualMachine
     local machine = {
-        type = "virtual-machine",
+        type = "virtual_machine",
         name = mining_drill_prototype.name,
         localised_name = mining_drill_prototype.localised_name,
         sprite_path = "entity/" .. mining_drill_prototype.name,

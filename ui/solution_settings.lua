@@ -50,7 +50,7 @@ function handlers.on_make_constraints_table(event)
 
         do
             local amount = data.limit_amount_per_second
-            if not (data.type == "recipe" or data.type == "virtual-recipe") then
+            if not (data.type == "recipe" or data.type == "virtual_recipe") then
                 amount = info.to_scale(amount, player_data.time_scale)
             end
             local def = {
@@ -113,7 +113,7 @@ function handlers.on_constraint_button_click(event)
 
     local typed_name = info.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
 
-    if typed_name.type == "recipe" or typed_name.type == "virtual-recipe" then
+    if typed_name.type == "recipe" or typed_name.type == "virtual_recipe" then
         save.new_production_line(event.player_index, solution, typed_name)
 
         local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
@@ -148,7 +148,7 @@ function handlers.on_limit_amount_confirmed(event)
         return info.equals_typed_name(value, typed_name)
     end))
     local amount = tonumber(elem.text) or 0
-    if not (typed_name.type == "recipe" or typed_name.type == "virtual-recipe") then
+    if not (typed_name.type == "recipe" or typed_name.type == "virtual_recipe") then
         amount = info.from_scale(amount, player_data.time_scale)
     end
 

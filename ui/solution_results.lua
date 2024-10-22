@@ -54,7 +54,7 @@ function handlers.make_final_products_table(event)
     end
 
     for name, number in pairs(virtual_totals) do
-        add(info.create_typed_name("virtual-object", name), number)
+        add(info.create_typed_name("virtual_material", name), number)
     end
 end
 
@@ -103,7 +103,7 @@ function handlers.make_basic_ingredients_table(event)
     end
 
     for name, number in pairs(virtual_totals) do
-        add(info.create_typed_name("virtual-object", name), number)
+        add(info.create_typed_name("virtual_material", name), number)
     end
 end
 

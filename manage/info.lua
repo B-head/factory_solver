@@ -202,7 +202,7 @@ function M.create_relation_to_recipes(force_index)
         fluids[key] = { enabled_recipe_used_count = 0, recipe_for_ingredient = {}, recipe_for_product = {} }
     end
 
-    for key, _ in pairs(storage.virtuals.object) do
+    for key, _ in pairs(storage.virtuals.material) do
         virtuals[key] = { enabled_recipe_used_count = 0, recipe_for_ingredient = {}, recipe_for_product = {} }
     end
 
@@ -247,7 +247,7 @@ function M.create_relation_to_recipes(force_index)
                 info = items[value.name]
             elseif value.type == "fluid" then
                 info = fluids[value.name]
-            elseif value.type == "virtual-object" then
+            elseif value.type == "virtual_material" then
                 info = virtuals[value.name]
             else
                 assert(false)
@@ -265,7 +265,7 @@ function M.create_relation_to_recipes(force_index)
                 info = items[value.name]
             elseif value.type == "fluid" then
                 info = fluids[value.name]
-            elseif value.type == "virtual-object" then
+            elseif value.type == "virtual_material" then
                 info = virtuals[value.name]
             else
                 assert(false)
@@ -286,7 +286,7 @@ function M.create_relation_to_recipes(force_index)
                 info = items[value.name]
             elseif value.type == "fluid" then
                 info = fluids[value.name]
-            elseif value.type == "virtual-object" then
+            elseif value.type == "virtual_material" then
                 info = virtuals[value.name]
             else
                 assert(false)
@@ -301,7 +301,7 @@ function M.create_relation_to_recipes(force_index)
         end
     end
 
-    return { item = items, fluid = fluids, virtual = virtuals }
+    return { item = items, fluid = fluids, virtual_recipe = virtuals }
 end
 
 ---Create caches of additional information for groups.
@@ -361,8 +361,8 @@ function M.create_group_infos(force_index, relation_to_recipes)
         end
     end
 
-    for _, virtual_object in pairs(storage.virtuals.object) do
-        local virtual_group = virtuals[virtual_object.group_name]
+    for _, virtual_material in pairs(storage.virtuals.material) do
+        local virtual_group = virtuals[virtual_material.group_name]
         virtual_group.researched_count = virtual_group.researched_count + 1
         -- TODO hidden and unreserched
     end
@@ -373,7 +373,7 @@ function M.create_group_infos(force_index, relation_to_recipes)
         -- TODO hidden and unreserched
     end
 
-    return { item = items, fluid = fluids, recipe = recipes, virtual = virtuals }
+    return { item = items, fluid = fluids, recipe = recipes, virtual_recipe = virtuals }
 end
 
 ---comment
@@ -389,11 +389,11 @@ function M.is_hidden(craft)
         return craft.hidden
     elseif craft.object_name == "LuaEntityPrototype" then
         return craft.hidden
-    elseif craft.type == "virtual-object" then
+    elseif craft.type == "virtual_material" then
         return false --TODO
-    elseif craft.type == "virtual-recipe" then
+    elseif craft.type == "virtual_recipe" then
         return false --TODO
-    elseif craft.type == "virtual-machine" then
+    elseif craft.type == "virtual_machine" then
         return false --TODO
     else
         return assert(false)
@@ -423,11 +423,11 @@ function M.is_unresearched(craft, relation_to_recipes)
             ret = ret and not is_researched
         end
         return ret
-    elseif craft.type == "virtual-object" then
+    elseif craft.type == "virtual_material" then
         return false --TODO
-    elseif craft.type == "virtual-recipe" then
+    elseif craft.type == "virtual_recipe" then
         return false --TODO
-    elseif craft.type == "virtual-machine" then
+    elseif craft.type == "virtual_machine" then
         return false --TODO
     else
         return assert(false)
@@ -466,7 +466,7 @@ function M.typed_name_to_elem_id(typed_name, quality)
 end
 
 ---comment
----@param filter_type FilterType
+---@param filter_type FilterType 
 ---@param name string
 ---@return TypedName
 function M.create_typed_name(filter_type, name)
@@ -500,11 +500,11 @@ function M.typed_name_to_craft(typed_name, force)
         end
     elseif type == "machine" then
         return prototypes.entity[name]
-    elseif type == "virtual-object" then
-        return storage.virtuals.object[name]
-    elseif type == "virtual-recipe" then
+    elseif type == "virtual_material" then
+        return storage.virtuals.material[name]
+    elseif type == "virtual_recipe" then
         return storage.virtuals.recipe[name]
-    elseif type == "virtual-machine" then
+    elseif type == "virtual_machine" then
         return storage.virtuals.machine[name]
     else
         return assert(nil)
@@ -536,13 +536,13 @@ end
 ---@param typed_name TypedName
 ---@return string
 function M.get_sprite_path(typed_name)
-    if typed_name.type == "virtual-object" then
-        object = storage.virtuals.object[typed_name.name]
-        return object.sprite_path
-    elseif typed_name.type == "virtual-recipe" then
+    if typed_name.type == "virtual_material" then
+        local material = storage.virtuals.material[typed_name.name]
+        return material.sprite_path
+    elseif typed_name.type == "virtual_recipe" then
         local recipe = storage.virtuals.recipe[typed_name.name]
         return recipe.sprite_path
-    elseif typed_name.type == "virtual-machine" then
+    elseif typed_name.type == "virtual_machine" then
         local machine = storage.virtuals.machine[typed_name.name]
         return machine.sprite_path
     elseif typed_name.type == "machine" then
@@ -553,20 +553,20 @@ function M.get_sprite_path(typed_name)
 end
 
 ---comment
----@param object LuaItemPrototype | LuaFluidPrototype | VirtualObject
+---@param material LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
 ---@param machine LuaEntityPrototype | VirtualMachine
 ---@return number
-function M.get_fuel_value(object, machine)
+function M.get_fuel_value(material, machine)
     ---@diagnostic disable: param-type-mismatch
     if not machine.object_name and machine.energy_source.alternative_fuel_value then
         return machine.energy_source.alternative_fuel_value
     end
 
     ---@diagnostic disable: param-type-mismatch
-    if object.object_name == "LuaItemPrototype" then
-        return object.fuel_value
-    elseif object.object_name == "LuaFluidPrototype" then
-        return object.fuel_value
+    if material.object_name == "LuaItemPrototype" then
+        return material.fuel_value
+    elseif material.object_name == "LuaFluidPrototype" then
+        return material.fuel_value
     else
         return 1
     end
@@ -574,14 +574,14 @@ function M.get_fuel_value(object, machine)
 end
 
 ---comment
----@param object LuaItemPrototype | LuaFluidPrototype | VirtualObject
+---@param material LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
 ---@return number
-function M.get_fuel_emissions_multiplier(object)
+function M.get_fuel_emissions_multiplier(material)
     ---@diagnostic disable: param-type-mismatch
-    if object.object_name == "LuaItemPrototype" then
-        return object.fuel_emissions_multiplier
-    elseif object.object_name == "LuaFluidPrototype" then
-        return object.emissions_multiplier
+    if material.object_name == "LuaItemPrototype" then
+        return material.fuel_emissions_multiplier
+    elseif material.object_name == "LuaFluidPrototype" then
+        return material.emissions_multiplier
     else
         return 1
     end
@@ -635,7 +635,7 @@ function M.try_get_fixed_fuel(machine)
     ---@diagnostic disable-next-line: param-type-mismatch
     if machine.object_name then
         if machine.heat_energy_source_prototype then
-            return M.create_typed_name("virtual-object", "<heat>")
+            return M.create_typed_name("virtual_material", "<heat>")
         elseif machine.fluid_energy_source_prototype then
             local fluid_name = machine.fluid_energy_source_prototype.fluid_box.filter.name
             return M.create_typed_name("fluid", fluid_name)

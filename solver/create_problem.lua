@@ -204,7 +204,7 @@ function M.create_problem(solution_name, constraints, production_lines)
 
     for _, constraint in ipairs(constraints) do
         local craft_name
-        if constraint.type == "recipe" or constraint.type == "virtual-recipe" then
+        if constraint.type == "recipe" or constraint.type == "virtual_recipe" then
             craft_name = constraint.name
         else
             craft_name = constraint.type .. "/" .. constraint.name

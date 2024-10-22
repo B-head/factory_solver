@@ -51,8 +51,8 @@ function handlers.on_make_choose_table(event)
         else
             recipe_names = fluids.recipe_for_ingredient
         end
-    elseif typed_name.type == "virtual-object" then
-        local virtuals = relation_to_recipes.virtual[typed_name.name]
+    elseif typed_name.type == "virtual_material" then
+        local virtuals = relation_to_recipes.virtual_recipe[typed_name.name]
         if kind == "product" then
             recipe_names = virtuals.recipe_for_product
         else

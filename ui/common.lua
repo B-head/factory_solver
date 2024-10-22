@@ -17,7 +17,7 @@ function M.get_style(is_hidden, is_unresearched, filter_type)
     elseif is_unresearched then
         return "flib_slot_button_orange"
     else
-        if filter_type == "recipe" or filter_type == "virtual-recipe" then
+        if filter_type == "recipe" or filter_type == "virtual_recipe" then
             return "flib_slot_button_blue"
         else
             return "flib_slot_button_default"

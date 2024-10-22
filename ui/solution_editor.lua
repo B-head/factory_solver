@@ -264,7 +264,7 @@ function handlers.make_production_line_table(event)
             end
 
             if fuel_typed_name then
-                local fuel = info.typed_name_to_craft(fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualObject]]
+                local fuel = info.typed_name_to_craft(fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
                 local is_hidden = info.is_hidden(fuel)
                 local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
                 local amount_per_second = power / info.get_fuel_value(fuel, machine)
@@ -308,7 +308,7 @@ function handlers.make_production_line_table(event)
                 effectivity.pollution)
 
             if line.fuel_typed_name then
-                local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualObject]]
+                local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
                 pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
             end
 

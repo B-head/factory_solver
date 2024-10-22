@@ -173,10 +173,10 @@ function handlers.on_make_constraint_picker(event)
                     add(typed_name, is_hidden, is_unresearched)
                 end
             end
-        elseif filter_type == "virtual" then
-            ---@type (VirtualObject|VirtualRecipe)[]
+        elseif filter_type == "virtual_recipe" then
+            ---@type (VirtualMaterial|VirtualRecipe)[]
             local virtuals = {}
-            for _, value in pairs(storage.virtuals.object) do
+            for _, value in pairs(storage.virtuals.material) do
                 if value.subgroup_name == subgroup.name then
                     flib_table.insert(virtuals, value)
                 end
@@ -228,7 +228,7 @@ function handlers.on_constraint_picker_button_click(event)
     local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
     fs_util.dispatch_to_subtree(root, "on_constraint_changed")
 
-    if typed_name.type == "recipe" or typed_name.type == "virtual-recipe" then
+    if typed_name.type == "recipe" or typed_name.type == "virtual_recipe" then
         save.new_production_line(event.player_index, solution, typed_name)
 
         fs_util.dispatch_to_subtree(root, "on_production_line_changed")
@@ -301,7 +301,7 @@ return {
                     "item",
                     "fluid",
                     "recipe",
-                    "virtual",
+                    "virtual_recipe",
                 },
             },
             handler = {
@@ -391,7 +391,7 @@ return {
                         style = "slot_table",
                         column_count = 6,
                         tags = {
-                            filter_type = "virtual",
+                            filter_type = "virtual_recipe",
                         },
                         handler = {
                             on_added = handlers.on_make_filter_group,

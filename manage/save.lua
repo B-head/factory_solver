@@ -19,7 +19,7 @@ function M.init_player_data(player_index)
                 item = "logistics",
                 fluid = "fluids",
                 recipe = "logistics",
-                virtual = "production",
+                virtual_recipe = "production",
             },
             unresearched_craft_visible = __DebugAdapter ~= nil,
             hidden_craft_visible = __DebugAdapter ~= nil,
@@ -126,9 +126,9 @@ end
 function M.init_force_data(force_index)
     if not storage.forces[force_index] then
         storage.forces[force_index] = {
-            relation_to_recipes = { item = {}, fluid = {}, virtual = {} },
+            relation_to_recipes = { item = {}, fluid = {}, virtual_recipe = {} },
             relation_to_recipes_needs_updating = true,
-            group_infos = { item = {}, fluid = {}, recipe = {}, virtual = {} },
+            group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {} },
             group_infos_needs_updating = true,
             solutions = {},
         }
@@ -271,7 +271,7 @@ function M.get_total_amounts(solution)
                 item_totals[value.name] = (item_totals[value.name] or 0) + number
             elseif value.type == "fluid" then
                 fluid_totals[value.name] = (fluid_totals[value.name] or 0) + number
-            elseif value.type == "virtual-object" then
+            elseif value.type == "virtual_material" then
                 virtual_totals[value.name] = (virtual_totals[value.name] or 0) + number
             else
                 assert(false)
@@ -286,7 +286,7 @@ function M.get_total_amounts(solution)
                 item_totals[value.name] = (item_totals[value.name] or 0) - number
             elseif value.type == "fluid" then
                 fluid_totals[value.name] = (fluid_totals[value.name] or 0) - number
-            elseif value.type == "virtual-object" then
+            elseif value.type == "virtual_material" then
                 virtual_totals[value.name] = (virtual_totals[value.name] or 0) - number
             else
                 assert(false)
@@ -297,7 +297,7 @@ function M.get_total_amounts(solution)
         if ftn then
             local power = info.raw_energy_to_power(machine, effectivity.consumption)
             power = power * quantity_of_machines_required
-            local fuel = info.typed_name_to_craft(ftn) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualObject]]
+            local fuel = info.typed_name_to_craft(ftn) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
             local amount_per_second = power / info.get_fuel_value(fuel, machine)
 
             if info.is_generator(machine) then
@@ -308,7 +308,7 @@ function M.get_total_amounts(solution)
                 item_totals[ftn.name] = (item_totals[ftn.name] or 0) - amount_per_second
             elseif ftn.type == "fluid" then
                 fluid_totals[ftn.name] = (fluid_totals[ftn.name] or 0) - amount_per_second
-            elseif ftn.type == "virtual-object" then
+            elseif ftn.type == "virtual_material" then
                 virtual_totals[ftn.name] = (virtual_totals[ftn.name] or 0) - amount_per_second
             else
                 assert(false)
@@ -358,7 +358,7 @@ function M.get_total_pollution(solution)
         pollution = pollution * quantity_of_machines_required
 
         if line.fuel_typed_name then
-            local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualObject]]
+            local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
             pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
         end
 
@@ -451,7 +451,7 @@ function M.new_constraint(solution, typed_name)
     end
 
     local amount
-    if typed_name.type == "recipe" or typed_name.type == "virtual-recipe" then
+    if typed_name.type == "recipe" or typed_name.type == "virtual_recipe" then
         amount = 1
     else
         amount = 0.5

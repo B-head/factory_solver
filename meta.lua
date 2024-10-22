@@ -1,12 +1,12 @@
 ---@meta
 
----@alias FilterType "item"|"fluid"|"recipe"|"machine"|"research-progress"|"virtual"|"virtual-object"|"virtual-recipe"|"virtual-machine"
+---@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"|"virtual_machine"
 ---@alias LimitType "upper"|"lower"|"equal"
 ---@alias TimeScale "tick"|"second"|"minute"|"hour"
 ---@alias AmountUnit "time"|"belt"|"storage"
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
----@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaRecipe | LuaEntityPrototype | VirtualObject | VirtualRecipe | VirtualMachine
+---@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaRecipe | LuaEntityPrototype | VirtualMaterial | VirtualRecipe | VirtualMachine
 ---@alias TypedName { type: FilterType, name: string }
 
 ---@class EventDataTrait
@@ -47,7 +47,7 @@ local ForceLocalData = {}
 ---@class RelationToRecipes
 ---@field item table<string, RelationToRecipe>
 ---@field fluid table<string, RelationToRecipe>
----@field virtual table<string, RelationToRecipe>
+---@field virtual_recipe table<string, RelationToRecipe>
 local RelationToRecipes = {}
 
 ---@class RelationToRecipe
@@ -60,7 +60,7 @@ local RelationToRecipe = {}
 ---@field item table<string, GroupInfo>
 ---@field fluid table<string, GroupInfo>
 ---@field recipe table<string, GroupInfo>
----@field virtual table<string, GroupInfo>
+---@field virtual_recipe table<string, GroupInfo>
 local GroupInfos = {}
 
 ---@class GroupInfo
@@ -121,24 +121,24 @@ local NormalizedProductionLine
 local NormalizedAmount = {}
 
 ---@class Virtuals
----@field object table<string, VirtualObject>
+---@field material table<string, VirtualMaterial>
 ---@field recipe table<string, VirtualRecipe>
 ---@field machine table<string, VirtualMachine>
 ---@field crafting_categories { [string]: boolean }
 local Virtuals = {}
 
----@class VirtualObject
----@field type "virtual-object"
+---@class VirtualMaterial
+---@field type "virtual_material"
 ---@field name string
 ---@field localised_name LocalisedString
 ---@field sprite_path string
 ---@field order string
 ---@field group_name string
 ---@field subgroup_name string
-local VirtualObject = {}
+local VirtualMaterial = {}
 
 ---@class VirtualRecipe
----@field type "virtual-recipe"
+---@field type "virtual_recipe"
 ---@field name string
 ---@field localised_name LocalisedString
 ---@field sprite_path string
@@ -152,7 +152,7 @@ local VirtualObject = {}
 local VirtualRecipe = {}
 
 ---@class VirtualMachine
----@field type "virtual-machine"
+---@field type "virtual_machine"
 ---@field name string
 ---@field localised_name LocalisedString
 ---@field sprite_path string
