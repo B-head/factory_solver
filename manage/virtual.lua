@@ -612,7 +612,7 @@ function M.create_resource_virtual(resource_prototype)
         type = "virtual_recipe",
         name = "<minable>" .. resource_prototype.name,
         localised_name = "<minable>" .. resource_prototype.name, --TODO
-        sprite_path = "entity/" .. main_product.name,
+        sprite_path = "entity/" .. resource_prototype.name,
         energy = 1,
         products = products,
         ingredients = ingredients,

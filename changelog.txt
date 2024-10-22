@@ -3,6 +3,7 @@ Version: 0.1.2
 Date: ????
   Bugfixes:
     - Fix crash when opening machine presets.
+    - Fix crash caused by wrong sprite path in resource virtual recipes.
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.1
 Date: 2024-10-22
