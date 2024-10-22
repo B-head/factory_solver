@@ -1,6 +1,8 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.2
 Date: ????
+  Changes:
+    - Hide categories with less than one element in machine presets.
   Bugfixes:
     - Fix crash when opening machine presets.
     - Fix crash caused by wrong sprite path in resource virtual recipes.

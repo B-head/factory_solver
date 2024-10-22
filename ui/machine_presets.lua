@@ -24,6 +24,11 @@ function handlers.on_make_fuel_presets(event)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     for category_name, _ in pairs(prototypes.fuel_category) do
+        local fuels = info.get_fuels_in_categories { [category_name] = true }
+        if #fuels <= 1 then
+            goto continue
+        end
+
         do
             local def = {
                 type = "label",
@@ -33,8 +38,6 @@ function handlers.on_make_fuel_presets(event)
         end
 
         do
-            local fuels = info.get_fuels_in_categories { [category_name] = true }
-
             local def_buttons = {}
             for _, value in pairs(fuels) do
                 local typed_name = info.craft_to_typed_name(value)
@@ -70,6 +73,7 @@ function handlers.on_make_fuel_presets(event)
             }
             fs_util.add_gui(elem, def_table)
         end
+        ::continue::
     end
 
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
@@ -82,6 +86,11 @@ function handlers.on_make_machine_presets(event)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     local function add(category_name)
+        local machines = info.get_machines_in_category(category_name)
+        if #machines <= 1 then
+            return
+        end
+
         do
             local def = {
                 type = "label",
@@ -91,8 +100,6 @@ function handlers.on_make_machine_presets(event)
         end
 
         do
-            local machines = info.get_machines_in_category(category_name)
-
             local def_buttons = {}
             for _, machine in pairs(machines) do
                 local typed_name = info.craft_to_typed_name(machine)
