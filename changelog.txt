@@ -16,7 +16,7 @@ Date: 2024-10-23
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.2
 Date: 2024-10-22
-  Changes:
+  Gui:
     - Hide categories with less than one element in machine presets.
   Bugfixes:
     - Fix crash when opening machine presets.
@@ -24,10 +24,10 @@ Date: 2024-10-22
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.1
 Date: 2024-10-22
-  Bugfixes:
-    - Fix the crash when adding this mod to an existing save.
   Gui:
     - Add shortcut button. (Icon is temporary)
+  Bugfixes:
+    - Fix the crash when adding this mod to an existing save.
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.0
 Date: 2024-10-22
