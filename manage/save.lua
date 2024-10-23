@@ -141,6 +141,7 @@ function M.reinit_force_data(force_index)
     local force_data = storage.forces[force_index]
     if force_data then
         force_data.relation_to_recipes_needs_updating = true
+        force_data.group_infos_needs_updating = true
     else
         M.init_force_data(force_index)
     end
