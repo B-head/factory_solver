@@ -5,9 +5,21 @@ local fs_util = require "fs_util"
 
 local M = {}
 
-M.ticks_per_second = 60
-M.seconds_per_minute = 60
-M.seconds_per_hour = 60 * 60
+---@type table<TimeScale, number>
+M.scale_per_second = {
+    tick = 1 / 60,
+    second = 1,
+    five_seconds = 5,
+    minute = 60,
+    ten_minutes = 10 * 60,
+    hour = 60 * 60,
+    ten_hours = 10 * 60 * 60,
+    fifty_hours = 50 * 60 * 60,
+    two_hundred_fifty_hours = 250 * 60 * 60,
+    thousand_hours = 1000 * 60 * 60,
+}
+
+M.second_per_tick = 60
 M.tolerance = (10 ^ -5)
 
 ---comment
@@ -74,7 +86,7 @@ function M.raw_energy_to_power(machine, effectivity_consumption)
         assert(false)
     end
 
-    return energy_per_tick * M.ticks_per_second
+    return energy_per_tick * M.second_per_tick
 end
 
 ---comment
@@ -109,39 +121,23 @@ function M.raw_emission_to_pollution(machine, pollutant_type, effectivity_consum
         assert(false)
     end
 
-    return emission_per_tick * M.ticks_per_second
+    return emission_per_tick * M.second_per_tick
 end
 
 ---comment
 ---@param value number
----@param scale TimeScale?
+---@param scale TimeScale
 ---@return number
 function M.to_scale(value, scale)
-    if scale == "tick" then
-        return value / M.ticks_per_second
-    elseif scale == "minute" then
-        return value * M.seconds_per_minute
-    elseif scale == "hour" then
-        return value * M.seconds_per_hour
-    else
-        return value
-    end
+    return value * M.scale_per_second[scale]
 end
 
 ---comment
 ---@param value number
----@param scale TimeScale?
+---@param scale TimeScale
 ---@return number
 function M.from_scale(value, scale)
-    if scale == "tick" then
-        return value * M.ticks_per_second
-    elseif scale == "minute" then
-        return value / M.seconds_per_minute
-    elseif scale == "hour" then
-        return value / M.seconds_per_hour
-    else
-        return value
-    end
+    return value / M.scale_per_second[scale]
 end
 
 ---comment

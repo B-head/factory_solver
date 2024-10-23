@@ -222,14 +222,14 @@ function M.create_boiler_virtual(boiler_prototype)
                 {
                     type = "fluid",
                     name = output_fluidbox.filter.name,
-                    amount_per_second = info.ticks_per_second / (need_tick * output_fluid.heat_capacity),
+                    amount_per_second = info.second_per_tick / (need_tick * output_fluid.heat_capacity),
                 }
             },
             ingredients = {
                 {
                     type = "fluid",
                     name = input_fluidbox.filter.name,
-                    amount_per_second = info.ticks_per_second / (need_tick * input_fluid.heat_capacity),
+                    amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
             order = order,
@@ -282,14 +282,14 @@ function M.create_boiler_virtual(boiler_prototype)
                 {
                     type = "fluid",
                     name = input_fluidbox.filter.name,
-                    amount_per_second = info.ticks_per_second / (need_tick * input_fluid.heat_capacity),
+                    amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
             ingredients = {
                 {
                     type = "fluid",
                     name = input_fluidbox.filter.name,
-                    amount_per_second = info.ticks_per_second / (need_tick * input_fluid.heat_capacity),
+                    amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
             order = order,
@@ -376,7 +376,7 @@ function M.create_generator_virtual(generator_prototype)
         energy_source = {
             type = "fluid",
             is_generator = true,
-            power_per_second = -max_power_per_tick * info.ticks_per_second,
+            power_per_second = -max_power_per_tick * info.second_per_tick,
             pollution_per_second = 0,
             fixed_fuel_typed_name = info.create_typed_name("fluid", input_fluidbox.filter.name),
             alternative_fuel_value = alternative_fuel_value,
@@ -425,7 +425,7 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
         energy_source = {
             type = "burner",
             is_generator = true,
-            power_per_second = -max_power * info.ticks_per_second,
+            power_per_second = -max_power * info.second_per_tick,
             pollution_per_second = max_power *
                 burner_generator_prototype.burner_prototype.emissions_per_joule["pollution"],
             fuel_categories = burner_generator_prototype.burner_prototype.fuel_categories,
@@ -458,7 +458,7 @@ function M.create_reactor_virtual(reactor_prototype)
             {
                 type = "virtual_material",
                 name = "<heat>",
-                amount_per_second = reactor_prototype.get_max_energy_usage() * info.ticks_per_second,
+                amount_per_second = reactor_prototype.get_max_energy_usage() * info.second_per_tick,
             },
         },
         ingredients = {},
@@ -508,7 +508,7 @@ function M.create_solar_panel_virtual(solar_panel_prototype)
         energy_source = {
             type = "electric",
             is_generator = true,
-            power_per_second = -solar_panel_prototype.get_max_energy_production() * info.ticks_per_second *
+            power_per_second = -solar_panel_prototype.get_max_energy_production() * info.second_per_tick *
                 daylight_coefficient,
             pollution_per_second = 0,
         },
@@ -547,7 +547,7 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
             {
                 type = "fluid",
                 name = fluid_name,
-                amount_per_second = offshore_pump_prototype.pumping_speed * info.ticks_per_second,
+                amount_per_second = offshore_pump_prototype.pumping_speed * info.second_per_tick,
             }
         },
         ingredients = {},

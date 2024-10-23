@@ -6,10 +6,17 @@ local machine_presets = require "ui/machine_presets"
 local info = require "manage/info"
 local save = require "manage/save"
 
+---@type table<TimeScale, integer>
 local time_scale_to_index = {
-    ["second"] = 1,
-    ["minute"] = 2,
-    ["hour"] = 3,
+    second = 1,
+    five_seconds = 2,
+    minute = 3,
+    ten_minutes = 4,
+    hour = 5,
+    ten_hours = 6,
+    fifty_hours = 7,
+    two_hundred_fifty_hours = 8,
+    thousand_hours = 9,
 }
 
 local handlers = {}
@@ -55,9 +62,15 @@ return {
     {
         type = "drop-down",
         items = {
-            "Second",
-            "Minute",
-            "Hour",
+            { "time-symbol-seconds-short", 1 },
+            { "time-symbol-seconds-short", 5 },
+            { "time-symbol-minutes-short", 1 },
+            { "time-symbol-minutes-short", 10 },
+            { "time-symbol-hours-short",   1 },
+            { "time-symbol-hours-short",   10 },
+            { "time-symbol-hours-short",   50 },
+            { "time-symbol-hours-short",   250 },
+            { "time-symbol-hours-short",   1000 },
         },
         handler = {
             [defines.events.on_gui_selection_state_changed] = handlers.on_time_scale_selection_state_changed,
