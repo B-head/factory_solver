@@ -218,7 +218,7 @@ function M.create_relation_to_recipes(force_index)
             end
 
             flib_table.insert(info.recipe_for_product, recipe.name)
-            if recipe.enabled then
+            if recipe.enabled and not recipe.hidden then
                 info.enabled_recipe_used_count = info.enabled_recipe_used_count + 1
             end
         end
@@ -234,7 +234,7 @@ function M.create_relation_to_recipes(force_index)
             end
 
             flib_table.insert(info.recipe_for_ingredient, recipe.name)
-            if recipe.enabled then
+            if recipe.enabled and not recipe.hidden then
                 info.enabled_recipe_used_count = info.enabled_recipe_used_count + 1
             end
         end
