@@ -164,7 +164,7 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_subject_term(primal_variable, "|upper_limit|" .. craft_name, 1)
             problem:add_subject_term(primal_variable, "|lower_limit|" .. craft_name, 1)
         else
-            assert(false)
+            assert()
         end
     end
 
@@ -219,7 +219,7 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_upper_limit_constraint("|upper_limit|" .. craft_name, limit)
             problem:add_upper_limit_constraint("|lower_limit|" .. craft_name, limit)
         else
-            assert(false)
+            assert()
         end
     end
 

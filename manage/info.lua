@@ -82,7 +82,7 @@ function M.raw_energy_to_power(machine, effectivity_consumption)
     elseif machine.void_energy_source_prototype then
         energy_per_tick = 0
     else
-        assert(false)
+        assert()
     end
 
     return energy_per_tick * M.second_per_tick
@@ -117,7 +117,7 @@ function M.raw_emission_to_pollution(machine, pollutant_type, effectivity_consum
     elseif machine.void_energy_source_prototype then
         emission_per_tick = emission_per_tick * machine.void_energy_source_prototype.emissions_per_joule[pollutant_type]
     else
-        assert(false)
+        assert()
     end
 
     return emission_per_tick * M.second_per_tick
@@ -209,7 +209,7 @@ function M.create_relation_to_recipes(force_index)
             elseif value.type == "fluid" then
                 info = fluids[value.name]
             else
-                assert(false)
+                assert()
             end
 
             flib_table.insert(info.recipe_for_product, recipe.name)
@@ -225,7 +225,7 @@ function M.create_relation_to_recipes(force_index)
             elseif value.type == "fluid" then
                 info = fluids[value.name]
             else
-                assert(false)
+                assert()
             end
 
             flib_table.insert(info.recipe_for_ingredient, recipe.name)
@@ -245,7 +245,7 @@ function M.create_relation_to_recipes(force_index)
             elseif value.type == "virtual_material" then
                 info = virtuals[value.name]
             else
-                assert(false)
+                assert()
             end
 
             flib_table.insert(info.recipe_for_product, recipe.name)
@@ -263,7 +263,7 @@ function M.create_relation_to_recipes(force_index)
             elseif value.type == "virtual_material" then
                 info = virtuals[value.name]
             else
-                assert(false)
+                assert()
             end
 
             flib_table.insert(info.recipe_for_ingredient, recipe.name)
@@ -284,7 +284,7 @@ function M.create_relation_to_recipes(force_index)
             elseif value.type == "virtual_material" then
                 info = virtuals[value.name]
             else
-                assert(false)
+                assert()
             end
 
             local categories = machine.crafting_categories
@@ -391,7 +391,7 @@ function M.is_hidden(craft)
     elseif craft.type == "virtual_machine" then
         return false --TODO
     else
-        return assert(false)
+        return assert()
     end
     ---@diagnostic enable: param-type-mismatch
 end
@@ -425,7 +425,7 @@ function M.is_unresearched(craft, relation_to_recipes)
     elseif craft.type == "virtual_machine" then
         return false --TODO
     else
-        return assert(false)
+        return assert()
     end
     ---@diagnostic enable: param-type-mismatch
 end
@@ -638,7 +638,7 @@ function M.get_energy_source_type(machine)
         elseif machine.void_energy_source_prototype then
             return "void"
         else
-            return assert(nil)
+            return assert()
         end
     else
         return machine.energy_source.type

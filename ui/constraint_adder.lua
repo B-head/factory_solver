@@ -209,7 +209,7 @@ function handlers.on_make_constraint_picker(event)
                 add(typed_name, is_hidden, is_unresearched)
             end
         else
-            assert(false)
+            assert()
         end
 
         local column_count = elem.column_count

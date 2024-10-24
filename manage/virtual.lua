@@ -134,7 +134,7 @@ function M.get_craft_order(typed_name)
     elseif typed_name.type == "fluid" then
         prototype = prototypes.fluid[typed_name.name]
     else
-        return assert(nil)
+        return assert()
     end
 
     return prototype.order, prototype.group.name, prototype.subgroup.name
@@ -337,7 +337,7 @@ function M.create_boiler_virtual(boiler_prototype)
 
         return recipe, machine
     else
-        return assert(nil)
+        return assert()
     end
 end
 

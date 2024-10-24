@@ -282,7 +282,7 @@ function M.get_total_amounts(solution)
             elseif value.type == "virtual_material" then
                 virtual_totals[value.name] = (virtual_totals[value.name] or 0) + number
             else
-                assert(false)
+                assert()
             end
         end
 
@@ -297,7 +297,7 @@ function M.get_total_amounts(solution)
             elseif value.type == "virtual_material" then
                 virtual_totals[value.name] = (virtual_totals[value.name] or 0) - number
             else
-                assert(false)
+                assert()
             end
         end
 
@@ -319,7 +319,7 @@ function M.get_total_amounts(solution)
             elseif ftn.type == "virtual_material" then
                 virtual_totals[ftn.name] = (virtual_totals[ftn.name] or 0) - amount_per_second
             else
-                assert(false)
+                assert()
             end
         end
     end

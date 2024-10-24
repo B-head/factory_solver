@@ -43,7 +43,7 @@ function handlers.on_make_choose_table(event)
     elseif typed_name.type == "virtual_material" then
         relation_to_recipe = relation_to_recipes.virtual_recipe[typed_name.name]
     else
-        assert(false)
+        assert()
     end
 
     local recipe_names
