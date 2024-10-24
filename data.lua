@@ -254,7 +254,7 @@ styles.factory_solver_preset_layout_table = {
     }
 }
 
--- machine_setups --
+-- machine_setup --
 
 styles.factory_solver_beacons_table = {
     type = "table_style",

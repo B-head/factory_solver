@@ -6,7 +6,7 @@ local common = require "ui/common"
 local info = require "manage/info"
 local save = require "manage/save"
 local production_line_adder = require "ui/production_line_adder"
-local machine_setups = require "ui/machine_setups"
+local machine_setup = require "ui/machine_setup"
 
 local headers = {
     "",
@@ -402,7 +402,7 @@ end
 function handlers.on_production_line_recipe_click(event)
     local tags = event.element.tags
     if event.button == defines.mouse_button_type.left then
-        common.open_gui(event.player_index, true, machine_setups, tags)
+        common.open_gui(event.player_index, true, machine_setup, tags)
     elseif event.button == defines.mouse_button_type.right then
         local solution = assert(save.get_selected_solution(event.player_index))
 
