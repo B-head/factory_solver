@@ -291,9 +291,11 @@ function handlers.on_make_total_effectivity(event)
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
     local module_names = dialog.tags.module_names --[[@as table<string, string>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
-    local total_modules = info.get_total_modules(module_names, affected_by_beacons)
+    local total_modules = info.get_total_modules(machine, module_names, affected_by_beacons)
 
     elem.clear()
     for name, count in pairs(total_modules) do
@@ -407,25 +409,6 @@ function handlers.on_machine_setups_confirm(event)
     local data = dialog.tags --[[@as ProductionLine]]
     local line_index = data.line_index --[[@as integer]]
     data.line_index = nil ---@diagnostic disable-line: inject-field
-
-    local machine = info.typed_name_to_craft(data.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
-    data.module_names = save.trim_modules(data.module_names, machine.module_inventory_size)
-
-    data.affected_by_beacons = flib_table.filter(data.affected_by_beacons, function(value)
-        return value.beacon_name ~= nil and 0 < value.beacon_quantity
-    end, true)
-
-    for _, value in ipairs(data.affected_by_beacons) do
-        local beacon = prototypes.entity[value.beacon_name]
-        value.module_names = save.trim_modules(value.module_names, beacon.module_inventory_size)
-    end
-
-    local machine_typed_name = data.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
-    local energy_source_type = info.get_energy_source_type(machine)
-    if energy_source_type == "electric" or energy_source_type == "void" then
-        data.fuel_typed_name = nil
-    end
 
     save.update_production_line(solution, line_index, data)
 

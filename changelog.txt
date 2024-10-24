@@ -3,6 +3,7 @@ Version: 0.1.5
 Date: ????
   Gui:
     - Change timescale to match statistics.
+    - Change the machine setup to not normalize when confirmed.
   Bugfixes:
     - Fix more crashes on migration failure.
     - Fix any crashes with mod configuration changes.

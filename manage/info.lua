@@ -598,7 +598,7 @@ function M.get_fuel_amount_per_second(power, material, machine)
         fuel_value = material.fuel_value
     end
     ---@diagnostic enable: param-type-mismatch
-    
+
     if fuel_value == 0 then
         return 0
     else
@@ -683,6 +683,14 @@ end
 ---comment
 ---@param machine LuaEntityPrototype | VirtualMachine
 ---@return boolean
+function M.is_use_fuel(machine)
+    local energy_source_type = M.get_energy_source_type(machine)
+    return energy_source_type == "burner" or energy_source_type == "heat" or energy_source_type == "fluid"
+end
+
+---comment
+---@param machine LuaEntityPrototype | VirtualMachine
+---@return boolean
 function M.is_generator(machine)
     ---@diagnostic disable-next-line: param-type-mismatch
     return not machine.object_name and machine.energy_source.is_generator
@@ -702,11 +710,25 @@ end
 
 ---comment
 ---@param module_names table<string, string>
+---@param module_inventory_size integer
+---@return table<string, string>
+function M.trim_modules(module_names, module_inventory_size)
+    local ret = {}
+    for index = 1, module_inventory_size do
+        ret[tostring(index)] = module_names[tostring(index)]
+    end
+    return ret
+end
+
+---comment
+---@param machine LuaEntityPrototype | VirtualMachine
+---@param module_names table<string, string>
 ---@param affected_by_beacons AffectedByBeacon[]
 ---@return table<string, number>
-function M.get_total_modules(module_names, affected_by_beacons)
+function M.get_total_modules(machine, module_names, affected_by_beacons)
     local module_counts = {}
 
+    module_names = M.trim_modules(module_names, machine.module_inventory_size)
     for _, name in pairs(module_names) do
         module_counts[name] = (module_counts[name] or 0) + 1
     end
@@ -715,9 +737,9 @@ function M.get_total_modules(module_names, affected_by_beacons)
         if affected_by_beacon.beacon_name then
             local beacon = prototypes.entity[affected_by_beacon.beacon_name]
             local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
-            local module_names = affected_by_beacon.module_names
+            local beacon_module_names = M.trim_modules(affected_by_beacon.module_names, beacon.module_inventory_size)
 
-            for _, name in pairs(module_names) do
+            for _, name in pairs(beacon_module_names) do
                 module_counts[name] = (module_counts[name] or 0) + effectivity
             end
         end

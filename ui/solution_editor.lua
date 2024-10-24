@@ -50,7 +50,7 @@ function handlers.make_production_line_table(event)
         local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine)
-        local module_counts = info.get_total_modules(line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
@@ -139,7 +139,7 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(buttons, def)
             end
 
-            local total_modules = info.get_total_modules(line.module_names, line.affected_by_beacons)
+            local total_modules = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
             for name, count in pairs(total_modules) do
                 local module_typed_name = info.create_typed_name("item", name)
 
@@ -245,9 +245,8 @@ function handlers.make_production_line_table(event)
             local children = {}
 
             local power = info.raw_energy_to_power(machine, effectivity.consumption)
-            local fuel_typed_name = line.fuel_typed_name
 
-            if not fuel_typed_name or info.is_generator(machine) then
+            if not info.is_use_fuel(machine) or info.is_generator(machine) then
                 local def = {
                     type = "label",
                     tags = {
@@ -263,7 +262,8 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(children, def)
             end
 
-            if fuel_typed_name then
+            if info.is_use_fuel(machine) then
+                local fuel_typed_name = assert(line.fuel_typed_name)
                 local fuel = info.typed_name_to_craft(fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
                 local is_hidden = info.is_hidden(fuel)
                 local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
@@ -307,7 +307,7 @@ function handlers.make_production_line_table(event)
             local pollution = info.raw_emission_to_pollution(machine, "pollution", effectivity.consumption,
                 effectivity.pollution)
 
-            if line.fuel_typed_name then
+            if info.is_use_fuel(machine) then
                 local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
                 pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
             end

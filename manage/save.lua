@@ -266,7 +266,7 @@ function M.get_total_amounts(solution)
         local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine)
-        local module_counts = info.get_total_modules(line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
@@ -301,8 +301,8 @@ function M.get_total_amounts(solution)
             end
         end
 
-        local ftn = line.fuel_typed_name
-        if ftn then
+        if info.is_use_fuel(machine) then
+            local ftn = assert(line.fuel_typed_name)
             local power = info.raw_energy_to_power(machine, effectivity.consumption)
             power = power * quantity_of_machines_required
             local fuel = info.typed_name_to_craft(ftn) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
@@ -335,11 +335,11 @@ function M.get_total_power(solution)
 
     for _, line in ipairs(solution.production_lines) do
         local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
-        local module_counts = info.get_total_modules(line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        if not line.fuel_typed_name or info.is_generator(machine) then
+        if not info.is_use_fuel(machine) or info.is_generator(machine) then
             local power = info.raw_energy_to_power(machine, effectivity.consumption)
             power = power * quantity_of_machines_required
             total = total + power
@@ -357,7 +357,7 @@ function M.get_total_pollution(solution)
 
     for _, line in ipairs(solution.production_lines) do
         local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
-        local module_counts = info.get_total_modules(line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
@@ -365,7 +365,7 @@ function M.get_total_pollution(solution)
             effectivity.consumption, effectivity.pollution)
         pollution = pollution * quantity_of_machines_required
 
-        if line.fuel_typed_name then
+        if info.is_use_fuel(machine) then
             local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
             pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
         end
@@ -575,18 +575,6 @@ function M.move_production_line(solution, from_line_index, to_line_index)
 
     local temp = flib_table.remove(production_lines, from_line_index)
     flib_table.insert(production_lines, to_line_index, temp)
-end
-
----comment
----@param module_names table<string, string>
----@param module_inventory_size integer
----@return table<string, string>
-function M.trim_modules(module_names, module_inventory_size)
-    local ret = {}
-    for index = 1, module_inventory_size do
-        ret[tostring(index)] = module_names[tostring(index)]
-    end
-    return ret
 end
 
 return M
