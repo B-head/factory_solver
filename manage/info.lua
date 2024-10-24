@@ -7,7 +7,6 @@ local M = {}
 
 ---@type table<TimeScale, number>
 M.scale_per_second = {
-    tick = 1 / 60,
     second = 1,
     five_seconds = 5,
     minute = 60,
@@ -454,7 +453,7 @@ local type_dictionary = {
 ---@return ElemID?
 function M.typed_name_to_elem_id(typed_name, quality)
     local elem_type = type_dictionary[typed_name.type]
-    if elem_type then
+    if elem_type and M.validate_typed_name(typed_name) then
         return { type = elem_type, name = typed_name.name, quality = quality }
     else
         return nil
@@ -482,31 +481,56 @@ end
 
 ---comment
 ---@param typed_name TypedName
+---@return boolean
+function M.validate_typed_name(typed_name)
+    local type = typed_name.type
+    local name = typed_name.name
+    if type == "item" then
+        return prototypes.item[name] ~= nil
+    elseif type == "fluid" then
+        return prototypes.fluid[name] ~= nil
+    elseif type == "recipe" then
+        return prototypes.recipe[name] ~= nil
+    elseif type == "machine" then
+        return prototypes.entity[name] ~= nil
+    elseif type == "virtual_material" then
+        return storage.virtuals.material[name] ~= nil
+    elseif type == "virtual_recipe" then
+        return storage.virtuals.recipe[name] ~= nil
+    elseif type == "virtual_machine" then
+        return storage.virtuals.machine[name] ~= nil
+    else
+        return false
+    end
+end
+
+---comment
+---@param typed_name TypedName
 ---@param force LuaForce?
 ---@return Craft
 function M.typed_name_to_craft(typed_name, force)
     local type = typed_name.type
     local name = typed_name.name
     if type == "item" then
-        return prototypes.item[name]
+        return prototypes.item[name] or prototypes.item["item-unknown"]
     elseif type == "fluid" then
-        return prototypes.fluid[name]
+        return prototypes.fluid[name] or prototypes.fluid["fluid-unknown"]
     elseif type == "recipe" then
         if force then
-            return force.recipes[name]
+            return force.recipes[name] or force.recipes["recipe-unknown"]
         else
-            return prototypes.recipe[name]
+            return prototypes.recipe[name] or prototypes.recipe["recipe-unknown"]
         end
     elseif type == "machine" then
-        return prototypes.entity[name]
+        return prototypes.entity[name] or storage.virtuals.machine["machine-unknown"]
     elseif type == "virtual_material" then
-        return storage.virtuals.material[name]
+        return storage.virtuals.material[name] or prototypes.fluid["fluid-unknown"]
     elseif type == "virtual_recipe" then
-        return storage.virtuals.recipe[name]
+        return storage.virtuals.recipe[name] or prototypes.recipe["recipe-unknown"]
     elseif type == "virtual_machine" then
-        return storage.virtuals.machine[name]
+        return storage.virtuals.machine[name] or storage.virtuals.machine["machine-unknown"]
     else
-        return assert(nil)
+        return assert()
     end
 end
 
@@ -535,6 +559,10 @@ end
 ---@param typed_name TypedName
 ---@return string
 function M.get_sprite_path(typed_name)
+    if not M.validate_typed_name(typed_name) then
+        return "utility/questionmark"
+    end
+
     if typed_name.type == "virtual_material" then
         local material = storage.virtuals.material[typed_name.name]
         return material.sprite_path
@@ -552,24 +580,30 @@ function M.get_sprite_path(typed_name)
 end
 
 ---comment
+---@param power number
 ---@param material LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
 ---@param machine LuaEntityPrototype | VirtualMachine
 ---@return number
-function M.get_fuel_value(material, machine)
+function M.get_fuel_amount_per_second(power, material, machine)
     ---@diagnostic disable: param-type-mismatch
     if not machine.object_name and machine.energy_source.alternative_fuel_value then
         return machine.energy_source.alternative_fuel_value
     end
 
+    local fuel_value = 1
     ---@diagnostic disable: param-type-mismatch
     if material.object_name == "LuaItemPrototype" then
-        return material.fuel_value
+        fuel_value = material.fuel_value
     elseif material.object_name == "LuaFluidPrototype" then
-        return material.fuel_value
-    else
-        return 1
+        fuel_value = material.fuel_value
     end
     ---@diagnostic enable: param-type-mismatch
+    
+    if fuel_value == 0 then
+        return 0
+    else
+        return power / fuel_value
+    end
 end
 
 ---comment

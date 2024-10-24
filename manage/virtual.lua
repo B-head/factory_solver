@@ -47,7 +47,23 @@ function M.create_virtuals()
     }
 
     ---@type table<string, VirtualMachine>
-    local machines = {}
+    local machines = {
+        ["machine-unknown"] = {
+            type = "virtual_machine",
+            name = "machine-unknown",
+            localised_name = "machine-unknown",
+            sprite_path = "utility/questionmark",
+            module_inventory_size = 0,
+            crafting_speed = 1,
+            energy_source = {
+                type = "void",
+                is_generator = false,
+                power_per_second = 0,
+                pollution_per_second = 0,
+            },
+            crafting_categories = {},
+        },
+    }
 
     for _, entity in pairs(prototypes.entity) do
         if entity.type == "rocket-silo" then

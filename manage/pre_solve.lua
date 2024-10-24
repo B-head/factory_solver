@@ -95,7 +95,7 @@ function M.to_normalized_production_lines(production_lines)
         local power = info.raw_energy_to_power(machine, effectivity.consumption)
         if ftn then
             local fuel = info.typed_name_to_craft(ftn) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
-            local amount_per_second = power / info.get_fuel_value(fuel, machine)
+            local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
 
             if info.is_generator(machine) then
                 amount_per_second = -amount_per_second

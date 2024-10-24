@@ -41,10 +41,16 @@ function M.craft_visible(is_hidden, is_unresearched, player_data)
 end
 
 ---comment
----@param group_info GroupInfo
+---@param group_infos GroupInfos
+---@param group_name string
 ---@param player_data PlayerLocalData
 ---@return boolean
-function M.group_visible(group_info, player_data)
+function M.group_visible(group_infos, group_name, player_data)
+    local group_info = group_infos[group_name]
+    if not group_info then
+        return false
+    end
+
     if player_data.hidden_craft_visible and 0 < group_info.hidden_count then
         return true
     elseif player_data.unresearched_craft_visible and 0 < group_info.unresearched_count then

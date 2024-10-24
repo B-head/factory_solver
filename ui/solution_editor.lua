@@ -267,7 +267,7 @@ function handlers.make_production_line_table(event)
                 local fuel = info.typed_name_to_craft(fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
                 local is_hidden = info.is_hidden(fuel)
                 local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
-                local amount_per_second = power / info.get_fuel_value(fuel, machine)
+                local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
 
                 if info.is_generator(machine) then
                     amount_per_second = -amount_per_second

@@ -2,7 +2,7 @@
 
 ---@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"|"virtual_machine"
 ---@alias LimitType "upper"|"lower"|"equal"
----@alias TimeScale "tick"|"second"|"minute"|"hour"
+---@alias TimeScale "second"|"five_seconds"|"minute"|"ten_minutes"|"hour"|"ten_hours"|"fifty_hours"|"two_hundred_fifty_hours"|"thousand_hours"
 ---@alias AmountUnit "time"|"belt"|"storage"
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"

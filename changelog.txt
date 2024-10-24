@@ -3,6 +3,9 @@ Version: 0.1.5
 Date: ????
   Gui:
     - Change timescale to match statistics.
+  Bugfixes:
+    - Fix more crashes on migration failure.
+    - Fix any crashes with mod configuration changes.
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.4
 Date: 2024-10-23

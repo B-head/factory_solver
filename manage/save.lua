@@ -37,6 +37,12 @@ end
 function M.reinit_player_data(player_index)
     local player_data = storage.players[player_index]
     if player_data then
+        if not info.scale_per_second[player_data.time_scale] then
+            player_data.time_scale = "minute"
+        end
+        if false then
+            player_data.amount_unit = "time"
+        end
         player_data.fuel_presets = M.init_fuel_presets(player_data.fuel_presets)
         player_data.machine_presets = M.init_machine_presets(player_data.machine_presets)
     else
@@ -68,7 +74,7 @@ function M.init_fuel_presets(origin)
     end
 
     for category_name, _ in pairs(prototypes.fuel_category) do
-        if ret[category_name] then
+        if info.validate_typed_name(ret[category_name]) then
             goto continue
         end
 
@@ -96,7 +102,7 @@ function M.init_machine_presets(origin)
     end
 
     local function add(category_name)
-        if ret[category_name] then
+        if info.validate_typed_name(ret[category_name]) then
             return
         end
 
@@ -196,8 +202,9 @@ end
 
 ---comment
 ---@param player_index integer
+---@param filter_type FilterType
 ---@return GroupInfos
-function M.get_group_infos(player_index)
+function M.get_group_infos(player_index, filter_type)
     local force_index = game.players[player_index].force_index
     local force_data = storage.forces[force_index]
     if force_data.group_infos_needs_updating then
@@ -205,7 +212,7 @@ function M.get_group_infos(player_index)
         force_data.group_infos_needs_updating = false
         force_data.group_infos = info.create_group_infos(force_index, relation_to_recipes)
     end
-    return force_data.group_infos
+    return assert(force_data.group_infos[filter_type])
 end
 
 ---comment
@@ -299,7 +306,7 @@ function M.get_total_amounts(solution)
             local power = info.raw_energy_to_power(machine, effectivity.consumption)
             power = power * quantity_of_machines_required
             local fuel = info.typed_name_to_craft(ftn) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
-            local amount_per_second = power / info.get_fuel_value(fuel, machine)
+            local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
 
             if info.is_generator(machine) then
                 amount_per_second = -amount_per_second

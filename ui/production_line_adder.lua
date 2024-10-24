@@ -35,31 +35,24 @@ function handlers.on_make_choose_table(event)
     local kind = elem.tags.kind --[[@as string]]
     local typed_name = dialog_tags.typed_name --[[@as TypedName]]
 
-    ---@type string[]
-    local recipe_names
+    local relation_to_recipe
     if typed_name.type == "item" then
-        local items = relation_to_recipes.item[typed_name.name]
-        if kind == "product" then
-            recipe_names = items.recipe_for_product
-        else
-            recipe_names = items.recipe_for_ingredient
-        end
+        relation_to_recipe = relation_to_recipes.item[typed_name.name]
     elseif typed_name.type == "fluid" then
-        local fluids = relation_to_recipes.fluid[typed_name.name]
-        if kind == "product" then
-            recipe_names = fluids.recipe_for_product
-        else
-            recipe_names = fluids.recipe_for_ingredient
-        end
+        relation_to_recipe = relation_to_recipes.fluid[typed_name.name]
     elseif typed_name.type == "virtual_material" then
-        local virtuals = relation_to_recipes.virtual_recipe[typed_name.name]
-        if kind == "product" then
-            recipe_names = virtuals.recipe_for_product
-        else
-            recipe_names = virtuals.recipe_for_ingredient
-        end
+        relation_to_recipe = relation_to_recipes.virtual_recipe[typed_name.name]
     else
         assert(false)
+    end
+
+    local recipe_names
+    if not relation_to_recipe then
+        recipe_names = {}
+    elseif kind == "product" then
+        recipe_names = relation_to_recipe.recipe_for_product
+    else
+        recipe_names = relation_to_recipe.recipe_for_ingredient
     end
 
     local used_recipes = flib_table.map(recipe_names, function(name)

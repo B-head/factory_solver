@@ -12,9 +12,15 @@ local handlers = {}
 function handlers.on_filter_type_tabbed_pane_added(event)
     local elem = event.element
     local player_data = save.get_player_data(event.player_index)
+    local relation = elem.tags.relation --[[@as (string[])]]
 
-    ---@diagnostic disable-next-line: param-type-mismatch
-    elem.selected_tab_index = flib_table.find(elem.tags.relation, player_data.selected_filter_type) or 1
+    local selected_tab_index = flib_table.find(relation, player_data.selected_filter_type)
+    if selected_tab_index then
+        elem.selected_tab_index = selected_tab_index
+    else
+        elem.selected_tab_index = 1
+        player_data.selected_filter_type = elem.tags.relation[1]
+    end
 end
 
 ---@param event EventData.on_gui_selected_tab_changed
@@ -54,16 +60,24 @@ end
 ---@param event EventDataTrait
 function handlers.on_make_filter_group(event)
     local elem = event.element
-    local filter_type = elem.tags.filter_type
+    local filter_type = elem.tags.filter_type --[[@as FilterType]]
     local player_data = save.get_player_data(event.player_index)
-    local group_infos = save.get_group_infos(event.player_index)
+    local group_infos = save.get_group_infos(event.player_index, filter_type)
+    local selected_filter_group = player_data.selected_filter_group
+
 
     local groups = fs_util.to_list(prototypes.item_group)
     groups = fs_util.sort_prototypes(groups)
 
+    if not common.group_visible(group_infos, selected_filter_group[filter_type], player_data) then
+        selected_filter_group[filter_type] = fs_util.find(group_infos, function(_, name)
+            return common.group_visible(group_infos, name, player_data)
+        end) or ""
+    end
+
     elem.clear()
     for _, group in ipairs(groups) do
-        if not common.group_visible(group_infos[filter_type][group.name], player_data) then
+        if not common.group_visible(group_infos, group.name, player_data) then
             goto continue
         end
 
