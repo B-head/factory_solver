@@ -54,8 +54,8 @@ end
 function M.to_normalized_production_lines(production_lines)
     local normalized_production_lines = {}
     for _, line in ipairs(production_lines) do
-        local recipe = info.typed_name_to_craft(line.recipe_typed_name) --[[@as LuaRecipePrototype | VirtualRecipe]]
-        local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+        local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
+        local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine)
         local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
@@ -94,7 +94,7 @@ function M.to_normalized_production_lines(production_lines)
         local power = info.raw_energy_to_power(machine, effectivity.consumption)
         if info.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
-            local fuel = info.typed_name_to_craft(ftn) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
+            local fuel = info.typed_name_to_material(ftn)
             local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
 
             if info.is_generator(machine) then

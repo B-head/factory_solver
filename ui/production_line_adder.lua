@@ -56,8 +56,8 @@ function handlers.on_make_choose_table(event)
     end
 
     local used_recipes = flib_table.map(recipe_names, function(name)
-        return storage.virtuals.recipe[name] or force.recipes[name]
-    end) --[=[@as (LuaRecipe | VirtualRecipe)[]]=]
+        return storage.virtuals.recipe[name] or prototypes.recipe[name]
+    end) --[=[@as (LuaRecipePrototype | VirtualRecipe)[]]=]
 
     local grouped = fs_util.group_by(used_recipes, function(value)
         if value.group then
@@ -65,7 +65,7 @@ function handlers.on_make_choose_table(event)
         else
             return value.group_name
         end
-    end) --[=[@as table<string, (LuaRecipe | VirtualRecipe)[]>]=]
+    end) --[=[@as table<string, (LuaRecipePrototype | VirtualRecipe)[]>]=]
 
     local groups = fs_util.to_list(prototypes.item_group)
     groups = fs_util.sort_prototypes(groups)
@@ -81,7 +81,7 @@ function handlers.on_make_choose_table(event)
             else
                 return value.subgroup_name
             end
-        end) --[=[@as table<string, LuaRecipe[]>]=]
+        end) --[=[@as table<string, (LuaRecipePrototype | VirtualRecipe)[]>]=]
 
         local subgroups = fs_util.to_list(group.subgroups)
         subgroups = fs_util.sort_prototypes(subgroups)

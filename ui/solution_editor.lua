@@ -46,8 +46,8 @@ function handlers.make_production_line_table(event)
     end
 
     for line_index, line in ipairs(solution.production_lines) do
-        local recipe = info.typed_name_to_craft(line.recipe_typed_name, force) --[[@as LuaRecipe | VirtualRecipe]]
-        local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+        local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
+        local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine)
         local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
@@ -168,7 +168,7 @@ function handlers.make_production_line_table(event)
             local buttons = {}
             for _, value in pairs(recipe.products) do
                 local typed_name = info.create_typed_name(value.type, value.name)
-                local craft = info.typed_name_to_craft(typed_name, force)
+                local craft = info.typed_name_to_material(typed_name)
                 local is_hidden = info.is_hidden(craft)
                 local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
                 local raw_amount = info.raw_product_to_amount(value, craft_energy, crafting_speed,
@@ -207,7 +207,7 @@ function handlers.make_production_line_table(event)
             local buttons = {}
             for _, value in pairs(recipe.ingredients) do
                 local typed_name = info.create_typed_name(value.type, value.name)
-                local craft = info.typed_name_to_craft(typed_name, force)
+                local craft = info.typed_name_to_material(typed_name)
                 local is_hidden = info.is_hidden(craft)
                 local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
                 local raw_amount = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
@@ -264,7 +264,7 @@ function handlers.make_production_line_table(event)
 
             if info.is_use_fuel(machine) then
                 local fuel_typed_name = assert(line.fuel_typed_name)
-                local fuel = info.typed_name_to_craft(fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
+                local fuel = info.typed_name_to_material(fuel_typed_name)
                 local is_hidden = info.is_hidden(fuel)
                 local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
                 local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
@@ -308,7 +308,7 @@ function handlers.make_production_line_table(event)
                 effectivity.pollution)
 
             if info.is_use_fuel(machine) then
-                local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
+                local fuel = info.typed_name_to_material(line.fuel_typed_name)
                 pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
             end
 

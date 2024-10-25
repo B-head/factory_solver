@@ -6,7 +6,7 @@
 ---@alias AmountUnit "time"|"belt"|"storage"
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
----@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaRecipe | LuaEntityPrototype | VirtualMaterial | VirtualRecipe | VirtualMachine
+---@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaEntityPrototype | VirtualMaterial | VirtualRecipe | VirtualMachine
 ---@alias TypedName { type: FilterType, name: string }
 
 ---@class EventDataTrait
@@ -45,6 +45,7 @@ local PlayerLocalData = {}
 local ForceLocalData = {}
 
 ---@class RelationToRecipes
+---@field enabled_recipe table<string, boolean>
 ---@field item table<string, RelationToRecipe>
 ---@field fluid table<string, RelationToRecipe>
 ---@field virtual_recipe table<string, RelationToRecipe>

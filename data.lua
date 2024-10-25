@@ -17,12 +17,6 @@ end
 
 data:extend({
     {
-        type = "item-subgroup",
-        name = "general",
-        group = "other",
-        order = "a"
-    },
-    {
         type = "sprite",
         name = "factory-solver-solar-panel",
         filename = "__factory_solver__/graphics/solar-panel.png",

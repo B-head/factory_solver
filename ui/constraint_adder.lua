@@ -174,10 +174,7 @@ function handlers.on_make_constraint_picker(event)
             local recipe_prototypes = prototypes.get_recipe_filtered {
                 { filter = "subgroup", subgroup = subgroup.name },
             }
-            local recipes = flib_table.map(recipe_prototypes, function(_, key)
-                return force.recipes[key]
-            end)
-            local sorted = fs_util.sort_prototypes(fs_util.to_list(recipes)) --[=[@as LuaRecipe[]]=]
+            local sorted = fs_util.sort_prototypes(fs_util.to_list(recipe_prototypes))
 
             for _, value in pairs(sorted) do
                 if not prototypes.recipe[value.name].parameter then

@@ -132,7 +132,7 @@ end
 function M.init_force_data(force_index)
     if not storage.forces[force_index] then
         storage.forces[force_index] = {
-            relation_to_recipes = { item = {}, fluid = {}, virtual_recipe = {} },
+            relation_to_recipes = { enabled_recipe = {}, item = {}, fluid = {}, virtual_recipe = {} },
             relation_to_recipes_needs_updating = true,
             group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {} },
             group_infos_needs_updating = true,
@@ -222,7 +222,7 @@ end
 function M.get_fuel_preset(player_index, machine_typed_name)
     local player_data = storage.players[player_index]
 
-    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+    local machine = info.typed_name_to_machine(machine_typed_name)
 
     local fixed_fuel = info.try_get_fixed_fuel(machine)
     if fixed_fuel then
@@ -262,8 +262,8 @@ function M.get_total_amounts(solution)
     local item_totals, fluid_totals, virtual_totals = {}, {}, {}
 
     for _, line in ipairs(solution.production_lines) do
-        local recipe = info.typed_name_to_craft(line.recipe_typed_name) --[[@as LuaRecipePrototype | VirtualRecipe]]
-        local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+        local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
+        local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine)
         local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
@@ -305,7 +305,7 @@ function M.get_total_amounts(solution)
             local ftn = assert(line.fuel_typed_name)
             local power = info.raw_energy_to_power(machine, effectivity.consumption)
             power = power * quantity_of_machines_required
-            local fuel = info.typed_name_to_craft(ftn) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
+            local fuel = info.typed_name_to_material(ftn)
             local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
 
             if info.is_generator(machine) then
@@ -334,7 +334,7 @@ function M.get_total_power(solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+        local machine = info.typed_name_to_machine(line.machine_typed_name)
         local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
@@ -356,7 +356,7 @@ function M.get_total_pollution(solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local machine = info.typed_name_to_craft(line.machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+        local machine = info.typed_name_to_machine(line.machine_typed_name)
         local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
@@ -366,7 +366,7 @@ function M.get_total_pollution(solution)
         pollution = pollution * quantity_of_machines_required
 
         if info.is_use_fuel(machine) then
-            local fuel = info.typed_name_to_craft(line.fuel_typed_name) --[[@as LuaItemPrototype | LuaFluidPrototype | VirtualMaterial]]
+            local fuel = info.typed_name_to_material(line.fuel_typed_name)
             pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
         end
 

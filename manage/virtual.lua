@@ -25,7 +25,16 @@ function M.create_virtuals()
             sprite_path = "utility/heat_exchange_indication",
             order = "a",
             group_name = "other",
-            subgroup_name = "general",
+            subgroup_name = "other",
+        },
+        ["<material-unknown>"] = {
+            type = "virtual_material",
+            name = "<material-unknown>",
+            localised_name = "Unknown material",
+            sprite_path = "utility/questionmark",
+            order = "z",
+            group_name = "other",
+            subgroup_name = "other",
         },
     }
 
@@ -41,17 +50,17 @@ function M.create_virtuals()
             ingredients = {},
             order = "b",
             group_name = "other",
-            subgroup_name = "general",
+            subgroup_name = "other",
             category = "<solar-power>",
         },
     }
 
     ---@type table<string, VirtualMachine>
     local machines = {
-        ["machine-unknown"] = {
+        ["<machine-unknown>"] = {
             type = "virtual_machine",
-            name = "machine-unknown",
-            localised_name = "machine-unknown",
+            name = "<machine-unknown>",
+            localised_name = "Unknown machine",
             sprite_path = "utility/questionmark",
             module_inventory_size = 0,
             crafting_speed = 1,

@@ -14,7 +14,7 @@ function handlers.on_make_machine_table(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
-    local recipe = info.typed_name_to_craft(recipe_typed_name) --[[@as LuaRecipe | VirtualRecipe]]
+    local recipe = info.typed_name_to_recipe(recipe_typed_name)
     local machines = info.get_machines_in_category(recipe.category)
 
     elem.clear()
@@ -71,7 +71,7 @@ function handlers.on_modules_visible(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+    local machine = info.typed_name_to_machine(machine_typed_name)
     elem.visible = 0 < machine.module_inventory_size
 end
 
@@ -82,14 +82,19 @@ function handlers.on_make_machine_modules(event)
 
     local module_names = dialog.tags.module_names --[[@as table<string, string>]]
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+    local machine = info.typed_name_to_machine(machine_typed_name)
 
     elem.clear()
     for index = 1, machine.module_inventory_size do
+        local module_name = module_names[tostring(index)]
+        if module_name and not info.get_module(module_name) then
+            module_name = "item-unknown"
+        end
+
         local def = {
             type = "choose-elem-button",
             elem_type = "item",
-            item = module_names[tostring(index)],
+            item = module_name,
             elem_filters = {
                 { filter = "type", type = "module" },
             },
@@ -135,11 +140,18 @@ function handlers.on_make_beacons_table(event)
 
     elem.clear()
     for beacon_index, affected_by_beacon in ipairs(affected_by_beacons) do
+        local beacon_name = affected_by_beacon.beacon_name
+        local beacon = info.get_beacon(beacon_name)
+
         do
+            if beacon_name and not beacon then
+                beacon_name = "entity-unknown"
+            end
+
             local def = {
                 type = "choose-elem-button",
                 elem_type = "entity",
-                entity = affected_by_beacon.beacon_name,
+                entity = beacon_name,
                 elem_filters = {
                     { filter = "type", type = "beacon" },
                 },
@@ -174,15 +186,19 @@ function handlers.on_make_beacons_table(event)
         do
             local children = {}
 
-            if affected_by_beacon.beacon_name then
-                local beacon = prototypes.entity[affected_by_beacon.beacon_name]
+            if beacon then
                 local module_names = affected_by_beacon.module_names
 
                 for slot_index = 1, beacon.module_inventory_size do
+                    local module_name = module_names[tostring(slot_index)]
+                    if module_name and not info.get_module(module_name) then
+                        module_name = "item-unknown"
+                    end
+
                     local def = {
                         type = "choose-elem-button",
                         elem_type = "item",
-                        item = module_names[tostring(slot_index)],
+                        item = module_name,
                         elem_filters = {
                             { filter = "type", type = "module" },
                         },
@@ -292,7 +308,7 @@ function handlers.on_make_total_effectivity(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+    local machine = info.typed_name_to_machine(machine_typed_name)
     local module_names = dialog.tags.module_names --[[@as table<string, string>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
     local total_modules = info.get_total_modules(machine, module_names, affected_by_beacons)
@@ -318,7 +334,7 @@ function handlers.on_fuel_visible(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+    local machine = info.typed_name_to_machine(machine_typed_name)
     elem.visible = info.get_energy_source_type(machine) == "burner"
 end
 
@@ -330,7 +346,7 @@ function handlers.on_make_fuel_table(event)
     local dialog_tags = dialog.tags
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_craft(machine_typed_name) --[[@as LuaEntityPrototype | VirtualMachine]]
+    local machine = info.typed_name_to_machine(machine_typed_name)
 
     local fuel_typed_name = dialog_tags.fuel_typed_name --[[@as TypedName?]]
     if not fuel_typed_name then

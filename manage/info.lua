@@ -185,6 +185,7 @@ end
 ---@return RelationToRecipes
 function M.create_relation_to_recipes(force_index)
     local force = game.forces[force_index]
+    local enabled_recipe = {} ---@type table<string, boolean>
     local items = {} ---@type table<string, RelationToRecipe>
     local fluids = {} ---@type table<string, RelationToRecipe>
     local virtuals = {} ---@type table<string, RelationToRecipe>
@@ -202,6 +203,8 @@ function M.create_relation_to_recipes(force_index)
     end
 
     for _, recipe in pairs(force.recipes) do
+        enabled_recipe[recipe.name] = recipe.enabled
+
         for _, value in ipairs(recipe.products) do
             local info
             if value.type == "item" then
@@ -296,7 +299,7 @@ function M.create_relation_to_recipes(force_index)
         end
     end
 
-    return { item = items, fluid = fluids, virtual_recipe = virtuals }
+    return { enabled_recipe = enabled_recipe, item = items, fluid = fluids, virtual_recipe = virtuals }
 end
 
 ---Create caches of additional information for groups.
@@ -380,7 +383,7 @@ function M.is_hidden(craft)
         return craft.hidden
     elseif craft.object_name == "LuaFluidPrototype" then
         return craft.hidden
-    elseif craft.object_name == "LuaRecipe" then
+    elseif craft.object_name == "LuaRecipePrototype" then
         return craft.hidden
     elseif craft.object_name == "LuaEntityPrototype" then
         return craft.hidden
@@ -403,13 +406,11 @@ end
 function M.is_unresearched(craft, relation_to_recipes)
     ---@diagnostic disable: param-type-mismatch
     if craft.object_name == "LuaItemPrototype" then
-        local is_researched = 0 < relation_to_recipes.item[craft.name].enabled_recipe_used_count
-        return not is_researched
+        return not (0 < relation_to_recipes.item[craft.name].enabled_recipe_used_count)
     elseif craft.object_name == "LuaFluidPrototype" then
-        local is_researched = 0 < relation_to_recipes.fluid[craft.name].enabled_recipe_used_count
-        return not is_researched
-    elseif craft.object_name == "LuaRecipe" then
-        return not craft.enabled
+        return not (0 < relation_to_recipes.fluid[craft.name].enabled_recipe_used_count)
+    elseif craft.object_name == "LuaRecipePrototype" then
+        return not relation_to_recipes.enabled_recipe[craft.name]
     elseif craft.object_name == "LuaEntityPrototype" then
         local ret = true
         for _, value in ipairs(craft.items_to_place_this) do
@@ -510,31 +511,84 @@ end
 
 ---comment
 ---@param typed_name TypedName
----@param force LuaForce?
----@return Craft
-function M.typed_name_to_craft(typed_name, force)
+---@return LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
+function M.typed_name_to_material(typed_name)
     local type = typed_name.type
     local name = typed_name.name
     if type == "item" then
         return prototypes.item[name] or prototypes.item["item-unknown"]
     elseif type == "fluid" then
         return prototypes.fluid[name] or prototypes.fluid["fluid-unknown"]
-    elseif type == "recipe" then
-        if force then
-            return force.recipes[name] or force.recipes["recipe-unknown"]
-        else
-            return prototypes.recipe[name] or prototypes.recipe["recipe-unknown"]
-        end
-    elseif type == "machine" then
-        return prototypes.entity[name] or storage.virtuals.machine["machine-unknown"]
     elseif type == "virtual_material" then
-        return storage.virtuals.material[name] or prototypes.fluid["fluid-unknown"]
+        return storage.virtuals.material[name] or storage.virtuals.material["<material-unknown>"]
+    else
+        return storage.virtuals.material["<material-unknown>"]
+    end
+end
+
+---comment
+---@param typed_name TypedName
+---@return LuaRecipePrototype | VirtualRecipe
+function M.typed_name_to_recipe(typed_name)
+    local type = typed_name.type
+    local name = typed_name.name
+    if type == "recipe" then
+        return prototypes.recipe[name] or prototypes.recipe["recipe-unknown"]
     elseif type == "virtual_recipe" then
         return storage.virtuals.recipe[name] or prototypes.recipe["recipe-unknown"]
-    elseif type == "virtual_machine" then
-        return storage.virtuals.machine[name] or storage.virtuals.machine["machine-unknown"]
     else
-        return assert()
+        return prototypes.recipe["recipe-unknown"]
+    end
+end
+
+---comment
+---@param typed_name TypedName
+---@return LuaEntityPrototype | VirtualMachine
+function M.typed_name_to_machine(typed_name)
+    local type = typed_name.type
+    local name = typed_name.name
+    if type == "machine" then
+        return prototypes.entity[name] or storage.virtuals.machine["<machine-unknown>"]
+    elseif type == "virtual_machine" then
+        return storage.virtuals.machine[name] or storage.virtuals.machine["<machine-unknown>"]
+    else
+        return storage.virtuals.machine["<machine-unknown>"]
+    end
+end
+
+---comment
+---@param name string?
+---@return LuaItemPrototype?
+function M.get_module(name)
+    if not name then
+        return nil
+    end
+
+    local module = prototypes.item[name]
+    if not module then
+        return nil
+    elseif module.type ~= "module" then
+        return nil
+    else
+        return module
+    end
+end
+
+---comment
+---@param name string?
+---@return LuaEntityPrototype?
+function M.get_beacon(name)
+    if not name then
+        return nil
+    end
+
+    local beacon = prototypes.entity[name]
+    if not beacon then
+        return nil
+    elseif beacon.type ~= "beacon" then
+        return nil
+    else
+        return beacon
     end
 end
 
@@ -543,7 +597,7 @@ end
 ---@return TypedName
 function M.craft_to_typed_name(craft)
     ---@diagnostic disable: param-type-mismatch
-    if craft.object_name == "LuaItemPrototype" then
+    if craft.object_name == "LuaPrototype" then
         return M.create_typed_name("item", craft.name)
     elseif craft.object_name == "LuaFluidPrototype" then
         return M.create_typed_name("fluid", craft.name)
@@ -738,8 +792,8 @@ function M.get_total_modules(machine, module_names, affected_by_beacons)
     end
 
     for _, affected_by_beacon in ipairs(affected_by_beacons) do
-        if affected_by_beacon.beacon_name then
-            local beacon = prototypes.entity[affected_by_beacon.beacon_name]
+        local beacon = M.get_beacon(affected_by_beacon.beacon_name)
+        if beacon then
             local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
             local beacon_module_names = M.trim_modules(affected_by_beacon.module_names, beacon.module_inventory_size)
 
@@ -766,14 +820,18 @@ function M.get_total_effectivity(module_counts)
     }
 
     for name, count in pairs(module_counts) do
-        local module = prototypes.item[name]
-        local effects = assert(module.module_effects)
+        local module = M.get_module(name)
+        if not module then
+            goto continue
+        end
 
+        local effects = assert(module.module_effects)
         ret.speed = ret.speed + (effects.speed or 0) * count
         ret.consumption = ret.consumption + (effects.consumption or 0) * count
         ret.productivity = ret.productivity + (effects.productivity or 0) * count
         ret.pollution = ret.pollution + (effects.pollution or 0) * count
         ret.quality = ret.quality + (effects.quality or 0) * count
+        ::continue::
     end
 
     ret.speed = math.max(ret.speed, 0.2)

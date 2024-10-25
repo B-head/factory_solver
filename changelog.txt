@@ -3,6 +3,8 @@ Version: 0.1.6
 Date: ????
   Bugfixes:
     - Fix crash on initialization.
+    - Fix more and more crashes on migration failure.
+    - Fix more any crashes with mod configuration changes.
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.5
 Date: 2024-10-24
