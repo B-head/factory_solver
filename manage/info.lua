@@ -480,9 +480,13 @@ function M.equals_typed_name(value1, value2)
 end
 
 ---comment
----@param typed_name TypedName
+---@param typed_name TypedName?
 ---@return boolean
 function M.validate_typed_name(typed_name)
+    if not typed_name then
+        return false
+    end
+
     local type = typed_name.type
     local name = typed_name.name
     if type == "item" then
