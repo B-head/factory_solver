@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.6
-Date: ????
+Date: 2024-10-25
   Bugfixes:
     - Fix crash on initialization.
     - Fix more and more crashes on migration failure.
