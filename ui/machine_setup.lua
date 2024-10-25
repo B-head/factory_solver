@@ -66,6 +66,42 @@ function handlers.on_machine_change_toggle(event)
 end
 
 ---@param event EventDataTrait
+function handlers.on_make_quality_dropdown(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local dictionary = {}
+    local machine_quality = dialog.tags.machine_quality --[[@as string]]
+    local qualities = fs_util.sort_prototypes(fs_util.to_list(prototypes.quality))
+    for _, value in ipairs(qualities) do
+        if not value.hidden then
+            local localised_string = { "", "[quality=", value.name, "] ", value.localised_name }
+            elem.add_item(localised_string)
+            flib_table.insert(dictionary, value.name)
+            if machine_quality == value.name then
+                elem.selected_index = #dictionary
+            end
+        end
+    end
+
+    local tags = elem.tags
+    tags.dictionary = dictionary
+    elem.tags = tags
+end
+
+---@param event EventData.on_gui_selection_state_changed
+function handlers.on_make_quality_state_changed(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local dictionary = elem.tags.dictionary
+
+    local dialog_tags = dialog.tags
+    dialog_tags.machine_quality = dictionary[elem.selected_index]
+    dialog.tags = dialog_tags
+end
+
+---@param event EventDataTrait
 function handlers.on_modules_visible(event)
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
@@ -483,6 +519,23 @@ return {
                 column_count = 6,
                 handler = {
                     on_added = handlers.on_make_machine_table,
+                },
+            },
+        },
+        {
+            type = "flow",
+            style = "factory_solver_centering_horizontal_flow",
+            direction = "horizontal",
+            visible = common.is_active_quality(),
+            {
+                type = "label",
+                caption = "Quality",
+            },
+            {
+                type = "drop-down",
+                handler = {
+                    on_added = handlers.on_make_quality_dropdown,
+                    [defines.events.on_gui_selection_state_changed] = handlers.on_make_quality_state_changed,
                 },
             },
         },

@@ -49,7 +49,7 @@ function handlers.make_production_line_table(event)
         local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine)
+        local crafting_speed = info.get_crafting_speed(machine, line.machine_quality)
         local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
@@ -244,7 +244,7 @@ function handlers.make_production_line_table(event)
         do
             local children = {}
 
-            local power = info.raw_energy_to_power(machine, effectivity.consumption)
+            local power = info.raw_energy_to_power(machine, "normal", effectivity.consumption)
 
             if not info.is_use_fuel(machine) or info.is_generator(machine) then
                 local def = {
@@ -304,8 +304,8 @@ function handlers.make_production_line_table(event)
         end
 
         do
-            local pollution = info.raw_emission_to_pollution(machine, "pollution", effectivity.consumption,
-                effectivity.pollution)
+            local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_quality,
+                effectivity.consumption, effectivity.pollution)
 
             if info.is_use_fuel(machine) then
                 local fuel = info.typed_name_to_material(line.fuel_typed_name)

@@ -90,6 +90,7 @@ local Constraint = {}
 ---@class ProductionLine
 ---@field recipe_typed_name TypedName
 ---@field machine_typed_name TypedName
+---@field machine_quality string
 ---@field module_names table<string, string>
 ---@field affected_by_beacons AffectedByBeacon[]
 ---@field fuel_typed_name TypedName?

@@ -74,6 +74,12 @@ function M.format_power(power)
 end
 
 ---comment
+---@return boolean
+function M.is_active_quality()
+    return script.active_mods["quality"] ~= nil
+end
+
+---comment
 ---@param player_index integer
 ---@param is_dialog boolean
 ---@param gui_def flib.GuiElemDef

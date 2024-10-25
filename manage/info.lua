@@ -30,8 +30,8 @@ M.tolerance = (10 ^ -5)
 ---@return number
 function M.raw_product_to_amount(product, craft_energy, crafting_speed, effectivity_speed, effectivity_productivity)
     if product.amount_per_second then
-        local amount = product.amount_per_second * crafting_speed / craft_energy
-        return amount * effectivity_speed * effectivity_productivity
+        return product.amount_per_second * crafting_speed *
+            effectivity_speed * effectivity_productivity / craft_energy
     else
         local amount = product.amount
         if not amount then
@@ -50,26 +50,24 @@ end
 ---@return number
 function M.raw_ingredient_to_amount(ingredient, craft_energy, crafting_speed, effectivity_speed)
     if ingredient.amount_per_second then
-        local amount = ingredient.amount_per_second * crafting_speed / craft_energy
-        return amount * effectivity_speed
+        return ingredient.amount_per_second * crafting_speed * effectivity_speed / craft_energy  -- TODO quality
     else
-        local amount = ingredient.amount * crafting_speed / craft_energy
-        return amount * effectivity_speed
+        return ingredient.amount * crafting_speed * effectivity_speed / craft_energy
     end
 end
 
 ---comment
 ---@param machine LuaEntityPrototype | VirtualMachine
+---@param quality QualityID
 ---@param effectivity_consumption number
 ---@return number
-function M.raw_energy_to_power(machine, effectivity_consumption)
+function M.raw_energy_to_power(machine, quality, effectivity_consumption)
     ---@diagnostic disable-next-line: param-type-mismatch
     if not machine.object_name then
-        return machine.energy_source.power_per_second * effectivity_consumption
+        return machine.energy_source.power_per_second * effectivity_consumption -- TODO quality
     end
 
-    -- The energy_usage is not defined in boilers and reactors (TODO probably inaccurate)
-    local energy_per_tick = (machine.energy_usage or machine.get_max_energy_usage()) * effectivity_consumption
+    local energy_per_tick = machine.get_max_energy_usage(quality) * effectivity_consumption
 
     if machine.electric_energy_source_prototype then
         energy_per_tick = energy_per_tick + machine.electric_energy_source_prototype.drain
@@ -91,18 +89,18 @@ end
 ---comment
 ---@param machine LuaEntityPrototype | VirtualMachine
 ---@param pollutant_type string
+---@param quality QualityID
 ---@param effectivity_consumption number
 ---@param effectivity_pollution number
 ---@return number
-function M.raw_emission_to_pollution(machine, pollutant_type, effectivity_consumption, effectivity_pollution)
+function M.raw_emission_to_pollution(machine, pollutant_type, quality, effectivity_consumption, effectivity_pollution)
     ---@diagnostic disable-next-line: param-type-mismatch
     if not machine.object_name then
-        return machine.energy_source.pollution_per_second * effectivity_consumption * effectivity_pollution
+        return machine.energy_source.pollution_per_second * effectivity_consumption * effectivity_pollution -- TODO quality
     end
 
-    -- The energy_usage is not defined in boilers and reactors (TODO probably inaccurate)
-    local emission_per_tick = (machine.energy_usage or machine.get_max_energy_usage())
-    emission_per_tick = emission_per_tick * effectivity_consumption * effectivity_pollution
+    local emission_per_tick = machine.get_max_energy_usage(quality)
+        * effectivity_consumption * effectivity_pollution
 
     if machine.electric_energy_source_prototype then
         emission_per_tick = emission_per_tick *
@@ -756,13 +754,14 @@ end
 
 ---comment
 ---@param machine LuaEntityPrototype | VirtualMachine
+---@param quality QualityID
 ---@return number
-function M.get_crafting_speed(machine)
+function M.get_crafting_speed(machine, quality)
     ---@diagnostic disable-next-line: param-type-mismatch
     if machine.object_name then
-        return machine.get_crafting_speed()
+        return machine.get_crafting_speed(quality)
     else
-        return machine.crafting_speed
+        return machine.crafting_speed -- TODO quality
     end
 end
 
