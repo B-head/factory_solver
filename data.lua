@@ -1,9 +1,7 @@
 if mods["base"] then
     -- Fixed base bug.
     -- data.raw["recipe"]["electric-energy-interface"].hidden = true
-end
-
-if not data.raw["item-group"]["other"] then
+else
     data:extend({
         {
             type = "item-group",
@@ -11,6 +9,12 @@ if not data.raw["item-group"]["other"] then
             icon = "__core__/graphics/icons/category/unsorted.png",
             icon_size = 128,
             order = "z"
+        },
+        {
+            type = "item-subgroup",
+            name = "other",
+            group = "other",
+            order = "d"
         },
     })
 end
@@ -20,7 +24,7 @@ data:extend({
         type = "sprite",
         name = "factory-solver-solar-panel",
         filename = "__factory_solver__/graphics/solar-panel.png",
-        flag = { "gui-icon" }, ---@diagnostic disable-line: missing-fields
+        flags = { "gui-icon" },
         size = 64,
         mipmap_count = 4,
     },
