@@ -5,7 +5,7 @@
 local Matrix = require("solver/Matrix")
 local SparseMatrix = require("solver/SparseMatrix")
 
-local debug_print = log
+local debug_print = print
 local hmul, hpow, diag = Matrix.hadamard_product, Matrix.hadamard_power, SparseMatrix.diag
 
 local iterate_limit = 120
