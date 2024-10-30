@@ -6,7 +6,6 @@ local info = require "manage/info"
 
 local M = {}
 
----comment
 ---@param typed_name TypedName
 ---@return boolean
 function M.is_virtual(typed_name)
@@ -128,27 +127,6 @@ function M.create_virtuals()
     }
 end
 
----@param typed_name TypedName?
----@return string
----@return string
----@return string
-function M.get_craft_order(typed_name)
-    if not typed_name then
-        return "", "other", "other"
-    end
-
-    local prototype
-    if typed_name.type == "item" then
-        prototype = prototypes.item[typed_name.name]
-    elseif typed_name.type == "fluid" then
-        prototype = prototypes.fluid[typed_name.name]
-    else
-        return assert()
-    end
-
-    return prototype.order, prototype.group.name, prototype.subgroup.name
-end
-
 ---@param rocket_silo_prototype LuaEntityPrototype
 ---@return VirtualRecipe
 ---@return VirtualMachine
@@ -167,9 +145,6 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         flib_table.insert(ingredients, amount)
     end
 
-    local mining_result = rocket_silo_prototype.mineable_properties.products[1]
-    local order, group_name, subgroup_name = M.get_craft_order(mining_result)
-
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -185,9 +160,9 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             }
         },
         ingredients = ingredients,
-        order = order,
-        group_name = group_name,
-        subgroup_name = subgroup_name,
+        order = rocket_silo_prototype.order,
+        group_name = rocket_silo_prototype.group.name,
+        subgroup_name = rocket_silo_prototype.subgroup.name,
         category = crafting_category,
     }
 
@@ -233,9 +208,6 @@ function M.create_boiler_virtual(boiler_prototype)
         local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
             boiler_prototype.get_max_energy_usage()
 
-        local mining_result = boiler_prototype.mineable_properties.products[1]
-        local order, group_name, subgroup_name = M.get_craft_order(mining_result)
-
         ---@type VirtualRecipe
         local recipe = {
             type = "virtual_recipe",
@@ -257,9 +229,9 @@ function M.create_boiler_virtual(boiler_prototype)
                     amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
-            order = order,
-            group_name = group_name,
-            subgroup_name = subgroup_name,
+            order = boiler_prototype.order,
+            group_name = boiler_prototype.group.name,
+            subgroup_name = boiler_prototype.subgroup.name,
             category = crafting_category,
         }
 
@@ -293,9 +265,6 @@ function M.create_boiler_virtual(boiler_prototype)
         local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
             boiler_prototype.get_max_energy_usage()
 
-        local mining_result = boiler_prototype.mineable_properties.products[1]
-        local order, group_name, subgroup_name = M.get_craft_order(mining_result)
-
         ---@type VirtualRecipe
         local recipe = {
             type = "virtual_recipe",
@@ -317,9 +286,9 @@ function M.create_boiler_virtual(boiler_prototype)
                     amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
-            order = order,
-            group_name = group_name,
-            subgroup_name = subgroup_name,
+            order = boiler_prototype.order,
+            group_name = boiler_prototype.group.name,
+            subgroup_name = boiler_prototype.subgroup.name,
             category = crafting_category,
         }
 
@@ -372,9 +341,6 @@ function M.create_generator_virtual(generator_prototype)
         end
     end
 
-    local mining_result = generator_prototype.mineable_properties.products[1]
-    local order, group_name, subgroup_name = M.get_craft_order(mining_result)
-
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -384,9 +350,9 @@ function M.create_generator_virtual(generator_prototype)
         energy = 1,
         products = {},
         ingredients = {},
-        order = order,
-        group_name = group_name,
-        subgroup_name = subgroup_name,
+        order = generator_prototype.order,
+        group_name = generator_prototype.group.name,
+        subgroup_name = generator_prototype.subgroup.name,
         category = crafting_category,
     }
 
@@ -421,9 +387,6 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
     local crafting_category = "<dedicated>" .. burner_generator_prototype.name
     local max_power = burner_generator_prototype.max_power_output
 
-    local mining_result = burner_generator_prototype.mineable_properties.products[1]
-    local order, group_name, subgroup_name = M.get_craft_order(mining_result)
-
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -433,9 +396,9 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
         energy = 1,
         products = {},
         ingredients = {},
-        order = order,
-        group_name = group_name,
-        subgroup_name = subgroup_name,
+        order = burner_generator_prototype.order,
+        group_name = burner_generator_prototype.group.name,
+        subgroup_name = burner_generator_prototype.subgroup.name,
         category = crafting_category,
     }
 
@@ -469,9 +432,6 @@ end
 function M.create_reactor_virtual(reactor_prototype)
     local crafting_category = "<dedicated>" .. reactor_prototype.name
 
-    local mining_result = reactor_prototype.mineable_properties.products[1]
-    local order, group_name, subgroup_name = M.get_craft_order(mining_result)
-
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -487,9 +447,9 @@ function M.create_reactor_virtual(reactor_prototype)
             },
         },
         ingredients = {},
-        order = order,
-        group_name = group_name,
-        subgroup_name = subgroup_name,
+        order = reactor_prototype.order,
+        group_name = reactor_prototype.group.name,
+        subgroup_name = reactor_prototype.subgroup.name,
         category = crafting_category,
     }
 
@@ -557,9 +517,6 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
         fluid_name = fluidbox.filter.name
     end
 
-    local mining_result = offshore_pump_prototype.mineable_properties.products[1]
-    local order, group_name, subgroup_name = M.get_craft_order(mining_result)
-
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -576,9 +533,9 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
             }
         },
         ingredients = {},
-        order = order,
-        group_name = group_name,
-        subgroup_name = subgroup_name,
+        order = offshore_pump_prototype.order,
+        group_name = offshore_pump_prototype.group.name,
+        subgroup_name = offshore_pump_prototype.subgroup.name,
         category = crafting_category,
     }
 
@@ -629,9 +586,6 @@ function M.create_resource_virtual(resource_prototype)
         flib_table.insert(ingredients, data)
     end
 
-    local main_product = mineable.products[1]
-    local order, group_name, subgroup_name = M.get_craft_order(main_product)
-
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -641,9 +595,9 @@ function M.create_resource_virtual(resource_prototype)
         energy = 1,
         products = products,
         ingredients = ingredients,
-        order = order,
-        group_name = group_name,
-        subgroup_name = subgroup_name,
+        order = resource_prototype.order,
+        group_name = resource_prototype.group.name,
+        subgroup_name = resource_prototype.subgroup.name,
         category = "<resource>" .. resource_prototype.resource_category,
     }
 
