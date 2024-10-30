@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.7
-Date: ????
+Date: 2024-10-30
   Bugfixes:
     - Remove log contamination.
     - Fix crash when no liquid filter is defined in generators.
