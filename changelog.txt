@@ -3,6 +3,9 @@ Version: 0.1.7
 Date: ????
   Bugfixes:
     - Remove log contamination.
+    - Fix crash when no liquid filter is defined in generators.
+  Info:
+    - A virtual recipe has not yet been implemented for generators that accept liquid fuel.
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.6
 Date: 2024-10-25

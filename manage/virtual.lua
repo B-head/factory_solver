@@ -83,9 +83,11 @@ function M.create_virtuals()
             recipes[recipe.name] = recipe
             machines[machine.name] = machine
         elseif entity.type == "generator" then
-            local recipe, machine = M.create_generator_virtual(entity)
-            recipes[recipe.name] = recipe
-            machines[machine.name] = machine
+            if entity.fluidbox_prototypes[1].filter then
+                local recipe, machine = M.create_generator_virtual(entity)
+                recipes[recipe.name] = recipe
+                machines[machine.name] = machine
+            end
         elseif entity.type == "burner-generator" then
             local recipe, machine = M.create_burner_generator_virtual(entity)
             recipes[recipe.name] = recipe
@@ -325,11 +327,11 @@ end
 function M.create_generator_virtual(generator_prototype)
     local crafting_category = "<dedicated>" .. generator_prototype.name
     local input_fluidbox = generator_prototype.fluidbox_prototypes[1]
-    local input_fluid = prototypes.fluid[input_fluidbox.filter.name]
 
     local alternative_fuel_value = generator_prototype.max_power_output / generator_prototype.fluid_usage_per_tick
     local max_power_per_tick = generator_prototype.max_power_output
     if not max_power_per_tick then
+        local input_fluid = prototypes.fluid[input_fluidbox.filter.name]
         if generator_prototype.burns_fluid then
             alternative_fuel_value = input_fluid.fuel_value * generator_prototype.effectivity
             max_power_per_tick = generator_prototype.fluid_usage_per_tick * alternative_fuel_value
