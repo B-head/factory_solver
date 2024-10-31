@@ -74,6 +74,7 @@ function M.init_fuel_presets(origin)
     end
 
     for category_name, _ in pairs(prototypes.fuel_category) do
+        M.typed_name_migration(ret[category_name])
         if info.validate_typed_name(ret[category_name]) then
             goto continue
         end
@@ -102,6 +103,7 @@ function M.init_machine_presets(origin)
     end
 
     local function add(category_name)
+        M.typed_name_migration(ret[category_name])
         if info.validate_typed_name(ret[category_name]) then
             return
         end
@@ -144,13 +146,62 @@ end
 ---comment
 ---@param force_index integer
 function M.reinit_force_data(force_index)
+    ---@diagnostic disable: undefined-field
+    ---@diagnostic disable: inject-field
     local force_data = storage.forces[force_index]
     if force_data then
         force_data.relation_to_recipes_needs_updating = true
         force_data.group_infos_needs_updating = true
+
+        for _, solution in pairs(force_data.solutions) do
+            for _, line in pairs(solution.production_lines) do
+                M.typed_name_migration(line.recipe_typed_name)
+                M.typed_name_migration(line.machine_typed_name)
+                M.typed_name_migration(line.fuel_typed_name)
+
+                if line.module_names then
+                    local module_typed_names = {}
+                    for _, name in pairs(line.module_names) do
+                        local typed_name = info.create_typed_name("item", name)
+                        flib_table.insert(module_typed_names, typed_name)
+                    end
+                    line.module_typed_names = module_typed_names
+                    line.module_names = nil
+                else
+                    for _, typed_name in pairs(line.module_typed_names) do
+                        M.typed_name_migration(typed_name)
+                    end
+                end
+
+                for _, affected in pairs(line.affected_by_beacons) do
+                    if affected.beacon_name then
+                        affected.beacon_typed_name = info.create_typed_name("machine", affected.beacon_name)
+                        affected.beacon_name = nil
+                    else
+                        M.typed_name_migration(affected.beacon_typed_name)
+                    end
+
+                    if affected.module_names then
+                        local module_typed_names = {}
+                        for _, name in pairs(affected.module_names) do
+                            local typed_name = info.create_typed_name("item", name)
+                            flib_table.insert(module_typed_names, typed_name)
+                        end
+                        affected.module_typed_names = module_typed_names
+                        affected.module_names = nil
+                    else
+                        for _, typed_name in pairs(affected.module_typed_names) do
+                            M.typed_name_migration(typed_name)
+                        end
+                    end
+                end
+            end
+        end
     else
         M.init_force_data(force_index)
     end
+    ---@diagnostic enable: undefined-field
+    ---@diagnostic enable: inject-field
 end
 
 ---comment
@@ -163,6 +214,34 @@ function M.resetup_force_data_metatable(force_data)
             end
         end
     end
+end
+
+---comment
+---@param typed_name TypedName
+function M.typed_name_migration(typed_name)
+    if not typed_name then
+        return
+    end
+
+    local type = typed_name.type
+    local name = typed_name.name
+    local quality = typed_name.quality
+
+    if type == "virtual-object" then
+        type = "virtual_material"
+    elseif type == "virtual-recipe" then
+        type = "virtual_recipe"
+    elseif type == "virtual-machine" then
+        type = "virtual_machine"
+    end
+
+    if not quality then
+        quality = "normal"
+    end
+
+    typed_name.type = type
+    typed_name.name = name
+    typed_name.quality = quality
 end
 
 ---comment
