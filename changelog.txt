@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.8
-Date: ????
+Date: 2024-10-31
   Bugfixes:
     - Fix crash when solutions are loaded that are not solver ready.
     - Fix crash when materials or fuel are used that have been deleted from the save.
