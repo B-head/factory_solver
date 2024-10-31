@@ -273,33 +273,33 @@ function M.get_total_amounts(solution)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
         for _, value in pairs(recipe.products) do
-            local number = info.raw_product_to_amount(value, craft_energy, crafting_speed,
+            local amount_per_second = info.raw_product_to_amount(value, craft_energy, crafting_speed,
                 effectivity.speed, effectivity.productivity)
-            number = number * quantity_of_machines_required
+            amount_per_second = amount_per_second * quantity_of_machines_required
 
             if value.type == "item" then
-                item_totals[value.name] = (item_totals[value.name] or 0) + number
+                item_totals[value.name] = (item_totals[value.name] or 0) + amount_per_second
             elseif value.type == "fluid" then
-                fluid_totals[value.name] = (fluid_totals[value.name] or 0) + number
+                fluid_totals[value.name] = (fluid_totals[value.name] or 0) + amount_per_second
             elseif value.type == "virtual_material" then
-                virtual_totals[value.name] = (virtual_totals[value.name] or 0) + number
+                virtual_totals[value.name] = (virtual_totals[value.name] or 0) + amount_per_second
             else
-                virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + number
+                virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + amount_per_second
             end
         end
 
         for _, value in pairs(recipe.ingredients) do
-            local number = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
-            number = number * effectivity.speed * quantity_of_machines_required
+            local amount_per_second = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
+            amount_per_second = amount_per_second * effectivity.speed * quantity_of_machines_required
 
             if value.type == "item" then
-                item_totals[value.name] = (item_totals[value.name] or 0) - number
+                item_totals[value.name] = (item_totals[value.name] or 0) - amount_per_second
             elseif value.type == "fluid" then
-                fluid_totals[value.name] = (fluid_totals[value.name] or 0) - number
+                fluid_totals[value.name] = (fluid_totals[value.name] or 0) - amount_per_second
             elseif value.type == "virtual_material" then
-                virtual_totals[value.name] = (virtual_totals[value.name] or 0) - number
+                virtual_totals[value.name] = (virtual_totals[value.name] or 0) - amount_per_second
             else
-                virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + number
+                virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + amount_per_second
             end
         end
 
