@@ -268,7 +268,7 @@ function M.get_total_amounts(solution)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine, line.machine_quality)
-        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
@@ -337,7 +337,7 @@ function M.get_total_power(solution)
 
     for _, line in ipairs(solution.production_lines) do
         local machine = info.typed_name_to_machine(line.machine_typed_name)
-        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
@@ -359,7 +359,7 @@ function M.get_total_pollution(solution)
 
     for _, line in ipairs(solution.production_lines) do
         local machine = info.typed_name_to_machine(line.machine_typed_name)
-        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
@@ -531,7 +531,7 @@ function M.new_production_line(player_index, solution, recipe_typed_name, line_i
         recipe_typed_name = recipe_typed_name,
         machine_typed_name = machine_typed_name,
         machine_quality = "normal",
-        module_names = {},
+        module_typed_names = {},
         affected_by_beacons = {},
         fuel_typed_name = fuel_typed_name,
     }
@@ -559,7 +559,7 @@ function M.update_production_line(solution, line_index, data)
     line.recipe_typed_name = data.recipe_typed_name
     line.machine_typed_name = data.machine_typed_name
     line.machine_quality = data.machine_quality
-    line.module_names = data.module_names
+    line.module_typed_names = data.module_typed_names
     line.affected_by_beacons = data.affected_by_beacons
     line.fuel_typed_name = data.fuel_typed_name
 

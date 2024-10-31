@@ -58,7 +58,7 @@ function M.to_normalized_production_lines(production_lines)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine, line.machine_quality)
-        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
 
         ---@type NormalizedAmount[]

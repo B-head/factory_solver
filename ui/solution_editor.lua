@@ -50,7 +50,7 @@ function handlers.make_production_line_table(event)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
         local crafting_speed = info.get_crafting_speed(machine, line.machine_quality)
-        local module_counts = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
+        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
@@ -139,7 +139,7 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(buttons, def)
             end
 
-            local total_modules = info.get_total_modules(machine, line.module_names, line.affected_by_beacons)
+            local total_modules = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
             for name, count in pairs(total_modules) do
                 local module_typed_name = info.create_typed_name("item", name)
 

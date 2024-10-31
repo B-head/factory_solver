@@ -7,7 +7,7 @@
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
 ---@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaEntityPrototype | VirtualMaterial | VirtualRecipe | VirtualMachine
----@alias TypedName { type: FilterType, name: string }
+---@alias TypedName { type: FilterType, name: string, quality: string }
 
 ---@class EventDataTrait
 ---@field element LuaGuiElement
@@ -90,16 +90,15 @@ local Constraint = {}
 ---@class ProductionLine
 ---@field recipe_typed_name TypedName
 ---@field machine_typed_name TypedName
----@field machine_quality string
----@field module_names table<string, string>
+---@field module_typed_names table<string, TypedName>
 ---@field affected_by_beacons AffectedByBeacon[]
 ---@field fuel_typed_name TypedName?
 local ProductionLine = {}
 
 ---@class AffectedByBeacon
----@field beacon_name string?
+---@field beacon_typed_name TypedName?
 ---@field beacon_quantity integer
----@field module_names table<string, string>
+---@field module_typed_names table<string, TypedName>
 local AffectedByBeacons = {}
 
 ---@class PackedVariables

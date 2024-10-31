@@ -50,7 +50,7 @@ end
 ---@return number
 function M.raw_ingredient_to_amount(ingredient, craft_energy, crafting_speed, effectivity_speed)
     if ingredient.amount_per_second then
-        return ingredient.amount_per_second * crafting_speed * effectivity_speed / craft_energy  -- TODO quality
+        return ingredient.amount_per_second * crafting_speed * effectivity_speed / craft_energy -- TODO quality
     else
         return ingredient.amount * crafting_speed * effectivity_speed / craft_energy
     end
@@ -96,7 +96,8 @@ end
 function M.raw_emission_to_pollution(machine, pollutant_type, quality, effectivity_consumption, effectivity_pollution)
     ---@diagnostic disable-next-line: param-type-mismatch
     if not machine.object_name then
-        return machine.energy_source.pollution_per_second * effectivity_consumption * effectivity_pollution -- TODO quality
+        return machine.energy_source.pollution_per_second * effectivity_consumption *
+            effectivity_pollution -- TODO quality
     end
 
     local emission_per_tick = machine.get_max_energy_usage(quality)
@@ -462,12 +463,14 @@ end
 ---comment
 ---@param filter_type FilterType | "research-progress"
 ---@param name string
+---@param quality string?
 ---@return TypedName
-function M.create_typed_name(filter_type, name)
+function M.create_typed_name(filter_type, name, quality)
+    quality = quality or "normal"
     if filter_type == "research-progress" then
         filter_type = "virtual_material"
     end
-    return { type = filter_type, name = name }
+    return { type = filter_type, name = name, quality = quality }
 end
 
 ---comment
@@ -766,35 +769,36 @@ function M.get_crafting_speed(machine, quality)
 end
 
 ---comment
----@param module_names table<string, string>
+---@param module_typed_names table<string, string>
 ---@param module_inventory_size integer
 ---@return table<string, string>
-function M.trim_modules(module_names, module_inventory_size)
+function M.trim_modules(module_typed_names, module_inventory_size)
     local ret = {}
     for index = 1, module_inventory_size do
-        ret[tostring(index)] = module_names[tostring(index)]
+        ret[tostring(index)] = module_typed_names[tostring(index)]
     end
     return ret
 end
 
 ---comment
 ---@param machine LuaEntityPrototype | VirtualMachine
----@param module_names table<string, string>
+---@param module_typed_names table<string, string>
 ---@param affected_by_beacons AffectedByBeacon[]
 ---@return table<string, number>
-function M.get_total_modules(machine, module_names, affected_by_beacons)
+function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
     local module_counts = {}
 
-    module_names = M.trim_modules(module_names, machine.module_inventory_size)
-    for _, name in pairs(module_names) do
+    module_typed_names = M.trim_modules(module_typed_names, machine.module_inventory_size)
+    for _, name in pairs(module_typed_names) do
         module_counts[name] = (module_counts[name] or 0) + 1
     end
 
     for _, affected_by_beacon in ipairs(affected_by_beacons) do
-        local beacon = M.get_beacon(affected_by_beacon.beacon_name)
+        local beacon = M.get_beacon(affected_by_beacon.beacon_typed_name)
         if beacon then
             local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
-            local beacon_module_names = M.trim_modules(affected_by_beacon.module_names, beacon.module_inventory_size)
+            local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
+                beacon.module_inventory_size)
 
             for _, name in pairs(beacon_module_names) do
                 module_counts[name] = (module_counts[name] or 0) + effectivity

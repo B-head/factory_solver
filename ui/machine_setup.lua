@@ -116,21 +116,20 @@ function handlers.on_make_machine_modules(event)
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
-    local module_names = dialog.tags.module_names --[[@as table<string, string>]]
+    local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, string>]]
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = info.typed_name_to_machine(machine_typed_name)
 
     elem.clear()
     for index = 1, machine.module_inventory_size do
-        local module_name = module_names[tostring(index)]
+        local module_name = module_typed_names[tostring(index)]
         if module_name and not info.get_module(module_name) then
             module_name = "item-unknown"
         end
 
         local def = {
             type = "choose-elem-button",
-            elem_type = "item",
-            item = module_name,
+            elem_type = "item-with-quality",
             elem_filters = {
                 { filter = "type", type = "module" },
             },
@@ -142,7 +141,8 @@ function handlers.on_make_machine_modules(event)
                 [defines.events.on_gui_elem_changed] = handlers.on_module_changed,
             },
         }
-        fs_util.add_gui(elem, def)
+        local _, added = fs_util.add_gui(elem, def)
+        added.elem_value = { name = module_name, quality = "normal" }
     end
 end
 
@@ -157,10 +157,10 @@ function handlers.on_module_changed(event)
 
     if beacon_index then
         local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
-        affected_by_beacon.module_names[slot_index] = elem.elem_value --[[@as string]]
+        affected_by_beacon.module_typed_names[slot_index] = elem.elem_value --[[@as string]]
     else
-        local module_names = dialog_tags.module_names --[[@as table<string, string>]]
-        module_names[slot_index] = elem.elem_value --[[@as string]]
+        local module_typed_names = dialog_tags.module_typed_names --[[@as table<string, string>]]
+        module_typed_names[slot_index] = elem.elem_value --[[@as string]]
     end
 
     dialog.tags = dialog_tags
@@ -176,7 +176,7 @@ function handlers.on_make_beacons_table(event)
 
     elem.clear()
     for beacon_index, affected_by_beacon in ipairs(affected_by_beacons) do
-        local beacon_name = affected_by_beacon.beacon_name
+        local beacon_name = affected_by_beacon.beacon_typed_name
         local beacon = info.get_beacon(beacon_name)
 
         do
@@ -223,7 +223,7 @@ function handlers.on_make_beacons_table(event)
             local children = {}
 
             if beacon then
-                local module_names = affected_by_beacon.module_names
+                local module_typed_names = affected_by_beacon.module_typed_names
 
                 for slot_index = 1, beacon.module_inventory_size do
                     local module_name = module_names[tostring(slot_index)]
@@ -234,7 +234,7 @@ function handlers.on_make_beacons_table(event)
                     local def = {
                         type = "choose-elem-button",
                         elem_type = "item",
-                        item = module_name,
+                        item = module_typed_names[tostring(slot_index)],
                         elem_filters = {
                             { filter = "type", type = "module" },
                         },
@@ -286,9 +286,9 @@ function handlers.on_add_beacon_click(event)
 
     ---@type AffectedByBeacon
     local add_data = {
-        beacon_name = nil,
+        beacon_typed_name = nil,
         beacon_quantity = 1,
-        module_names = {},
+        module_typed_names = {},
     }
     flib_table.insert(affected_by_beacons, add_data)
 
@@ -304,7 +304,7 @@ function handlers.on_beacon_changed(event)
 
     local beacon_index = elem.tags.beacon_index --[[@as integer]]
     local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
-    affected_by_beacon.beacon_name = elem.elem_value --[[@as string]]
+    affected_by_beacon.beacon_typed_name = elem.elem_value --[[@as string]]
 
     dialog.tags = dialog_tags
     fs_util.dispatch_to_subtree(dialog, "on_beacon_changed")
@@ -345,9 +345,9 @@ function handlers.on_make_total_effectivity(event)
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = info.typed_name_to_machine(machine_typed_name)
-    local module_names = dialog.tags.module_names --[[@as table<string, string>]]
+    local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, string>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
-    local total_modules = info.get_total_modules(machine, module_names, affected_by_beacons)
+    local total_modules = info.get_total_modules(machine, module_typed_names, affected_by_beacons)
 
     elem.clear()
     for name, count in pairs(total_modules) do
