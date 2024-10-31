@@ -158,7 +158,9 @@ end
 function M.resetup_force_data_metatable(force_data)
     if force_data then
         for _, solution in pairs(force_data.solutions) do
-            problem_generator.setup_metatable(solution.problem)
+            if solution.problem then
+                problem_generator.setup_metatable(solution.problem)
+            end
         end
     end
 end
