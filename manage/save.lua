@@ -284,7 +284,7 @@ function M.get_total_amounts(solution)
             elseif value.type == "virtual_material" then
                 virtual_totals[value.name] = (virtual_totals[value.name] or 0) + number
             else
-                assert()
+                virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + number
             end
         end
 
@@ -299,29 +299,28 @@ function M.get_total_amounts(solution)
             elseif value.type == "virtual_material" then
                 virtual_totals[value.name] = (virtual_totals[value.name] or 0) - number
             else
-                assert()
+                virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + number
             end
         end
 
         if info.is_use_fuel(machine) then
-            local ftn = assert(line.fuel_typed_name)
             local power = info.raw_energy_to_power(machine, effectivity.consumption)
             power = power * quantity_of_machines_required
-            local fuel = info.typed_name_to_material(ftn)
+            local fuel = info.typed_name_to_material(line.fuel_typed_name)
             local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
 
             if info.is_generator(machine) then
                 amount_per_second = -amount_per_second
             end
 
-            if ftn.type == "item" then
-                item_totals[ftn.name] = (item_totals[ftn.name] or 0) - amount_per_second
-            elseif ftn.type == "fluid" then
-                fluid_totals[ftn.name] = (fluid_totals[ftn.name] or 0) - amount_per_second
-            elseif ftn.type == "virtual_material" then
-                virtual_totals[ftn.name] = (virtual_totals[ftn.name] or 0) - amount_per_second
+            if fuel.type == "item" then
+                item_totals[fuel.name] = (item_totals[fuel.name] or 0) - amount_per_second
+            elseif fuel.type == "fluid" then
+                fluid_totals[fuel.name] = (fluid_totals[fuel.name] or 0) - amount_per_second
+            elseif fuel.type == "virtual_material" then
+                virtual_totals[fuel.name] = (virtual_totals[fuel.name] or 0) - amount_per_second
             else
-                assert()
+                virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + amount_per_second
             end
         end
     end
