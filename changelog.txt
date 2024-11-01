@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.2.0
-Date: ????
+Date: 2024-11-01
   Features:
     - Add support for quality mechanisms for actual machines and modules.
   Bugfixes:
