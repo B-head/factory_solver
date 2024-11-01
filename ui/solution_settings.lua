@@ -35,11 +35,8 @@ function handlers.on_make_constraints_table(event)
         do
             local typed_name = info.create_typed_name(data.type, data.name)
 
-            local def = {
-                type = "sprite-button",
-                style = common.get_style(false, false, typed_name.type),
-                sprite = info.get_sprite_path(typed_name),
-                elem_tooltip = info.typed_name_to_elem_id(typed_name),
+            local def = common.create_decorated_sprite_button{
+                typed_name = typed_name,
                 tags = data,
                 handler = {
                     [defines.events.on_gui_click] = handlers.on_constraint_button_click,

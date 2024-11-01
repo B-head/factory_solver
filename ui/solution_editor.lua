@@ -91,11 +91,10 @@ function handlers.make_production_line_table(event)
             local is_hidden = info.is_hidden(recipe)
             local is_unresearched = info.is_unresearched(recipe, relation_to_recipes)
 
-            local def = {
-                type = "sprite-button",
-                style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-                sprite = info.get_sprite_path(typed_name),
-                elem_tooltip = info.typed_name_to_elem_id(typed_name),
+            local def = common.create_decorated_sprite_button{
+                typed_name = typed_name,
+                is_hidden = is_hidden,
+                is_unresearched = is_unresearched,
                 tags = recipe_tags,
                 handler = {
                     [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
@@ -126,11 +125,10 @@ function handlers.make_production_line_table(event)
             local is_unresearched = info.is_unresearched(machine, relation_to_recipes)
 
             do
-                local def = {
-                    type = "sprite-button",
-                    style = common.get_style(is_hidden, is_unresearched, machine_typed_name.type),
-                    sprite = info.get_sprite_path(machine_typed_name),
-                    elem_tooltip = info.typed_name_to_elem_id(machine_typed_name),
+                local def = common.create_decorated_sprite_button{
+                    typed_name = machine_typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
                     tags = recipe_tags,
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
@@ -145,11 +143,8 @@ function handlers.make_production_line_table(event)
                 for quality, count in pairs(inner) do
                     local module_typed_name = info.create_typed_name("item", name, quality)
 
-                    local def = {
-                        type = "sprite-button",
-                        style = common.get_style(false, false, module_typed_name.type),
-                        sprite = info.get_sprite_path(module_typed_name),
-                        elem_tooltip = info.typed_name_to_elem_id(module_typed_name),
+                    local def = common.create_decorated_sprite_button{
+                        typed_name = module_typed_name,
                         number = count,
                         tags = recipe_tags,
                         handler = {
@@ -177,11 +172,10 @@ function handlers.make_production_line_table(event)
                 local raw_amount = info.raw_product_to_amount(value, craft_energy, crafting_speed,
                     effectivity.speed, effectivity.productivity)
 
-                local def = {
-                    type = "sprite-button",
-                    style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-                    sprite = info.get_sprite_path(typed_name),
-                    elem_tooltip = info.typed_name_to_elem_id(typed_name),
+                local def = common.create_decorated_sprite_button{
+                    typed_name = typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
                     tags = {
                         line_index = line_index,
                         typed_name = typed_name,
@@ -215,11 +209,10 @@ function handlers.make_production_line_table(event)
                 local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
                 local raw_amount = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
 
-                local def = {
-                    type = "sprite-button",
-                    style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-                    sprite = info.get_sprite_path(typed_name),
-                    elem_tooltip = info.typed_name_to_elem_id(typed_name),
+                local def = common.create_decorated_sprite_button{
+                    typed_name = typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
                     tags = {
                         line_index = line_index,
                         typed_name = typed_name,
@@ -276,11 +269,10 @@ function handlers.make_production_line_table(event)
                     amount_per_second = -amount_per_second
                 end
 
-                local def = {
-                    type = "sprite-button",
-                    style = common.get_style(is_hidden, is_unresearched, fuel_typed_name.type),
-                    sprite = info.get_sprite_path(fuel_typed_name),
-                    elem_tooltip = info.typed_name_to_elem_id(fuel_typed_name),
+                local def = common.create_decorated_sprite_button{
+                    typed_name = fuel_typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
                     tags = {
                         line_index = line_index,
                         typed_name = fuel_typed_name,

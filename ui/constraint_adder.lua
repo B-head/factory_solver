@@ -118,11 +118,10 @@ function handlers.on_make_constraint_picker(event)
             return
         end
 
-        local def = {
-            type = "sprite-button",
-            style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-            sprite = info.get_sprite_path(typed_name),
-            elem_tooltip = info.typed_name_to_elem_id(typed_name),
+        local def = common.create_decorated_sprite_button{
+            typed_name = typed_name,
+            is_hidden = is_hidden,
+            is_unresearched = is_unresearched,
             tags = {
                 typed_name = typed_name,
             },

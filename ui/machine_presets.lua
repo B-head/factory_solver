@@ -44,11 +44,10 @@ function handlers.on_make_fuel_presets(event)
                 local is_hidden = info.is_hidden(value)
                 local is_unresearched = info.is_unresearched(value, relation_to_recipes)
 
-                local def = {
-                    type = "sprite-button",
-                    style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-                    sprite = info.get_sprite_path(typed_name),
-                    elem_tooltip = info.typed_name_to_elem_id(typed_name),
+                local def = common.create_decorated_sprite_button{
+                    typed_name = typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
                     tags = {
                         typed_name = typed_name,
                         category_name = category_name,
@@ -106,11 +105,10 @@ function handlers.on_make_machine_presets(event)
                 local is_hidden = info.is_hidden(machine)
                 local is_unresearched = info.is_unresearched(machine, relation_to_recipes)
 
-                local def = {
-                    type = "sprite-button",
-                    style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-                    sprite = info.get_sprite_path(typed_name),
-                    elem_tooltip = info.typed_name_to_elem_id(typed_name),
+                local def = common.create_decorated_sprite_button{
+                    typed_name = typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
                     tags = {
                         typed_name = typed_name,
                         category_name = category_name,

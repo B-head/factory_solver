@@ -14,6 +14,7 @@ function handlers.make_final_products_table(event)
     local elem = event.element
     local player_data = save.get_player_data(event.player_index)
     local solution = save.get_selected_solution(event.player_index)
+    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     elem.clear()
     if not solution or type(solution.solver_state) == "number" then
@@ -26,12 +27,15 @@ function handlers.make_final_products_table(event)
             return
         end
         number = info.to_scale(number, player_data.time_scale)
+        
+        local craft = info.typed_name_to_material(typed_name)
+        local is_hidden = info.is_hidden(craft)
+        local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
 
-        local def = {
-            type = "sprite-button",
-            style = "flib_slot_button_default",
-            sprite = info.get_sprite_path(typed_name),
-            elem_tooltip = info.typed_name_to_elem_id(typed_name),
+        local def = common.create_decorated_sprite_button{
+            typed_name = typed_name,
+            is_hidden = is_hidden,
+            is_unresearched = is_unresearched,
             number = number + info.tolerance,
             tags = {
                 line_index = nil,
@@ -63,6 +67,7 @@ function handlers.make_basic_ingredients_table(event)
     local elem = event.element
     local player_data = save.get_player_data(event.player_index)
     local solution = save.get_selected_solution(event.player_index)
+    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     elem.clear()
     if not solution or type(solution.solver_state) == "number" then
@@ -76,11 +81,14 @@ function handlers.make_basic_ingredients_table(event)
         end
         number = info.to_scale(-number, player_data.time_scale)
 
-        local def = {
-            type = "sprite-button",
-            style = "flib_slot_button_default",
-            sprite = info.get_sprite_path(typed_name),
-            elem_tooltip = info.typed_name_to_elem_id(typed_name),
+        local craft = info.typed_name_to_material(typed_name)
+        local is_hidden = info.is_hidden(craft)
+        local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
+
+        local def = common.create_decorated_sprite_button{
+            typed_name = typed_name,
+            is_hidden = is_hidden,
+            is_unresearched = is_unresearched,
             number = number + info.tolerance,
             tags = {
                 line_index = nil,

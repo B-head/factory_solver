@@ -23,7 +23,7 @@ function handlers.on_make_machine_table(event)
         local is_hidden = info.is_hidden(machine)
         local is_unresearched = info.is_unresearched(machine, relation_to_recipes)
 
-        local def = common.create_decorated_sprite_button {
+        local def = common.create_decorated_sprite_button{
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
@@ -368,7 +368,7 @@ function handlers.on_make_total_effectivity(event)
         for quality, count in pairs(inner) do
             local module_typed_name = info.create_typed_name("item", name, quality)
 
-            local def = common.create_decorated_sprite_button {
+            local def = common.create_decorated_sprite_button{
                 typed_name = module_typed_name,
                 number = count,
             }
@@ -420,7 +420,7 @@ function handlers.on_make_fuel_table(event)
             local is_hidden = info.is_hidden(fuel)
             local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
 
-            local def = common.create_decorated_sprite_button {
+            local def = common.create_decorated_sprite_button{
                 typed_name = typed_name,
                 is_hidden = is_hidden,
                 is_unresearched = is_unresearched,

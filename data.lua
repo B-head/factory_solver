@@ -105,7 +105,24 @@ styles.factory_solver_no_spacing_vertical_flow_style = {
 styles.factory_solver_fake_slot = {
     type = "empty_widget_style",
     width = 40,
-    heigth = 40,
+    height = 40,
+}
+
+styles.factory_solver_slot_label = {
+    type = "label_style",
+    parent = "count_label",
+    width = 40,
+    height = 40,
+}
+
+styles.factory_solver_slot_image_with_quality = {
+    type = "image_style",
+    width = 32,
+    height = 32,
+    top_padding = 18,
+    bottom_padding = 1,
+    right_padding = 19,
+    stretch_image_to_widget_size = true,
 }
 
 -- main_window --

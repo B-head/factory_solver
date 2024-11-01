@@ -3,6 +3,7 @@ local flib_format = require "__flib__/format"
 
 local fs_util = require "fs_util"
 local save = require "manage/save"
+local info = require "manage/info"
 
 local M = {}
 
@@ -77,6 +78,36 @@ end
 ---@return boolean
 function M.is_active_quality()
     return script.active_mods["quality"] ~= nil
+end
+
+---comment
+---@param data table
+---@return flib.GuiElemDef
+function M.create_decorated_sprite_button(data)
+    local typed_name = assert(data.typed_name) --[[@as TypedName]]
+    local is_hidden = data.is_hidden or false
+    local is_unresearched = data.is_unresearched or false
+    local children = {}
+
+    if typed_name.quality ~= "normal" then
+        local def = {
+            type = "sprite",
+            style = "factory_solver_slot_image_with_quality",
+            sprite = "quality/" .. typed_name.quality,
+        }
+        flib_table.insert(children, def)
+    end
+
+    return {
+        type = "sprite-button",
+        style = M.get_style(is_hidden, is_unresearched, typed_name.type),
+        sprite = info.get_sprite_path(typed_name),
+        elem_tooltip = info.typed_name_to_elem_id(typed_name),
+        number = data.number,
+        tags = data.tags,
+        handler = data.handler,
+        children = children
+    }
 end
 
 ---comment
