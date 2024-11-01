@@ -217,7 +217,7 @@ function M.resetup_force_data_metatable(force_data)
 end
 
 ---comment
----@param typed_name TypedName
+---@param typed_name TypedName?
 function M.typed_name_migration(typed_name)
     if not typed_name then
         return
@@ -346,7 +346,7 @@ function M.get_total_amounts(solution)
         local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine, line.machine_quality)
+        local crafting_speed = info.get_crafting_speed(machine, line.machine_typed_name.quality)
         local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
@@ -368,7 +368,8 @@ function M.get_total_amounts(solution)
         end
 
         for _, value in pairs(recipe.ingredients) do
-            local amount_per_second = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
+            local amount_per_second = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed,
+                effectivity.speed)
             amount_per_second = amount_per_second * effectivity.speed * quantity_of_machines_required
 
             if value.type == "item" then
@@ -384,7 +385,7 @@ function M.get_total_amounts(solution)
 
         if info.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
-            local power = info.raw_energy_to_power(machine, line.machine_quality, effectivity.consumption)
+            local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
             power = power * quantity_of_machines_required
             local fuel = info.typed_name_to_material(line.fuel_typed_name)
             local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
@@ -421,7 +422,7 @@ function M.get_total_power(solution)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
         if not info.is_use_fuel(machine) or info.is_generator(machine) then
-            local power = info.raw_energy_to_power(machine, line.machine_quality, effectivity.consumption)
+            local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
             power = power * quantity_of_machines_required
             total = total + power
         end
@@ -442,7 +443,7 @@ function M.get_total_pollution(solution)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_quality,
+        local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
             effectivity.consumption, effectivity.pollution)
         pollution = pollution * quantity_of_machines_required
 
@@ -609,7 +610,6 @@ function M.new_production_line(player_index, solution, recipe_typed_name, line_i
     local line = {
         recipe_typed_name = recipe_typed_name,
         machine_typed_name = machine_typed_name,
-        machine_quality = "normal",
         module_typed_names = {},
         affected_by_beacons = {},
         fuel_typed_name = fuel_typed_name,
@@ -637,7 +637,6 @@ function M.update_production_line(solution, line_index, data)
     local line = solution.production_lines[line_index]
     line.recipe_typed_name = data.recipe_typed_name
     line.machine_typed_name = data.machine_typed_name
-    line.machine_quality = data.machine_quality
     line.module_typed_names = data.module_typed_names
     line.affected_by_beacons = data.affected_by_beacons
     line.fuel_typed_name = data.fuel_typed_name

@@ -23,11 +23,10 @@ function handlers.on_make_machine_table(event)
         local is_hidden = info.is_hidden(machine)
         local is_unresearched = info.is_unresearched(machine, relation_to_recipes)
 
-        local def = {
-            type = "sprite-button",
-            style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-            sprite = info.get_sprite_path(typed_name),
-            elem_tooltip = info.typed_name_to_elem_id(typed_name),
+        local def = common.create_decorated_sprite_button {
+            typed_name = typed_name,
+            is_hidden = is_hidden,
+            is_unresearched = is_unresearched,
             tags = {
                 typed_name = typed_name,
             },
@@ -71,14 +70,14 @@ function handlers.on_make_quality_dropdown(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local dictionary = {}
-    local machine_quality = dialog.tags.machine_quality --[[@as string]]
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local qualities = fs_util.sort_prototypes(fs_util.to_list(prototypes.quality))
     for _, value in ipairs(qualities) do
         if not value.hidden then
             local localised_string = { "", "[quality=", value.name, "] ", value.localised_name }
             elem.add_item(localised_string)
             flib_table.insert(dictionary, value.name)
-            if machine_quality == value.name then
+            if machine_typed_name.quality == value.name then
                 elem.selected_index = #dictionary
             end
         end
@@ -97,7 +96,7 @@ function handlers.on_make_quality_state_changed(event)
     local dictionary = elem.tags.dictionary
 
     local dialog_tags = dialog.tags
-    dialog_tags.machine_quality = dictionary[elem.selected_index]
+    dialog_tags.machine_typed_name.quality = dictionary[elem.selected_index]
     dialog.tags = dialog_tags
 end
 
@@ -116,17 +115,12 @@ function handlers.on_make_machine_modules(event)
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
-    local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, string>]]
+    local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = info.typed_name_to_machine(machine_typed_name)
 
     elem.clear()
     for index = 1, machine.module_inventory_size do
-        local module_name = module_typed_names[tostring(index)]
-        if module_name and not info.get_module(module_name) then
-            module_name = "item-unknown"
-        end
-
         local def = {
             type = "choose-elem-button",
             elem_type = "item-with-quality",
@@ -142,7 +136,14 @@ function handlers.on_make_machine_modules(event)
             },
         }
         local _, added = fs_util.add_gui(elem, def)
-        added.elem_value = { name = module_name, quality = "normal" }
+        local typed_name = module_typed_names[tostring(index)]
+        if typed_name then
+            if info.get_module(typed_name.name) then
+                added.elem_value = { name = typed_name.name, quality = typed_name.quality }
+            else
+                added.elem_value = { name = "item-unknown", quality = typed_name.quality }
+            end
+        end
     end
 end
 
@@ -154,13 +155,20 @@ function handlers.on_module_changed(event)
 
     local slot_index = elem.tags.slot_index --[[@as string]]
     local beacon_index = elem.tags.beacon_index --[[@as integer?]]
+    local elem_value = elem.elem_value --[[@as { name: string, quality: string }]]
+    local new_typed_name = nil
+    if elem_value then
+        new_typed_name = info.create_typed_name("item", elem_value.name, elem_value.quality)
+    end
 
     if beacon_index then
         local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
-        affected_by_beacon.module_typed_names[slot_index] = elem.elem_value --[[@as string]]
+        local module_typed_names = affected_by_beacon.module_typed_names
+
+        module_typed_names[slot_index] = new_typed_name
     else
-        local module_typed_names = dialog_tags.module_typed_names --[[@as table<string, string>]]
-        module_typed_names[slot_index] = elem.elem_value --[[@as string]]
+        local module_typed_names = dialog_tags.module_typed_names --[[@as table<string, TypedName>]]
+        module_typed_names[slot_index] = new_typed_name
     end
 
     dialog.tags = dialog_tags
@@ -176,18 +184,13 @@ function handlers.on_make_beacons_table(event)
 
     elem.clear()
     for beacon_index, affected_by_beacon in ipairs(affected_by_beacons) do
-        local beacon_name = affected_by_beacon.beacon_typed_name
-        local beacon = info.get_beacon(beacon_name)
+        local beacon_typed_name = affected_by_beacon.beacon_typed_name
+        local beacon = beacon_typed_name and info.get_beacon(beacon_typed_name.name)
 
         do
-            if beacon_name and not beacon then
-                beacon_name = "entity-unknown"
-            end
-
             local def = {
                 type = "choose-elem-button",
-                elem_type = "entity",
-                entity = beacon_name,
+                elem_type = "entity-with-quality",
                 elem_filters = {
                     { filter = "type", type = "beacon" },
                 },
@@ -198,7 +201,14 @@ function handlers.on_make_beacons_table(event)
                     [defines.events.on_gui_elem_changed] = handlers.on_beacon_changed,
                 },
             }
-            fs_util.add_gui(elem, def)
+            local _, added = fs_util.add_gui(elem, def)
+            if beacon_typed_name then
+                if beacon then
+                    added.elem_value = { name = beacon_typed_name.name, quality = beacon_typed_name.quality }
+                else
+                    added.elem_value = { name = "entity-unknown", quality = beacon_typed_name.quality }
+                end
+            end
         end
 
         do
@@ -220,21 +230,19 @@ function handlers.on_make_beacons_table(event)
         end
 
         do
-            local children = {}
+            local def = {
+                type = "flow",
+                direction = "horizontal",
+            }
+            local _, flow = fs_util.add_gui(elem, def)
 
             if beacon then
                 local module_typed_names = affected_by_beacon.module_typed_names
 
                 for slot_index = 1, beacon.module_inventory_size do
-                    local module_name = module_names[tostring(slot_index)]
-                    if module_name and not info.get_module(module_name) then
-                        module_name = "item-unknown"
-                    end
-
                     local def = {
                         type = "choose-elem-button",
-                        elem_type = "item",
-                        item = module_typed_names[tostring(slot_index)],
+                        elem_type = "item-with-quality",
                         elem_filters = {
                             { filter = "type", type = "module" },
                         },
@@ -246,16 +254,17 @@ function handlers.on_make_beacons_table(event)
                             [defines.events.on_gui_elem_changed] = handlers.on_module_changed,
                         },
                     }
-                    flib_table.insert(children, def)
+                    local _, added = fs_util.add_gui(flow, def)
+                    local typed_name = module_typed_names[tostring(slot_index)]
+                    if typed_name then
+                        if info.get_module(typed_name.name) then
+                            added.elem_value = { name = typed_name.name, quality = typed_name.quality }
+                        else
+                            added.elem_value = { name = "item-unknown", quality = typed_name.quality }
+                        end
+                    end
                 end
             end
-
-            local def = {
-                type = "flow",
-                direction = "horizontal",
-                children = children,
-            }
-            fs_util.add_gui(elem, def)
         end
 
         do
@@ -302,9 +311,14 @@ function handlers.on_beacon_changed(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
     local dialog_tags = dialog.tags
 
+    local elem_value = elem.elem_value --[[@as { name: string, quality: string }]]
     local beacon_index = elem.tags.beacon_index --[[@as integer]]
     local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
-    affected_by_beacon.beacon_typed_name = elem.elem_value --[[@as string]]
+    if elem_value then
+        affected_by_beacon.beacon_typed_name = info.create_typed_name("machine", elem_value.name, elem_value.quality)
+    else
+        affected_by_beacon.beacon_typed_name = nil
+    end
 
     dialog.tags = dialog_tags
     fs_util.dispatch_to_subtree(dialog, "on_beacon_changed")
@@ -345,22 +359,21 @@ function handlers.on_make_total_effectivity(event)
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = info.typed_name_to_machine(machine_typed_name)
-    local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, string>]]
+    local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
     local total_modules = info.get_total_modules(machine, module_typed_names, affected_by_beacons)
 
     elem.clear()
-    for name, count in pairs(total_modules) do
-        local module_typed_name = info.create_typed_name("item", name)
+    for name, inner in pairs(total_modules) do
+        for quality, count in pairs(inner) do
+            local module_typed_name = info.create_typed_name("item", name, quality)
 
-        local def = {
-            type = "sprite-button",
-            style = common.get_style(false, false, module_typed_name.type),
-            sprite = info.get_sprite_path(module_typed_name),
-            elem_tooltip = info.typed_name_to_elem_id(module_typed_name),
-            number = count,
-        }
-        fs_util.add_gui(elem, def)
+            local def = common.create_decorated_sprite_button {
+                typed_name = module_typed_name,
+                number = count,
+            }
+            fs_util.add_gui(elem, def)
+        end
     end
 end
 
@@ -407,11 +420,10 @@ function handlers.on_make_fuel_table(event)
             local is_hidden = info.is_hidden(fuel)
             local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
 
-            local def = {
-                type = "sprite-button",
-                style = common.get_style(is_hidden, is_unresearched, typed_name.type),
-                sprite = info.get_sprite_path(typed_name),
-                elem_tooltip = info.typed_name_to_elem_id(typed_name),
+            local def = common.create_decorated_sprite_button {
+                typed_name = typed_name,
+                is_hidden = is_hidden,
+                is_unresearched = is_unresearched,
                 tags = {
                     typed_name = typed_name,
                 },

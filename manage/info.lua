@@ -441,20 +441,19 @@ end
 
 ---@type table<FilterType, ElemType>
 local type_dictionary = {
-    ["item"] = "item",
+    ["item"] = "item-with-quality",
     ["fluid"] = "fluid",
-    ["recipe"] = "recipe",
-    ["machine"] = "entity",
+    ["recipe"] = "recipe-with-quality",
+    ["machine"] = "entity-with-quality",
 }
 
 ---comment
 ---@param typed_name TypedName
----@param quality string?
 ---@return ElemID?
-function M.typed_name_to_elem_id(typed_name, quality)
+function M.typed_name_to_elem_id(typed_name)
     local elem_type = type_dictionary[typed_name.type]
     if elem_type and M.validate_typed_name(typed_name) then
-        return { type = elem_type, name = typed_name.name, quality = quality }
+        return { type = elem_type, name = typed_name.name, quality = typed_name.quality }
     else
         return nil
     end
@@ -769,9 +768,9 @@ function M.get_crafting_speed(machine, quality)
 end
 
 ---comment
----@param module_typed_names table<string, string>
+---@param module_typed_names table<string, TypedName>
 ---@param module_inventory_size integer
----@return table<string, string>
+---@return table<string, TypedName>
 function M.trim_modules(module_typed_names, module_inventory_size)
     local ret = {}
     for index = 1, module_inventory_size do
@@ -782,26 +781,40 @@ end
 
 ---comment
 ---@param machine LuaEntityPrototype | VirtualMachine
----@param module_typed_names table<string, string>
+---@param module_typed_names table<string, TypedName>
 ---@param affected_by_beacons AffectedByBeacon[]
----@return table<string, number>
+---@return table<string, table<string, number>>
 function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
     local module_counts = {}
 
+    ---@param typed_name TypedName
+    ---@param effectivity number
+    local function count(typed_name, effectivity)
+        local name = typed_name.name
+        local quality = typed_name.quality
+        if not module_counts[name] then
+            module_counts[name] = {}
+        end
+        local inner = module_counts[name]
+        local value = inner[quality] or 0
+        inner[quality] = value + effectivity
+    end
+
     module_typed_names = M.trim_modules(module_typed_names, machine.module_inventory_size)
-    for _, name in pairs(module_typed_names) do
-        module_counts[name] = (module_counts[name] or 0) + 1
+    for _, typed_name in pairs(module_typed_names) do
+        count(typed_name, 1)
     end
 
     for _, affected_by_beacon in ipairs(affected_by_beacons) do
-        local beacon = M.get_beacon(affected_by_beacon.beacon_typed_name)
+        local beacon_typed_name = affected_by_beacon.beacon_typed_name
+        local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
         if beacon then
             local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
             local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
                 beacon.module_inventory_size)
 
-            for _, name in pairs(beacon_module_names) do
-                module_counts[name] = (module_counts[name] or 0) + effectivity
+            for _, typed_name in pairs(beacon_module_names) do
+                count(typed_name, effectivity)
             end
         end
     end
@@ -810,7 +823,7 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
 end
 
 ---comment
----@param module_counts table<string, number>
+---@param module_counts table<string, table<string, number>>
 ---@return ModuleEffects
 function M.get_total_effectivity(module_counts)
     ---@type ModuleEffects
@@ -822,19 +835,43 @@ function M.get_total_effectivity(module_counts)
         quality = 1,
     }
 
-    for name, count in pairs(module_counts) do
-        local module = M.get_module(name)
-        if not module then
-            goto continue
+    ---@param effect number?
+    ---@param count number
+    ---@param quality_level integer
+    ---@param is_negative boolean
+    ---@return number
+    local function modify(effect, count, quality_level, is_negative)
+        effect = effect or 0
+        if is_negative then
+            if effect < 0 then
+                effect = effect * quality_level * 0.3
+            end
+        else
+            if effect > 0 then
+                effect = effect * quality_level * 0.3
+            end
         end
+        return effect * count
+    end
 
-        local effects = assert(module.module_effects)
-        ret.speed = ret.speed + (effects.speed or 0) * count
-        ret.consumption = ret.consumption + (effects.consumption or 0) * count
-        ret.productivity = ret.productivity + (effects.productivity or 0) * count
-        ret.pollution = ret.pollution + (effects.pollution or 0) * count
-        ret.quality = ret.quality + (effects.quality or 0) * count
-        ::continue::
+    for name, inner in pairs(module_counts) do
+        for quality, count in pairs(inner) do
+            local module = M.get_module(name)
+            if not module then
+                goto continue
+            end
+
+            local effects = assert(module.module_effects)
+            local quality_prototype = prototypes.quality[quality]
+            local quality_level = quality_prototype and quality_prototype.level or 0
+
+            ret.speed = ret.speed + modify(effects.speed, count, quality_level, false)
+            ret.consumption = ret.consumption + modify(effects.consumption, count, quality_level, true)
+            ret.productivity = ret.productivity + modify(effects.productivity, count, quality_level, false)
+            ret.pollution = ret.pollution + modify(effects.pollution, count, quality_level, true)
+            ret.quality = ret.quality + modify(effects.quality, count, quality_level, false)
+            ::continue::
+        end
     end
 
     ret.speed = math.max(ret.speed, 0.2)

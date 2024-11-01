@@ -49,7 +49,7 @@ function handlers.make_production_line_table(event)
         local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine, line.machine_quality)
+        local crafting_speed = info.get_crafting_speed(machine, line.machine_typed_name.quality)
         local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
@@ -140,21 +140,24 @@ function handlers.make_production_line_table(event)
             end
 
             local total_modules = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-            for name, count in pairs(total_modules) do
-                local module_typed_name = info.create_typed_name("item", name)
 
-                local def = {
-                    type = "sprite-button",
-                    style = common.get_style(false, false, module_typed_name.type),
-                    sprite = info.get_sprite_path(module_typed_name),
-                    elem_tooltip = info.typed_name_to_elem_id(module_typed_name),
-                    number = count,
-                    tags = recipe_tags,
-                    handler = {
-                        [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
-                    },
-                }
-                flib_table.insert(buttons, def)
+            for name, inner in pairs(total_modules) do
+                for quality, count in pairs(inner) do
+                    local module_typed_name = info.create_typed_name("item", name, quality)
+
+                    local def = {
+                        type = "sprite-button",
+                        style = common.get_style(false, false, module_typed_name.type),
+                        sprite = info.get_sprite_path(module_typed_name),
+                        elem_tooltip = info.typed_name_to_elem_id(module_typed_name),
+                        number = count,
+                        tags = recipe_tags,
+                        handler = {
+                            [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
+                        },
+                    }
+                    flib_table.insert(buttons, def)
+                end
             end
 
             local def = {
@@ -304,7 +307,7 @@ function handlers.make_production_line_table(event)
         end
 
         do
-            local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_quality,
+            local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
                 effectivity.consumption, effectivity.pollution)
 
             if info.is_use_fuel(machine) then

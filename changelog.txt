@@ -2,7 +2,9 @@
 Version: 0.2.0
 Date: ????
   Features:
-    - Add support for quality mechanisms for actual machines.
+    - Add support for quality mechanisms for actual machines, modules and beacon.
+  Info:
+    - No virtual machine quality support yet.
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.9
 Date: ????
