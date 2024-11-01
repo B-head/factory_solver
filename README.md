@@ -4,7 +4,7 @@ Calculate quantities of machine and ingredient required in a factory to achieve 
 
 - A recipe chain is configured to automatically calculate for each recipe.
 - Supports recipe chains including loops. (still incomplete)
-- Include the effects of modules and beacons in calculation.
+- Include the effects of modules, beacons and quality in calculation.
 - Calculate the total power used/generated and pollution emitted.
 - Generators and boilers etc. are treated as virtual recipes. (still incomplete)
 - Set limited machine and material constraints for calculations.

@@ -1,12 +1,16 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.2.0
+Version: 0.2.1
 Date: ????
+  Changes:
+---------------------------------------------------------------------------------------------------
+Version: 0.2.0
+Date: 2024-11-01
   Features:
-    - Add support for quality mechanisms for actual machines, modules and beacon.
+    - Add support for quality mechanisms for actual machines and modules.
   Bugfixes:
     - Fix basic products and final ingredients not showing unresearched.
   Info:
-    - No virtual machine quality support yet.
+    - Not yet supported for virtual machine quality.
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.8
 Date: 2024-10-31
