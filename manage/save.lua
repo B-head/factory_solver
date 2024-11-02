@@ -25,8 +25,8 @@ function M.init_player_data(player_index)
             hidden_craft_visible = __DebugAdapter ~= nil,
             time_scale = "minute",
             amount_unit = "time",
-            fuel_presets = M.init_fuel_presets(),
-            machine_presets = M.init_machine_presets(),
+            fuel_presets = M.create_fuel_presets(),
+            machine_presets = M.create_machine_presets(),
             opened_gui = {},
         }
     end
@@ -43,90 +43,11 @@ function M.reinit_player_data(player_index)
         if false then
             player_data.amount_unit = "time"
         end
-        player_data.fuel_presets = M.init_fuel_presets(player_data.fuel_presets)
-        player_data.machine_presets = M.init_machine_presets(player_data.machine_presets)
+        player_data.fuel_presets = M.create_fuel_presets(player_data.fuel_presets)
+        player_data.machine_presets = M.create_machine_presets(player_data.machine_presets)
     else
         M.init_player_data(player_index)
     end
-end
-
----comment
----@param fuel_categories { [string]: boolean }
----@return string
-function M.join_fuel_categories(fuel_categories)
-    local joined_fuel_category = ""
-    for name, _ in pairs(fuel_categories) do
-        if joined_fuel_category ~= "" then
-            joined_fuel_category = joined_fuel_category .. "|"
-        end
-        joined_fuel_category = joined_fuel_category .. name
-    end
-    return joined_fuel_category
-end
-
----comment
----@param origin table<string, TypedName>?
----@return table<string, TypedName>
-function M.init_fuel_presets(origin)
-    local ret = {}
-    if origin then
-        ret = flib_table.deep_copy(origin)
-    end
-
-    for category_name, _ in pairs(prototypes.fuel_category) do
-        M.typed_name_migration(ret[category_name])
-        if info.validate_typed_name(ret[category_name]) then
-            goto continue
-        end
-
-        local fuels = info.get_fuels_in_categories(category_name)
-        local first = fs_util.find(fuels, function(value)
-            return not info.is_hidden(value)
-        end)
-        if first then
-            ret[category_name] = info.craft_to_typed_name(fuels[first])
-        end
-
-        ::continue::
-    end
-
-    return ret
-end
-
----comment
----@param origin table<string, TypedName>?
----@return table<string, TypedName>
-function M.init_machine_presets(origin)
-    local ret = {}
-    if origin then
-        ret = flib_table.deep_copy(origin)
-    end
-
-    local function add(category_name)
-        M.typed_name_migration(ret[category_name])
-        if info.validate_typed_name(ret[category_name]) then
-            return
-        end
-
-        local machines = info.get_machines_in_category(category_name)
-        local pos = fs_util.find(machines, function(value)
-            return not info.is_hidden(value)
-        end)
-        if pos then
-            local first = machines[pos]
-            ret[category_name] = info.craft_to_typed_name(first)
-        end
-    end
-
-    for category_name, _ in pairs(prototypes.recipe_category) do
-        add(category_name)
-    end
-
-    for category_name, _ in pairs(storage.virtuals.crafting_categories) do
-        add(category_name)
-    end
-
-    return ret
 end
 
 ---comment
