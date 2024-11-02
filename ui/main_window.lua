@@ -1,11 +1,10 @@
 local fs_util = require "fs_util"
-
 local common = require "ui/common"
-local solution_selector = require "ui/solution_selector"
 local common_settings = require "ui/common_settings"
 local solution_editor = require "ui/solution_editor"
-local solution_settings = require "ui/solution_settings"
 local solution_results = require "ui/solution_results"
+local solution_selector = require "ui/solution_selector"
+local solution_settings = require "ui/solution_settings"
 
 local handlers = {}
 

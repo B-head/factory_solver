@@ -1,5 +1,6 @@
 local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
+local tn = require "manage/typed_name"
 
 local M = {}
 
@@ -323,10 +324,10 @@ function M.try_get_fixed_fuel(machine)
     ---@diagnostic disable-next-line: param-type-mismatch
     if machine.object_name then
         if machine.heat_energy_source_prototype then
-            return M.create_typed_name("virtual_material", "<heat>")
+            return tn.create_typed_name("virtual_material", "<heat>")
         elseif machine.fluid_energy_source_prototype then
             local fluid_name = machine.fluid_energy_source_prototype.fluid_box.filter.name
-            return M.create_typed_name("fluid", fluid_name)
+            return tn.create_typed_name("fluid", fluid_name)
         else
             return nil
         end

@@ -1,8 +1,7 @@
 local flib_table = require "__flib__/table"
 local flib_math = require "__flib__/math"
-
-local fs_util = require "fs_util"
-local info = require "manage/info"
+local acc = require "manage/accessor"
+local tn = require "manage/typed_name"
 
 local M = {}
 
@@ -142,7 +141,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         local amount = {
             type = value.type,
             name = value.name,
-            amount_per_second = info.raw_ingredient_to_amount(value, rocket_part.energy, rocket_parts_required, 1),
+            amount_per_second = acc.raw_ingredient_to_amount(value, rocket_part.energy, rocket_parts_required, 1),
         }
         flib_table.insert(ingredients, amount)
     end
@@ -177,14 +176,14 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         module_inventory_size = rocket_silo_prototype.module_inventory_size,
         crafting_speed = rocket_silo_prototype.get_crafting_speed("normal") / rocket_parts_required,
         -- crafting_interval_delay = 2420, -- TODO calculate
-        -- interval_power_per_second = rocket_silo_prototype.active_energy_usage * info.ticks_per_second,
+        -- interval_power_per_second = rocket_silo_prototype.active_energy_usage * acc.ticks_per_second,
         energy_source = {
-            type = info.get_energy_source_type(rocket_silo_prototype),
+            type = acc.get_energy_source_type(rocket_silo_prototype),
             is_generator = false,
-            power_per_second = info.raw_energy_to_power(rocket_silo_prototype, "normal", 1),
-            pollution_per_second = info.raw_emission_to_pollution(rocket_silo_prototype, "pollution", "normal", 1, 1),
-            fuel_categories = info.try_get_fuel_categories(rocket_silo_prototype),
-            fixed_fuel_typed_name = info.try_get_fixed_fuel(rocket_silo_prototype)
+            power_per_second = acc.raw_energy_to_power(rocket_silo_prototype, "normal", 1),
+            pollution_per_second = acc.raw_emission_to_pollution(rocket_silo_prototype, "pollution", "normal", 1, 1),
+            fuel_categories = acc.try_get_fuel_categories(rocket_silo_prototype),
+            fixed_fuel_typed_name = acc.try_get_fixed_fuel(rocket_silo_prototype)
         },
         crafting_categories = {
             [crafting_category] = true,
@@ -221,14 +220,14 @@ function M.create_boiler_virtual(boiler_prototype)
                 {
                     type = "fluid",
                     name = output_fluidbox.filter.name,
-                    amount_per_second = info.second_per_tick / (need_tick * output_fluid.heat_capacity),
+                    amount_per_second = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
                 }
             },
             ingredients = {
                 {
                     type = "fluid",
                     name = input_fluidbox.filter.name,
-                    amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
+                    amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
             order = boiler_prototype.order,
@@ -246,12 +245,12 @@ function M.create_boiler_virtual(boiler_prototype)
             module_inventory_size = 0,
             crafting_speed = 1,
             energy_source = {
-                type = info.get_energy_source_type(boiler_prototype),
+                type = acc.get_energy_source_type(boiler_prototype),
                 is_generator = false,
-                power_per_second = info.raw_energy_to_power(boiler_prototype, "normal", 1),
-                pollution_per_second = info.raw_emission_to_pollution(boiler_prototype, "pollution", "normal", 1, 1),
-                fuel_categories = info.try_get_fuel_categories(boiler_prototype),
-                fixed_fuel_typed_name = info.try_get_fixed_fuel(boiler_prototype)
+                power_per_second = acc.raw_energy_to_power(boiler_prototype, "normal", 1),
+                pollution_per_second = acc.raw_emission_to_pollution(boiler_prototype, "pollution", "normal", 1, 1),
+                fuel_categories = acc.try_get_fuel_categories(boiler_prototype),
+                fixed_fuel_typed_name = acc.try_get_fixed_fuel(boiler_prototype)
             },
             crafting_categories = {
                 [crafting_category] = true,
@@ -278,14 +277,14 @@ function M.create_boiler_virtual(boiler_prototype)
                 {
                     type = "fluid",
                     name = input_fluidbox.filter.name,
-                    amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
+                    amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
             ingredients = {
                 {
                     type = "fluid",
                     name = input_fluidbox.filter.name,
-                    amount_per_second = info.second_per_tick / (need_tick * input_fluid.heat_capacity),
+                    amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
             order = boiler_prototype.order,
@@ -303,12 +302,12 @@ function M.create_boiler_virtual(boiler_prototype)
             module_inventory_size = 0,
             crafting_speed = 1,
             energy_source = {
-                type = info.get_energy_source_type(boiler_prototype),
+                type = acc.get_energy_source_type(boiler_prototype),
                 is_generator = false,
-                power_per_second = info.raw_energy_to_power(boiler_prototype, "normal", 1),
-                pollution_per_second = info.raw_emission_to_pollution(boiler_prototype, "pollution", "normal", 1, 1),
-                fuel_categories = info.try_get_fuel_categories(boiler_prototype),
-                fixed_fuel_typed_name = info.try_get_fixed_fuel(boiler_prototype)
+                power_per_second = acc.raw_energy_to_power(boiler_prototype, "normal", 1),
+                pollution_per_second = acc.raw_emission_to_pollution(boiler_prototype, "pollution", "normal", 1, 1),
+                fuel_categories = acc.try_get_fuel_categories(boiler_prototype),
+                fixed_fuel_typed_name = acc.try_get_fixed_fuel(boiler_prototype)
             },
             crafting_categories = {
                 [crafting_category] = true,
@@ -369,9 +368,9 @@ function M.create_generator_virtual(generator_prototype)
         energy_source = {
             type = "fluid",
             is_generator = true,
-            power_per_second = -max_power_per_tick * info.second_per_tick,
+            power_per_second = -max_power_per_tick * acc.second_per_tick,
             pollution_per_second = 0,
-            fixed_fuel_typed_name = info.create_typed_name("fluid", input_fluidbox.filter.name),
+            fixed_fuel_typed_name = tn.create_typed_name("fluid", input_fluidbox.filter.name),
             alternative_fuel_value = alternative_fuel_value,
         },
         crafting_categories = {
@@ -415,7 +414,7 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
         energy_source = {
             type = "burner",
             is_generator = true,
-            power_per_second = -max_power * info.second_per_tick,
+            power_per_second = -max_power * acc.second_per_tick,
             pollution_per_second = max_power *
                 burner_generator_prototype.burner_prototype.emissions_per_joule["pollution"],
             fuel_categories = burner_generator_prototype.burner_prototype.fuel_categories,
@@ -445,7 +444,7 @@ function M.create_reactor_virtual(reactor_prototype)
             {
                 type = "virtual_material",
                 name = "<heat>",
-                amount_per_second = reactor_prototype.get_max_energy_usage() * info.second_per_tick,
+                amount_per_second = reactor_prototype.get_max_energy_usage() * acc.second_per_tick,
             },
         },
         ingredients = {},
@@ -464,12 +463,12 @@ function M.create_reactor_virtual(reactor_prototype)
         module_inventory_size = 0,
         crafting_speed = 1,
         energy_source = {
-            type = info.get_energy_source_type(reactor_prototype),
+            type = acc.get_energy_source_type(reactor_prototype),
             is_generator = false,
-            power_per_second = info.raw_energy_to_power(reactor_prototype, "normal", 1),
-            pollution_per_second = info.raw_emission_to_pollution(reactor_prototype, "pollution", "normal", 1, 1),
-            fuel_categories = info.try_get_fuel_categories(reactor_prototype),
-            fixed_fuel_typed_name = info.try_get_fixed_fuel(reactor_prototype)
+            power_per_second = acc.raw_energy_to_power(reactor_prototype, "normal", 1),
+            pollution_per_second = acc.raw_emission_to_pollution(reactor_prototype, "pollution", "normal", 1, 1),
+            fuel_categories = acc.try_get_fuel_categories(reactor_prototype),
+            fixed_fuel_typed_name = acc.try_get_fixed_fuel(reactor_prototype)
         },
         crafting_categories = {
             [crafting_category] = true,
@@ -495,7 +494,7 @@ function M.create_solar_panel_virtual(solar_panel_prototype)
         energy_source = {
             type = "electric",
             is_generator = true,
-            power_per_second = -solar_panel_prototype.get_max_energy_production() * info.second_per_tick *
+            power_per_second = -solar_panel_prototype.get_max_energy_production() * acc.second_per_tick *
                 daylight_coefficient,
             pollution_per_second = 0,
         },
@@ -531,7 +530,7 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
             {
                 type = "fluid",
                 name = fluid_name,
-                amount_per_second = offshore_pump_prototype.pumping_speed * info.second_per_tick,
+                amount_per_second = offshore_pump_prototype.pumping_speed * acc.second_per_tick,
             }
         },
         ingredients = {},
@@ -552,7 +551,7 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
         energy_source = {
             type = "void",
             is_generator = false,
-            power_per_second = info.raw_energy_to_power(offshore_pump_prototype, "normal", 1),
+            power_per_second = acc.raw_energy_to_power(offshore_pump_prototype, "normal", 1),
             pollution_per_second = 0,
         },
         crafting_categories = {
@@ -573,7 +572,7 @@ function M.create_resource_virtual(resource_prototype)
         local data = {
             type = value.type,
             name = value.name,
-            amount_per_second = info.raw_product_to_amount(value, mineable.mining_time, 1, 1, 1),
+            amount_per_second = acc.raw_product_to_amount(value, mineable.mining_time, 1, 1, 1),
         }
         flib_table.insert(products, data)
     end
@@ -623,12 +622,12 @@ function M.create_mining_drill_virtual(mining_drill_prototype)
         module_inventory_size = mining_drill_prototype.module_inventory_size,
         crafting_speed = mining_drill_prototype.mining_speed,
         energy_source = {
-            type = info.get_energy_source_type(mining_drill_prototype),
+            type = acc.get_energy_source_type(mining_drill_prototype),
             is_generator = false,
-            power_per_second = info.raw_energy_to_power(mining_drill_prototype, "normal", 1),
-            pollution_per_second = info.raw_emission_to_pollution(mining_drill_prototype, "pollution", "normal", 1, 1),
-            fuel_categories = info.try_get_fuel_categories(mining_drill_prototype),
-            fixed_fuel_typed_name = info.try_get_fixed_fuel(mining_drill_prototype)
+            power_per_second = acc.raw_energy_to_power(mining_drill_prototype, "normal", 1),
+            pollution_per_second = acc.raw_emission_to_pollution(mining_drill_prototype, "pollution", "normal", 1, 1),
+            fuel_categories = acc.try_get_fuel_categories(mining_drill_prototype),
+            fixed_fuel_typed_name = acc.try_get_fixed_fuel(mining_drill_prototype)
         },
         crafting_categories = crafting_categories,
     }

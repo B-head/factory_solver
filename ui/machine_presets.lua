@@ -1,9 +1,9 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
-local common = require "ui/common"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
+local tn = require "manage/typed_name"
+local common = require "ui/common"
 
 local handlers = {}
 
@@ -24,7 +24,7 @@ function handlers.on_make_fuel_presets(event)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     for category_name, _ in pairs(prototypes.fuel_category) do
-        local fuels = info.get_fuels_in_categories { [category_name] = true }
+        local fuels = acc.get_fuels_in_categories { [category_name] = true }
         if #fuels <= 1 then
             goto continue
         end
@@ -40,9 +40,9 @@ function handlers.on_make_fuel_presets(event)
         do
             local def_buttons = {}
             for _, value in pairs(fuels) do
-                local typed_name = info.craft_to_typed_name(value)
-                local is_hidden = info.is_hidden(value)
-                local is_unresearched = info.is_unresearched(value, relation_to_recipes)
+                local typed_name = tn.craft_to_typed_name(value)
+                local is_hidden = acc.is_hidden(value)
+                local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
 
                 local def = common.create_decorated_sprite_button{
                     typed_name = typed_name,
@@ -85,7 +85,7 @@ function handlers.on_make_machine_presets(event)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     local function add(category_name)
-        local machines = info.get_machines_in_category(category_name)
+        local machines = acc.get_machines_in_category(category_name)
         if #machines <= 1 then
             return
         end
@@ -101,9 +101,9 @@ function handlers.on_make_machine_presets(event)
         do
             local def_buttons = {}
             for _, machine in pairs(machines) do
-                local typed_name = info.craft_to_typed_name(machine)
-                local is_hidden = info.is_hidden(machine)
-                local is_unresearched = info.is_unresearched(machine, relation_to_recipes)
+                local typed_name = tn.craft_to_typed_name(machine)
+                local is_hidden = acc.is_hidden(machine)
+                local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
                 local def = common.create_decorated_sprite_button{
                     typed_name = typed_name,
@@ -180,7 +180,7 @@ function handlers.on_fuel_preset_change_toggle(event)
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local fuel_presets = dialog.tags.fuel_presets
 
-    elem.toggled = info.equals_typed_name(fuel_presets[elem.tags.category_name], typed_name)
+    elem.toggled = tn.equals_typed_name(fuel_presets[elem.tags.category_name], typed_name)
 end
 
 ---@param event EventDataTrait
@@ -190,7 +190,7 @@ function handlers.on_machine_preset_change_toggle(event)
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local machine_presets = dialog.tags.machine_presets
 
-    elem.toggled = info.equals_typed_name(machine_presets[elem.tags.category_name], typed_name)
+    elem.toggled = tn.equals_typed_name(machine_presets[elem.tags.category_name], typed_name)
 end
 
 ---@param event EventData.on_gui_click

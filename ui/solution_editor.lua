@@ -1,12 +1,12 @@
 local flib_table = require "__flib__/table"
 local flib_format = require "__flib__/format"
-
 local fs_util = require "fs_util"
-local common = require "ui/common"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
-local production_line_adder = require "ui/production_line_adder"
+local tn = require "manage/typed_name"
+local common = require "ui/common"
 local machine_setup = require "ui/machine_setup"
+local production_line_adder = require "ui/production_line_adder"
 
 local headers = {
     "",
@@ -46,12 +46,12 @@ function handlers.make_production_line_table(event)
     end
 
     for line_index, line in ipairs(solution.production_lines) do
-        local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
-        local machine = info.typed_name_to_machine(line.machine_typed_name)
+        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+        local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine, line.machine_typed_name.quality)
-        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = info.get_total_effectivity(module_counts)
+        local crafting_speed = acc.get_crafting_speed(machine, line.machine_typed_name.quality)
+        local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+        local effectivity = save.get_total_effectivity(module_counts)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
         do
@@ -88,8 +88,8 @@ function handlers.make_production_line_table(event)
 
         do
             local typed_name = line.recipe_typed_name
-            local is_hidden = info.is_hidden(recipe)
-            local is_unresearched = info.is_unresearched(recipe, relation_to_recipes)
+            local is_hidden = acc.is_hidden(recipe)
+            local is_unresearched = acc.is_unresearched(recipe, relation_to_recipes)
 
             local def = common.create_decorated_sprite_button{
                 typed_name = typed_name,
@@ -121,8 +121,8 @@ function handlers.make_production_line_table(event)
         do
             local buttons = {}
             local machine_typed_name = line.machine_typed_name
-            local is_hidden = info.is_hidden(machine)
-            local is_unresearched = info.is_unresearched(machine, relation_to_recipes)
+            local is_hidden = acc.is_hidden(machine)
+            local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
             do
                 local def = common.create_decorated_sprite_button{
@@ -137,11 +137,11 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(buttons, def)
             end
 
-            local total_modules = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+            local total_modules = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
 
             for name, inner in pairs(total_modules) do
                 for quality, count in pairs(inner) do
-                    local module_typed_name = info.create_typed_name("item", name, quality)
+                    local module_typed_name = tn.create_typed_name("item", name, quality)
 
                     local def = common.create_decorated_sprite_button{
                         typed_name = module_typed_name,
@@ -165,11 +165,11 @@ function handlers.make_production_line_table(event)
         do
             local buttons = {}
             for _, value in pairs(recipe.products) do
-                local typed_name = info.create_typed_name(value.type, value.name)
-                local craft = info.typed_name_to_material(typed_name)
-                local is_hidden = info.is_hidden(craft)
-                local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
-                local raw_amount = info.raw_product_to_amount(value, craft_energy, crafting_speed,
+                local typed_name = tn.create_typed_name(value.type, value.name)
+                local craft = tn.typed_name_to_material(typed_name)
+                local is_hidden = acc.is_hidden(craft)
+                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+                local raw_amount = acc.raw_product_to_amount(value, craft_energy, crafting_speed,
                     effectivity.speed, effectivity.productivity)
 
                 local def = common.create_decorated_sprite_button{
@@ -203,11 +203,11 @@ function handlers.make_production_line_table(event)
         do
             local buttons = {}
             for _, value in pairs(recipe.ingredients) do
-                local typed_name = info.create_typed_name(value.type, value.name)
-                local craft = info.typed_name_to_material(typed_name)
-                local is_hidden = info.is_hidden(craft)
-                local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
-                local raw_amount = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
+                local typed_name = tn.create_typed_name(value.type, value.name)
+                local craft = tn.typed_name_to_material(typed_name)
+                local is_hidden = acc.is_hidden(craft)
+                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+                local raw_amount = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
 
                 local def = common.create_decorated_sprite_button{
                     typed_name = typed_name,
@@ -240,9 +240,9 @@ function handlers.make_production_line_table(event)
         do
             local children = {}
 
-            local power = info.raw_energy_to_power(machine, "normal", effectivity.consumption)
+            local power = acc.raw_energy_to_power(machine, "normal", effectivity.consumption)
 
-            if not info.is_use_fuel(machine) or info.is_generator(machine) then
+            if not acc.is_use_fuel(machine) or acc.is_generator(machine) then
                 local def = {
                     type = "label",
                     tags = {
@@ -258,14 +258,14 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(children, def)
             end
 
-            if info.is_use_fuel(machine) then
+            if acc.is_use_fuel(machine) then
                 local fuel_typed_name = assert(line.fuel_typed_name)
-                local fuel = info.typed_name_to_material(fuel_typed_name)
-                local is_hidden = info.is_hidden(fuel)
-                local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
-                local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
+                local fuel = tn.typed_name_to_material(fuel_typed_name)
+                local is_hidden = acc.is_hidden(fuel)
+                local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)
+                local amount_per_second = acc.get_fuel_amount_per_second(power, fuel, machine)
 
-                if info.is_generator(machine) then
+                if acc.is_generator(machine) then
                     amount_per_second = -amount_per_second
                 end
 
@@ -299,12 +299,12 @@ function handlers.make_production_line_table(event)
         end
 
         do
-            local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
+            local pollution = acc.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
                 effectivity.consumption, effectivity.pollution)
 
-            if info.is_use_fuel(machine) then
-                local fuel = info.typed_name_to_material(line.fuel_typed_name)
-                pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
+            if acc.is_use_fuel(machine) then
+                local fuel = tn.typed_name_to_material(line.fuel_typed_name)
+                pollution = pollution * acc.get_fuel_emissions_multiplier(fuel)
             end
 
             local def = {
@@ -361,8 +361,8 @@ function handlers.update_amount(event)
 
     local result_key = tags.result_key --[[@as string]]
     local raw_amount = tags.raw_amount --[[@as number]]
-    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key) + info.tolerance
-    elem.number = info.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
+    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key) + acc.tolerance
+    elem.number = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
 end
 
 ---@param event EventDataTrait
@@ -375,7 +375,7 @@ function handlers.update_power(event)
     local result_key = tags.result_key --[[@as string]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key)
-    local amount = info.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
+    local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = common.format_power(amount)
 end
 
@@ -389,7 +389,7 @@ function handlers.update_pollution(event)
     local result_key = tags.result_key --[[@as string]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key)
-    local amount = info.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
+    local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = flib_format.number(amount, false, 5)
 end
 

@@ -1,9 +1,9 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
-local common = require "ui/common"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
+local tn = require "manage/typed_name"
+local common = require "ui/common"
 
 local handlers = {}
 
@@ -91,9 +91,9 @@ function handlers.on_make_choose_table(event)
             local subgroup_recipes = subgrouped[subgroup.name] or {}
             local sorted = fs_util.sort_prototypes(fs_util.to_list(subgroup_recipes))
             for _, recipe in ipairs(sorted) do
-                local typed_name = info.craft_to_typed_name(recipe)
-                local is_hidden = info.is_hidden(recipe)
-                local is_unresearched = info.is_unresearched(recipe, relation_to_recipes)
+                local typed_name = tn.craft_to_typed_name(recipe)
+                local is_hidden = acc.is_hidden(recipe)
+                local is_unresearched = acc.is_unresearched(recipe, relation_to_recipes)
                 if not common.craft_visible(is_hidden, is_unresearched, player_data) then
                     goto inner_continue
                 end

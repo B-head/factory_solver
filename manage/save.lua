@@ -1,8 +1,9 @@
 local flib_table = require "__flib__/table"
 local flib_math = require "__flib__/math"
-
 local fs_util = require "fs_util"
-local info = require "manage/info"
+local acc = require "manage/accessor"
+local info = require "manage/information"
+local tn = require "manage/typed_name"
 local virtual = require "manage/virtual"
 local problem_generator = require "solver/problem_generator"
 
@@ -25,8 +26,8 @@ function M.init_player_data(player_index)
             hidden_craft_visible = __DebugAdapter ~= nil,
             time_scale = "minute",
             amount_unit = "time",
-            fuel_presets = M.create_fuel_presets(),
-            machine_presets = M.create_machine_presets(),
+            fuel_presets = info.create_fuel_presets(),
+            machine_presets = info.create_machine_presets(),
             opened_gui = {},
         }
     end
@@ -37,14 +38,14 @@ end
 function M.reinit_player_data(player_index)
     local player_data = storage.players[player_index]
     if player_data then
-        if not info.scale_per_second[player_data.time_scale] then
+        if not acc.scale_per_second[player_data.time_scale] then
             player_data.time_scale = "minute"
         end
         if false then
             player_data.amount_unit = "time"
         end
-        player_data.fuel_presets = M.create_fuel_presets(player_data.fuel_presets)
-        player_data.machine_presets = M.create_machine_presets(player_data.machine_presets)
+        player_data.fuel_presets = info.create_fuel_presets(player_data.fuel_presets)
+        player_data.machine_presets = info.create_machine_presets(player_data.machine_presets)
     else
         M.init_player_data(player_index)
     end
@@ -83,7 +84,7 @@ function M.reinit_force_data(force_index)
                 if line.module_names then
                     local module_typed_names = {}
                     for _, name in pairs(line.module_names) do
-                        local typed_name = info.create_typed_name("item", name)
+                        local typed_name = tn.create_typed_name("item", name)
                         flib_table.insert(module_typed_names, typed_name)
                     end
                     line.module_typed_names = module_typed_names
@@ -96,7 +97,7 @@ function M.reinit_force_data(force_index)
 
                 for _, affected in pairs(line.affected_by_beacons) do
                     if affected.beacon_name then
-                        affected.beacon_typed_name = info.create_typed_name("machine", affected.beacon_name)
+                        affected.beacon_typed_name = tn.create_typed_name("machine", affected.beacon_name)
                         affected.beacon_name = nil
                     else
                         M.typed_name_migration(affected.beacon_typed_name)
@@ -105,7 +106,7 @@ function M.reinit_force_data(force_index)
                     if affected.module_names then
                         local module_typed_names = {}
                         for _, name in pairs(affected.module_names) do
-                            local typed_name = info.create_typed_name("item", name)
+                            local typed_name = tn.create_typed_name("item", name)
                             flib_table.insert(module_typed_names, typed_name)
                         end
                         affected.module_typed_names = module_typed_names
@@ -196,14 +197,14 @@ end
 function M.get_fuel_preset(player_index, machine_typed_name)
     local player_data = storage.players[player_index]
 
-    local machine = info.typed_name_to_machine(machine_typed_name)
+    local machine = tn.typed_name_to_machine(machine_typed_name)
 
-    local fixed_fuel = info.try_get_fixed_fuel(machine)
+    local fixed_fuel = acc.try_get_fixed_fuel(machine)
     if fixed_fuel then
         return fixed_fuel
     end
 
-    local fuel_categories = info.try_get_fuel_categories(machine)
+    local fuel_categories = acc.try_get_fuel_categories(machine)
     if fuel_categories then
         local joined_fuel_category = M.join_fuel_categories(fuel_categories)
         return assert(player_data.fuel_presets[joined_fuel_category])
@@ -236,16 +237,16 @@ function M.get_total_amounts(solution)
     local item_totals, fluid_totals, virtual_totals = {}, {}, {}
 
     for _, line in ipairs(solution.production_lines) do
-        local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
-        local machine = info.typed_name_to_machine(line.machine_typed_name)
+        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+        local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine, line.machine_typed_name.quality)
-        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = info.get_total_effectivity(module_counts)
+        local crafting_speed = acc.get_crafting_speed(machine, line.machine_typed_name.quality)
+        local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+        local effectivity = M.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
         for _, value in pairs(recipe.products) do
-            local amount_per_second = info.raw_product_to_amount(value, craft_energy, crafting_speed,
+            local amount_per_second = acc.raw_product_to_amount(value, craft_energy, crafting_speed,
                 effectivity.speed, effectivity.productivity)
             amount_per_second = amount_per_second * quantity_of_machines_required
 
@@ -261,7 +262,7 @@ function M.get_total_amounts(solution)
         end
 
         for _, value in pairs(recipe.ingredients) do
-            local amount_per_second = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed,
+            local amount_per_second = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed,
                 effectivity.speed)
             amount_per_second = amount_per_second * effectivity.speed * quantity_of_machines_required
 
@@ -276,14 +277,14 @@ function M.get_total_amounts(solution)
             end
         end
 
-        if info.is_use_fuel(machine) then
+        if acc.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
-            local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
+            local power = acc.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
             power = power * quantity_of_machines_required
-            local fuel = info.typed_name_to_material(line.fuel_typed_name)
-            local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
+            local fuel = tn.typed_name_to_material(line.fuel_typed_name)
+            local amount_per_second = acc.get_fuel_amount_per_second(power, fuel, machine)
 
-            if info.is_generator(machine) then
+            if acc.is_generator(machine) then
                 amount_per_second = -amount_per_second
             end
 
@@ -309,13 +310,13 @@ function M.get_total_power(solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local machine = info.typed_name_to_machine(line.machine_typed_name)
-        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = info.get_total_effectivity(module_counts)
+        local machine = tn.typed_name_to_machine(line.machine_typed_name)
+        local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+        local effectivity = M.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        if not info.is_use_fuel(machine) or info.is_generator(machine) then
-            local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
+        if not acc.is_use_fuel(machine) or acc.is_generator(machine) then
+            local power = acc.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
             power = power * quantity_of_machines_required
             total = total + power
         end
@@ -331,18 +332,18 @@ function M.get_total_pollution(solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local machine = info.typed_name_to_machine(line.machine_typed_name)
-        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = info.get_total_effectivity(module_counts)
+        local machine = tn.typed_name_to_machine(line.machine_typed_name)
+        local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+        local effectivity = M.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
+        local pollution = acc.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
             effectivity.consumption, effectivity.pollution)
         pollution = pollution * quantity_of_machines_required
 
-        if info.is_use_fuel(machine) then
-            local fuel = info.typed_name_to_material(line.fuel_typed_name)
-            pollution = pollution * info.get_fuel_emissions_multiplier(fuel)
+        if acc.is_use_fuel(machine) then
+            local fuel = tn.typed_name_to_material(line.fuel_typed_name)
+            pollution = pollution * acc.get_fuel_emissions_multiplier(fuel)
         end
 
         total = total + pollution
@@ -399,7 +400,7 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
 
     for _, affected_by_beacon in ipairs(affected_by_beacons) do
         local beacon_typed_name = affected_by_beacon.beacon_typed_name
-        local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
+        local beacon = beacon_typed_name and tn.get_beacon(beacon_typed_name.name)
         if beacon then
             local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
             local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
@@ -448,7 +449,7 @@ function M.get_total_effectivity(module_counts)
 
     for name, inner in pairs(module_counts) do
         for quality, count in pairs(inner) do
-            local module = M.get_module(name)
+            local module = tn.get_module(name)
             if not module then
                 goto continue
             end
@@ -543,7 +544,7 @@ function M.new_constraint(solution, typed_name)
     local constraints = solution.constraints
 
     local pos = fs_util.find(constraints, function(value)
-        return info.equals_typed_name(value, typed_name)
+        return tn.equals_typed_name(value, typed_name)
     end)
     if pos then
         return

@@ -1,5 +1,4 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
 local save = require "manage/save"
 local common = require "ui/common"

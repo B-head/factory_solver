@@ -1,9 +1,9 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
-local common = require "ui/common"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
+local tn = require "manage/typed_name"
+local common = require "ui/common"
 
 local handlers = {}
 
@@ -14,14 +14,14 @@ function handlers.on_make_machine_table(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
-    local recipe = info.typed_name_to_recipe(recipe_typed_name)
-    local machines = info.get_machines_in_category(recipe.category)
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    local machines = acc.get_machines_in_category(recipe.category)
 
     elem.clear()
     for _, machine in pairs(machines) do
-        local typed_name = info.craft_to_typed_name(machine)
-        local is_hidden = info.is_hidden(machine)
-        local is_unresearched = info.is_unresearched(machine, relation_to_recipes)
+        local typed_name = tn.craft_to_typed_name(machine)
+        local is_hidden = acc.is_hidden(machine)
+        local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
         local def = common.create_decorated_sprite_button{
             typed_name = typed_name,
@@ -61,7 +61,7 @@ function handlers.on_machine_change_toggle(event)
 
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    elem.toggled = info.equals_typed_name(machine_typed_name, typed_name)
+    elem.toggled = tn.equals_typed_name(machine_typed_name, typed_name)
 end
 
 ---@param event EventDataTrait
@@ -106,7 +106,7 @@ function handlers.on_modules_visible(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_machine(machine_typed_name)
+    local machine = tn.typed_name_to_machine(machine_typed_name)
     elem.visible = 0 < machine.module_inventory_size
 end
 
@@ -117,7 +117,7 @@ function handlers.on_make_machine_modules(event)
 
     local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_machine(machine_typed_name)
+    local machine = tn.typed_name_to_machine(machine_typed_name)
 
     elem.clear()
     for index = 1, machine.module_inventory_size do
@@ -138,7 +138,7 @@ function handlers.on_make_machine_modules(event)
         local _, added = fs_util.add_gui(elem, def)
         local typed_name = module_typed_names[tostring(index)]
         if typed_name then
-            if info.get_module(typed_name.name) then
+            if tn.get_module(typed_name.name) then
                 added.elem_value = { name = typed_name.name, quality = typed_name.quality }
             else
                 added.elem_value = { name = "item-unknown", quality = typed_name.quality }
@@ -158,7 +158,7 @@ function handlers.on_module_changed(event)
     local elem_value = elem.elem_value --[[@as { name: string, quality: string }]]
     local new_typed_name = nil
     if elem_value then
-        new_typed_name = info.create_typed_name("item", elem_value.name, elem_value.quality)
+        new_typed_name = tn.create_typed_name("item", elem_value.name, elem_value.quality)
     end
 
     if beacon_index then
@@ -185,7 +185,7 @@ function handlers.on_make_beacons_table(event)
     elem.clear()
     for beacon_index, affected_by_beacon in ipairs(affected_by_beacons) do
         local beacon_typed_name = affected_by_beacon.beacon_typed_name
-        local beacon = beacon_typed_name and info.get_beacon(beacon_typed_name.name)
+        local beacon = beacon_typed_name and tn.get_beacon(beacon_typed_name.name)
 
         do
             local def = {
@@ -257,7 +257,7 @@ function handlers.on_make_beacons_table(event)
                     local _, added = fs_util.add_gui(flow, def)
                     local typed_name = module_typed_names[tostring(slot_index)]
                     if typed_name then
-                        if info.get_module(typed_name.name) then
+                        if tn.get_module(typed_name.name) then
                             added.elem_value = { name = typed_name.name, quality = typed_name.quality }
                         else
                             added.elem_value = { name = "item-unknown", quality = typed_name.quality }
@@ -315,7 +315,7 @@ function handlers.on_beacon_changed(event)
     local beacon_index = elem.tags.beacon_index --[[@as integer]]
     local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
     if elem_value then
-        affected_by_beacon.beacon_typed_name = info.create_typed_name("machine", elem_value.name, elem_value.quality)
+        affected_by_beacon.beacon_typed_name = tn.create_typed_name("machine", elem_value.name, elem_value.quality)
     else
         affected_by_beacon.beacon_typed_name = nil
     end
@@ -358,15 +358,15 @@ function handlers.on_make_total_effectivity(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_machine(machine_typed_name)
+    local machine = tn.typed_name_to_machine(machine_typed_name)
     local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
-    local total_modules = info.get_total_modules(machine, module_typed_names, affected_by_beacons)
+    local total_modules = save.get_total_modules(machine, module_typed_names, affected_by_beacons)
 
     elem.clear()
     for name, inner in pairs(total_modules) do
         for quality, count in pairs(inner) do
-            local module_typed_name = info.create_typed_name("item", name, quality)
+            local module_typed_name = tn.create_typed_name("item", name, quality)
 
             local def = common.create_decorated_sprite_button{
                 typed_name = module_typed_name,
@@ -383,8 +383,8 @@ function handlers.on_fuel_visible(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_machine(machine_typed_name)
-    elem.visible = info.get_energy_source_type(machine) == "burner"
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    elem.visible = acc.get_energy_source_type(machine) == "burner"
 end
 
 ---@param event EventDataTrait
@@ -395,16 +395,16 @@ function handlers.on_make_fuel_table(event)
     local dialog_tags = dialog.tags
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = info.typed_name_to_machine(machine_typed_name)
+    local machine = tn.typed_name_to_machine(machine_typed_name)
 
     local fuel_typed_name = dialog_tags.fuel_typed_name --[[@as TypedName?]]
     if not fuel_typed_name then
         fuel_typed_name = save.get_fuel_preset(event.player_index, machine_typed_name)
     end
 
-    local fuel_categories = info.try_get_fuel_categories(machine)
+    local fuel_categories = acc.try_get_fuel_categories(machine)
     if fuel_categories then
-        local fuels = info.get_fuels_in_categories(fuel_categories)
+        local fuels = acc.get_fuels_in_categories(fuel_categories)
 
         assert(fuel_typed_name)
         local pos = fs_util.find(fuels, function(value)
@@ -416,9 +416,9 @@ function handlers.on_make_fuel_table(event)
 
         elem.clear()
         for _, fuel in pairs(fuels) do
-            local typed_name = info.craft_to_typed_name(fuel)
-            local is_hidden = info.is_hidden(fuel)
-            local is_unresearched = info.is_unresearched(fuel, relation_to_recipes)
+            local typed_name = tn.craft_to_typed_name(fuel)
+            local is_hidden = acc.is_hidden(fuel)
+            local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)
 
             local def = common.create_decorated_sprite_button{
                 typed_name = typed_name,
@@ -462,7 +462,7 @@ function handlers.on_fuel_change_toggle(event)
 
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local fuel_typed_name = dialog.tags.fuel_typed_name --[[@as TypedName]]
-    elem.toggled = info.equals_typed_name(fuel_typed_name, typed_name)
+    elem.toggled = tn.equals_typed_name(fuel_typed_name, typed_name)
 end
 
 ---@param event EventData.on_gui_click

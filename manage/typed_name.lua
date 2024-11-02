@@ -1,6 +1,3 @@
-local flib_table = require "__flib__/table"
-local fs_util = require "fs_util"
-
 local M = {}
 
 ---comment
@@ -198,7 +195,7 @@ end
 ---@return TypedName
 function M.craft_to_typed_name(craft)
     ---@diagnostic disable: param-type-mismatch
-    if craft.object_name == "LuaPrototype" then
+    if craft.object_name == "LuaItemPrototype" then
         return M.create_typed_name("item", craft.name)
     elseif craft.object_name == "LuaFluidPrototype" then
         return M.create_typed_name("fluid", craft.name)

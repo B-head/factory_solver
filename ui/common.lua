@@ -1,9 +1,8 @@
 local flib_table = require "__flib__/table"
 local flib_format = require "__flib__/format"
-
 local fs_util = require "fs_util"
 local save = require "manage/save"
-local info = require "manage/info"
+local tn = require "manage/typed_name"
 
 local M = {}
 
@@ -101,8 +100,8 @@ function M.create_decorated_sprite_button(data)
     return {
         type = "sprite-button",
         style = M.get_style(is_hidden, is_unresearched, typed_name.type),
-        sprite = info.get_sprite_path(typed_name),
-        elem_tooltip = info.typed_name_to_elem_id(typed_name),
+        sprite = tn.get_sprite_path(typed_name),
+        elem_tooltip = tn.typed_name_to_elem_id(typed_name),
         number = data.number,
         tags = data.tags,
         handler = data.handler,

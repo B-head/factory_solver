@@ -1,8 +1,8 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
+local tn = require "manage/typed_name"
 local common = require "ui/common"
 local production_line_adder = require "ui/production_line_adder"
 
@@ -85,7 +85,7 @@ function handlers.on_make_filter_group(event)
             type = "sprite-button",
             style = "factory_solver_filter_group_button",
             sprite = "item-group/" .. group.name,
-            elem_tooltip = info.create_elem_id("item-group", group.name),
+            elem_tooltip = tn.create_elem_id("item-group", group.name),
             tags = {
                 filter_type = filter_type,
                 group_name = group.name,
@@ -149,9 +149,9 @@ function handlers.on_make_constraint_picker(event)
 
             for _, value in pairs(sorted) do
                 if not value.parameter then
-                    local is_hidden = info.is_hidden(value)
-                    local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                    local typed_name = info.craft_to_typed_name(value)
+                    local is_hidden = acc.is_hidden(value)
+                    local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
+                    local typed_name = tn.craft_to_typed_name(value)
                     add(typed_name, is_hidden, is_unresearched)
                 end
             end
@@ -163,9 +163,9 @@ function handlers.on_make_constraint_picker(event)
 
             for _, value in pairs(sorted) do
                 if not value.parameter then
-                    local is_hidden = info.is_hidden(value)
-                    local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                    local typed_name = info.craft_to_typed_name(value)
+                    local is_hidden = acc.is_hidden(value)
+                    local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
+                    local typed_name = tn.craft_to_typed_name(value)
                     add(typed_name, is_hidden, is_unresearched)
                 end
             end
@@ -177,9 +177,9 @@ function handlers.on_make_constraint_picker(event)
 
             for _, value in pairs(sorted) do
                 if not prototypes.recipe[value.name].parameter then
-                    local is_hidden = info.is_hidden(value)
-                    local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                    local typed_name = info.craft_to_typed_name(value)
+                    local is_hidden = acc.is_hidden(value)
+                    local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
+                    local typed_name = tn.craft_to_typed_name(value)
                     add(typed_name, is_hidden, is_unresearched)
                 end
             end
@@ -199,9 +199,9 @@ function handlers.on_make_constraint_picker(event)
             local sorted = fs_util.sort_prototypes(virtuals)
 
             for _, value in pairs(sorted) do
-                local is_hidden = info.is_hidden(value)
-                local is_unresearched = info.is_unresearched(value, relation_to_recipes)
-                local typed_name = info.craft_to_typed_name(value)
+                local is_hidden = acc.is_hidden(value)
+                local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
+                local typed_name = tn.craft_to_typed_name(value)
                 add(typed_name, is_hidden, is_unresearched)
             end
         else

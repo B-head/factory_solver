@@ -1,10 +1,9 @@
-local flib_table = require "__flib__/table"
 local flib_format = require "__flib__/format"
-
 local fs_util = require "fs_util"
-local common = require "ui/common"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
+local tn = require "manage/typed_name"
+local common = require "ui/common"
 local production_line_adder = require "ui/production_line_adder"
 
 local handlers = {}
@@ -23,20 +22,20 @@ function handlers.make_final_products_table(event)
     local item_totals, fluid_totals, virtual_totals = save.get_total_amounts(solution)
 
     local function add(typed_name, number)
-        if number <= info.tolerance then
+        if number <= acc.tolerance then
             return
         end
-        number = info.to_scale(number, player_data.time_scale)
+        number = acc.to_scale(number, player_data.time_scale)
         
-        local craft = info.typed_name_to_material(typed_name)
-        local is_hidden = info.is_hidden(craft)
-        local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
+        local craft = tn.typed_name_to_material(typed_name)
+        local is_hidden = acc.is_hidden(craft)
+        local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
 
         local def = common.create_decorated_sprite_button{
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
-            number = number + info.tolerance,
+            number = number + acc.tolerance,
             tags = {
                 line_index = nil,
                 typed_name = typed_name,
@@ -50,15 +49,15 @@ function handlers.make_final_products_table(event)
     end
 
     for name, number in pairs(item_totals) do
-        add(info.create_typed_name("item", name), number)
+        add(tn.create_typed_name("item", name), number)
     end
 
     for name, number in pairs(fluid_totals) do
-        add(info.create_typed_name("fluid", name), number)
+        add(tn.create_typed_name("fluid", name), number)
     end
 
     for name, number in pairs(virtual_totals) do
-        add(info.create_typed_name("virtual_material", name), number)
+        add(tn.create_typed_name("virtual_material", name), number)
     end
 end
 
@@ -76,20 +75,20 @@ function handlers.make_basic_ingredients_table(event)
     local item_totals, fluid_totals, virtual_totals = save.get_total_amounts(solution)
 
     local function add(typed_name, number)
-        if -info.tolerance <= number then
+        if -acc.tolerance <= number then
             return
         end
-        number = info.to_scale(-number, player_data.time_scale)
+        number = acc.to_scale(-number, player_data.time_scale)
 
-        local craft = info.typed_name_to_material(typed_name)
-        local is_hidden = info.is_hidden(craft)
-        local is_unresearched = info.is_unresearched(craft, relation_to_recipes)
+        local craft = tn.typed_name_to_material(typed_name)
+        local is_hidden = acc.is_hidden(craft)
+        local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
 
         local def = common.create_decorated_sprite_button{
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
-            number = number + info.tolerance,
+            number = number + acc.tolerance,
             tags = {
                 line_index = nil,
                 typed_name = typed_name,
@@ -103,15 +102,15 @@ function handlers.make_basic_ingredients_table(event)
     end
     
     for name, number in pairs(item_totals) do
-        add(info.create_typed_name("item", name), number)
+        add(tn.create_typed_name("item", name), number)
     end
 
     for name, number in pairs(fluid_totals) do
-        add(info.create_typed_name("fluid", name), number)
+        add(tn.create_typed_name("fluid", name), number)
     end
 
     for name, number in pairs(virtual_totals) do
-        add(info.create_typed_name("virtual_material", name), number)
+        add(tn.create_typed_name("virtual_material", name), number)
     end
 end
 
@@ -147,7 +146,7 @@ function handlers.update_total_power_label(event)
         return
     end
 
-    local total_power = info.to_scale(save.get_total_power(solution), player_data.time_scale)
+    local total_power = acc.to_scale(save.get_total_power(solution), player_data.time_scale)
     elem.caption = common.format_power(total_power)
 end
 
@@ -162,7 +161,7 @@ function handlers.update_total_pollution_label(event)
         return
     end
 
-    local total_pollution = info.to_scale(save.get_total_pollution(solution), player_data.time_scale)
+    local total_pollution = acc.to_scale(save.get_total_pollution(solution), player_data.time_scale)
     elem.caption = flib_format.number(total_pollution, true, 5)
 end
 

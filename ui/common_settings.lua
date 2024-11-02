@@ -1,10 +1,8 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
+local save = require "manage/save"
 local common = require "ui/common"
 local machine_presets = require "ui/machine_presets"
-local info = require "manage/info"
-local save = require "manage/save"
 
 ---@type table<TimeScale, integer>
 local time_scale_to_index = {

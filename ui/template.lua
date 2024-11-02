@@ -1,9 +1,9 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
-local common = require "ui/common"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
+local tn = require "manage/typed_name"
+local common = require "ui/common"
 
 local handlers = {}
 

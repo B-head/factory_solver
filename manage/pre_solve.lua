@@ -1,6 +1,7 @@
 local flib_table = require "__flib__/table"
-
-local info = require "manage/info"
+local acc = require "manage/accessor"
+local save = require "manage/save"
+local tn = require "manage/typed_name"
 local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 
@@ -54,17 +55,17 @@ end
 function M.to_normalized_production_lines(production_lines)
     local normalized_production_lines = {}
     for _, line in ipairs(production_lines) do
-        local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
-        local machine = info.typed_name_to_machine(line.machine_typed_name)
+        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+        local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine, line.machine_typed_name.quality)
-        local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = info.get_total_effectivity(module_counts)
+        local crafting_speed = acc.get_crafting_speed(machine, line.machine_typed_name.quality)
+        local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+        local effectivity = save.get_total_effectivity(module_counts)
 
         ---@type NormalizedAmount[]
         local products = {}
         for _, value in pairs(recipe.products) do
-            local amount_per_second = info.raw_product_to_amount(value, craft_energy, crafting_speed,
+            local amount_per_second = acc.raw_product_to_amount(value, craft_energy, crafting_speed,
                 effectivity.speed, effectivity.productivity)
 
             ---@type NormalizedAmount
@@ -79,7 +80,7 @@ function M.to_normalized_production_lines(production_lines)
         ---@type NormalizedAmount[]
         local ingredients = {}
         for _, value in pairs(recipe.ingredients) do
-            local amount_per_second = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
+            local amount_per_second = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
             amount_per_second = amount_per_second * effectivity.speed
 
             ---@type NormalizedAmount
@@ -91,13 +92,13 @@ function M.to_normalized_production_lines(production_lines)
             flib_table.insert(ingredients, amount)
         end
 
-        local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
-        if info.is_use_fuel(machine) then
+        local power = acc.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
+        if acc.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
-            local fuel = info.typed_name_to_material(ftn)
-            local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
+            local fuel = tn.typed_name_to_material(ftn)
+            local amount_per_second = acc.get_fuel_amount_per_second(power, fuel, machine)
 
-            if info.is_generator(machine) then
+            if acc.is_generator(machine) then
                 amount_per_second = -amount_per_second
             end
 
@@ -116,7 +117,7 @@ function M.to_normalized_production_lines(production_lines)
             products = products,
             ingredients = ingredients,
             power_per_second = power,
-            pollution_per_second = info.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality, effectivity.consumption, effectivity.pollution),
+            pollution_per_second = acc.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality, effectivity.consumption, effectivity.pollution),
         }
 
         flib_table.insert(normalized_production_lines, normalized_line)

@@ -1,5 +1,7 @@
 local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
+local acc = require "manage/accessor"
+local tn = require "manage/typed_name"
 
 local M = {}
 
@@ -221,17 +223,17 @@ function M.create_fuel_presets(origin)
     end
 
     for category_name, _ in pairs(prototypes.fuel_category) do
-        M.typed_name_migration(ret[category_name])
-        if info.validate_typed_name(ret[category_name]) then
+        tn.typed_name_migration(ret[category_name])
+        if tn.validate_typed_name(ret[category_name]) then
             goto continue
         end
 
-        local fuels = info.get_fuels_in_categories(category_name)
+        local fuels = acc.get_fuels_in_categories(category_name)
         local first = fs_util.find(fuels, function(value)
-            return not info.is_hidden(value)
+            return not acc.is_hidden(value)
         end)
         if first then
-            ret[category_name] = info.craft_to_typed_name(fuels[first])
+            ret[category_name] = tn.craft_to_typed_name(fuels[first])
         end
 
         ::continue::
@@ -250,18 +252,18 @@ function M.create_machine_presets(origin)
     end
 
     local function add(category_name)
-        M.typed_name_migration(ret[category_name])
-        if info.validate_typed_name(ret[category_name]) then
+        tn.typed_name_migration(ret[category_name])
+        if tn.validate_typed_name(ret[category_name]) then
             return
         end
 
-        local machines = info.get_machines_in_category(category_name)
+        local machines = acc.get_machines_in_category(category_name)
         local pos = fs_util.find(machines, function(value)
-            return not info.is_hidden(value)
+            return not acc.is_hidden(value)
         end)
         if pos then
             local first = machines[pos]
-            ret[category_name] = info.craft_to_typed_name(first)
+            ret[category_name] = tn.craft_to_typed_name(first)
         end
     end
 

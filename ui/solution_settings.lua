@@ -1,9 +1,9 @@
 local flib_table = require "__flib__/table"
-
 local fs_util = require "fs_util"
-local common = require "ui/common"
-local info = require "manage/info"
+local acc = require "manage/accessor"
 local save = require "manage/save"
+local tn = require "manage/typed_name"
+local common = require "ui/common"
 local constraint_adder = require "ui/constraint_adder"
 local production_line_adder = require "ui/production_line_adder"
 
@@ -33,7 +33,7 @@ function handlers.on_make_constraints_table(event)
 
     for index, data in ipairs(solution.constraints) do
         do
-            local typed_name = info.create_typed_name(data.type, data.name)
+            local typed_name = tn.create_typed_name(data.type, data.name)
 
             local def = common.create_decorated_sprite_button{
                 typed_name = typed_name,
@@ -48,7 +48,7 @@ function handlers.on_make_constraints_table(event)
         do
             local amount = data.limit_amount_per_second
             if not (data.type == "recipe" or data.type == "virtual_recipe") then
-                amount = info.to_scale(amount, player_data.time_scale)
+                amount = acc.to_scale(amount, player_data.time_scale)
             end
             local def = {
                 type = "textfield",
@@ -108,7 +108,7 @@ function handlers.on_constraint_button_click(event)
     local tags = event.element.tags
     local solution = assert(save.get_selected_solution(event.player_index))
 
-    local typed_name = info.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
+    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
 
     if typed_name.type == "recipe" or typed_name.type == "virtual_recipe" then
         save.new_production_line(event.player_index, solution, typed_name)
@@ -137,16 +137,16 @@ end
 function handlers.on_limit_amount_confirmed(event)
     local elem = event.element
     local tags = elem.tags
-    local typed_name = info.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
+    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
     local player_data = save.get_player_data(event.player_index)
     local solution = assert(save.get_selected_solution(event.player_index))
 
     local pos = assert(fs_util.find(solution.constraints, function(value)
-        return info.equals_typed_name(value, typed_name)
+        return tn.equals_typed_name(value, typed_name)
     end))
     local amount = tonumber(elem.text) or 0
     if not (typed_name.type == "recipe" or typed_name.type == "virtual_recipe") then
-        amount = info.from_scale(amount, player_data.time_scale)
+        amount = acc.from_scale(amount, player_data.time_scale)
     end
 
     save.update_constraint(solution, pos, { limit_amount_per_second = amount })
@@ -156,11 +156,11 @@ end
 function handlers.on_limit_type_changed(event)
     local elem = event.element
     local tags = elem.tags
-    local typed_name = info.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
+    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
     local solution = assert(save.get_selected_solution(event.player_index))
 
     local pos = assert(fs_util.find(solution.constraints, function(value)
-        return info.equals_typed_name(value, typed_name)
+        return tn.equals_typed_name(value, typed_name)
     end))
     local limit_type = flib_table.find(limit_type_to_index, elem.selected_index)
 
