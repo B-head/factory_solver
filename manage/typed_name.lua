@@ -83,6 +83,34 @@ function M.validate_typed_name(typed_name)
 end
 
 ---comment
+---@param typed_name TypedName?
+function M.typed_name_migration(typed_name)
+    if not typed_name then
+        return
+    end
+
+    local type = typed_name.type
+    local name = typed_name.name
+    local quality = typed_name.quality
+
+    if type == "virtual-object" then
+        type = "virtual_material"
+    elseif type == "virtual-recipe" then
+        type = "virtual_recipe"
+    elseif type == "virtual-machine" then
+        type = "virtual_machine"
+    end
+
+    if not quality then
+        quality = "normal"
+    end
+
+    typed_name.type = type
+    typed_name.name = name
+    typed_name.quality = quality
+end
+
+---comment
 ---@param typed_name TypedName
 ---@return LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
 function M.typed_name_to_material(typed_name)
