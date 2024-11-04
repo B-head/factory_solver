@@ -206,7 +206,7 @@ function M.get_fuel_preset(player_index, machine_typed_name)
 
     local fuel_categories = acc.try_get_fuel_categories(machine)
     if fuel_categories then
-        local joined_fuel_category = M.join_fuel_categories(fuel_categories)
+        local joined_fuel_category = info.join_fuel_categories(fuel_categories)
         return assert(player_data.fuel_presets[joined_fuel_category])
     end
 
