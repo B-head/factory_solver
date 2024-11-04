@@ -63,13 +63,6 @@ function M.sort_prototypes(list)
 end
 
 ---comment
----@param player_index integer
----@return LuaForce
-function M.get_force(player_index)
-    return game.players[player_index].force --[[@as LuaForce]]
-end
-
----comment
 ---@param value number
 ---@return boolean
 function M.is_nan(value)

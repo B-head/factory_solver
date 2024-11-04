@@ -107,7 +107,6 @@ function handlers.on_make_constraint_picker(event)
     local elem = event.element
     local player_data = save.get_player_data(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
-    local force = fs_util.get_force(event.player_index)
 
     ---comment
     ---@param typed_name TypedName

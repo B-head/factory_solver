@@ -25,7 +25,6 @@ local handlers = {}
 ---@param event EventDataTrait
 function handlers.make_production_line_table(event)
     local elem = event.element
-    local force = fs_util.get_force(event.player_index)
     local solution = save.get_selected_solution(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 

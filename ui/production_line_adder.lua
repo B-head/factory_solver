@@ -25,7 +25,6 @@ end
 ---@param event EventDataTrait
 function handlers.on_make_choose_table(event)
     local elem = event.element
-    local force = fs_util.get_force(event.player_index)
     local player_data = save.get_player_data(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
