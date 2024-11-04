@@ -219,12 +219,20 @@ end
 ---@return TypedName
 function M.get_machine_preset(player_index, recipe_typed_name)
     local player_data = storage.players[player_index]
-    if virtual.is_virtual(recipe_typed_name) then
+    if recipe_typed_name.type == "virtual_recipe" then
         local recipe = storage.virtuals.recipe[recipe_typed_name.name]
-        return assert(player_data.machine_presets[recipe.category])
-    else
+        if recipe.fixed_crafting_machine then
+            return recipe.fixed_crafting_machine
+        elseif recipe.resource_category then
+            return assert(player_data.resource_presets[recipe.resource_category])
+        else
+            return assert()
+        end
+    elseif recipe_typed_name.type == "recipe" then
         local recipe = prototypes.recipe[recipe_typed_name.name]
         return assert(player_data.machine_presets[recipe.category])
+    else
+        return assert()
     end
 end
 
@@ -376,7 +384,7 @@ function M.trim_modules(module_typed_names, module_inventory_size)
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@param module_typed_names table<string, TypedName>
 ---@param affected_by_beacons AffectedByBeacon[]
 ---@return table<string, table<string, number>>

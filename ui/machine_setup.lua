@@ -15,7 +15,7 @@ function handlers.on_make_machine_table(event)
 
     local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
     local recipe = tn.typed_name_to_recipe(recipe_typed_name)
-    local machines = acc.get_machines_in_category(recipe.category)
+    local machines = acc.get_machines_for_recipe(recipe)
 
     elem.clear()
     for _, machine in pairs(machines) do

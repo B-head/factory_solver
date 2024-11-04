@@ -143,13 +143,14 @@ local VirtualMaterial = {}
 ---@field name string
 ---@field localised_name LocalisedString
 ---@field sprite_path string
----@field energy number
----@field products NormalizedAmount[]
----@field ingredients NormalizedAmount[]
 ---@field order string
 ---@field group_name string
 ---@field subgroup_name string
----@field category string
+---@field energy number
+---@field products NormalizedAmount[]
+---@field ingredients NormalizedAmount[]
+---@field fixed_crafting_machine TypedName?
+---@field resource_category string?
 local VirtualRecipe = {}
 
 ---@class VirtualMachine

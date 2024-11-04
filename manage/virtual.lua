@@ -135,6 +135,9 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         name = "<space-science-pack>" .. rocket_silo_prototype.name,
         localised_name = { "item-name.space-science-pack" },
         sprite_path = "item/space-science-pack",
+        order = rocket_silo_prototype.order,
+        group_name = rocket_silo_prototype.group.name,
+        subgroup_name = rocket_silo_prototype.subgroup.name,
         energy = 1,
         products = {
             {
@@ -144,10 +147,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             }
         },
         ingredients = ingredients,
-        order = rocket_silo_prototype.order,
-        group_name = rocket_silo_prototype.group.name,
-        subgroup_name = rocket_silo_prototype.subgroup.name,
-        category = crafting_category,
+        fixed_crafting_machine = tn.craft_to_typed_name(rocket_silo_prototype),
     }
 
     ---@type VirtualMachine
@@ -198,6 +198,9 @@ function M.create_boiler_virtual(boiler_prototype)
             name = "<run>" .. boiler_prototype.name,
             localised_name = "<run>" .. boiler_prototype.name, --TODO
             sprite_path = "entity/" .. boiler_prototype.name,
+            order = boiler_prototype.order,
+            group_name = boiler_prototype.group.name,
+            subgroup_name = boiler_prototype.subgroup.name,
             energy = 1,
             products = {
                 {
@@ -213,10 +216,7 @@ function M.create_boiler_virtual(boiler_prototype)
                     amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
-            order = boiler_prototype.order,
-            group_name = boiler_prototype.group.name,
-            subgroup_name = boiler_prototype.subgroup.name,
-            category = crafting_category,
+            fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
         }
 
         ---@type VirtualMachine
@@ -255,6 +255,9 @@ function M.create_boiler_virtual(boiler_prototype)
             name = "<run>" .. boiler_prototype.name,
             localised_name = "<run>" .. boiler_prototype.name, --TODO
             sprite_path = "entity/" .. boiler_prototype.name,
+            order = boiler_prototype.order,
+            group_name = boiler_prototype.group.name,
+            subgroup_name = boiler_prototype.subgroup.name,
             energy = 1,
             products = {
                 {
@@ -270,10 +273,7 @@ function M.create_boiler_virtual(boiler_prototype)
                     amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
                 }
             },
-            order = boiler_prototype.order,
-            group_name = boiler_prototype.group.name,
-            subgroup_name = boiler_prototype.subgroup.name,
-            category = crafting_category,
+            fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
         }
 
         ---@type VirtualMachine
@@ -331,13 +331,13 @@ function M.create_generator_virtual(generator_prototype)
         name = "<run>" .. generator_prototype.name,
         localised_name = "<run>" .. generator_prototype.name, --TODO
         sprite_path = "entity/" .. generator_prototype.name,
-        energy = 1,
-        products = {},
-        ingredients = {},
         order = generator_prototype.order,
         group_name = generator_prototype.group.name,
         subgroup_name = generator_prototype.subgroup.name,
-        category = crafting_category,
+        energy = 1,
+        products = {},
+        ingredients = {},
+        fixed_crafting_machine = tn.craft_to_typed_name(generator_prototype),
     }
 
     ---@type VirtualMachine
@@ -377,13 +377,13 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
         name = "<run>" .. burner_generator_prototype.name,
         localised_name = "<run>" .. burner_generator_prototype.name, --TODO
         sprite_path = "entity/" .. burner_generator_prototype.name,
-        energy = 1,
-        products = {},
-        ingredients = {},
         order = burner_generator_prototype.order,
         group_name = burner_generator_prototype.group.name,
         subgroup_name = burner_generator_prototype.subgroup.name,
-        category = crafting_category,
+        energy = 1,
+        products = {},
+        ingredients = {},
+        fixed_crafting_machine = tn.craft_to_typed_name(burner_generator_prototype),
     }
 
     ---@type VirtualMachine
@@ -422,6 +422,9 @@ function M.create_reactor_virtual(reactor_prototype)
         name = "<run>" .. reactor_prototype.name,
         localised_name = "<run>" .. reactor_prototype.name, --TODO
         sprite_path = "entity/" .. reactor_prototype.name,
+        order = reactor_prototype.order,
+        group_name = reactor_prototype.group.name,
+        subgroup_name = reactor_prototype.subgroup.name,
         energy = 1,
         products = {
             {
@@ -431,10 +434,7 @@ function M.create_reactor_virtual(reactor_prototype)
             },
         },
         ingredients = {},
-        order = reactor_prototype.order,
-        group_name = reactor_prototype.group.name,
-        subgroup_name = reactor_prototype.subgroup.name,
-        category = crafting_category,
+        fixed_crafting_machine = tn.craft_to_typed_name(reactor_prototype),
     }
 
     ---@type VirtualMachine
@@ -479,7 +479,9 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
         name = "<run>" .. offshore_pump_prototype.name,
         localised_name = "<run>" .. offshore_pump_prototype.name, --TODO
         sprite_path = "entity/" .. offshore_pump_prototype.name,
-
+        order = offshore_pump_prototype.order,
+        group_name = offshore_pump_prototype.group.name,
+        subgroup_name = offshore_pump_prototype.subgroup.name,
         energy = 1,
         products = {
             {
@@ -489,10 +491,7 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
             }
         },
         ingredients = {},
-        order = offshore_pump_prototype.order,
-        group_name = offshore_pump_prototype.group.name,
-        subgroup_name = offshore_pump_prototype.subgroup.name,
-        category = crafting_category,
+        fixed_crafting_machine = tn.craft_to_typed_name(offshore_pump_prototype),
     }
 
     ---@type VirtualMachine
@@ -548,13 +547,13 @@ function M.create_resource_virtual(resource_prototype)
         name = "<minable>" .. resource_prototype.name,
         localised_name = "<minable>" .. resource_prototype.name, --TODO
         sprite_path = "entity/" .. resource_prototype.name,
-        energy = 1,
-        products = products,
-        ingredients = ingredients,
         order = resource_prototype.order,
         group_name = resource_prototype.group.name,
         subgroup_name = resource_prototype.subgroup.name,
-        category = "<resource>" .. resource_prototype.resource_category,
+        energy = 1,
+        products = products,
+        ingredients = ingredients,
+        resource_category =  resource_prototype.resource_category,
     }
 
     return recipe

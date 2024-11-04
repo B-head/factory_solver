@@ -101,28 +101,28 @@ function M.create_relation_to_recipes(force_index)
         end
     end
 
-    for _, machine in pairs(storage.virtuals.machine) do
-        local value = machine.energy_source.fixed_fuel_typed_name
-        if value then
-            local info
-            if value.type == "item" then
-                info = items[value.name]
-            elseif value.type == "fluid" then
-                info = fluids[value.name]
-            elseif value.type == "virtual_material" then
-                info = virtuals[value.name]
-            else
-                assert()
-            end
+    -- for _, machine in pairs(storage.virtuals.machine) do
+    --     local value = machine.energy_source.fixed_fuel_typed_name
+    --     if value then
+    --         local info
+    --         if value.type == "item" then
+    --             info = items[value.name]
+    --         elseif value.type == "fluid" then
+    --             info = fluids[value.name]
+    --         elseif value.type == "virtual_material" then
+    --             info = virtuals[value.name]
+    --         else
+    --             assert()
+    --         end
 
-            local categories = machine.crafting_categories
-            for _, recipe in pairs(storage.virtuals.recipe) do
-                if categories[recipe.category] then
-                    flib_table.insert(info.recipe_for_ingredient, recipe.name)
-                end
-            end
-        end
-    end
+    --         local categories = machine.crafting_categories
+    --         for _, recipe in pairs(storage.virtuals.recipe) do
+    --             if categories[recipe.category] then
+    --                 flib_table.insert(info.recipe_for_ingredient, recipe.name)
+    --             end
+    --         end
+    --     end
+    -- end
 
     return { enabled_recipe = enabled_recipe, item = items, fluid = fluids, virtual_recipe = virtuals }
 end
@@ -251,10 +251,10 @@ function M.create_machine_presets(origin)
         ret = flib_table.deep_copy(origin)
     end
 
-    local function add(category_name)
+    for category_name, _ in pairs(prototypes.recipe_category) do
         tn.typed_name_migration(ret[category_name])
         if tn.validate_typed_name(ret[category_name]) then
-            return
+            goto continue
         end
 
         local machines = acc.get_machines_in_category(category_name)
@@ -265,14 +265,7 @@ function M.create_machine_presets(origin)
             local first = machines[pos]
             ret[category_name] = tn.craft_to_typed_name(first)
         end
-    end
-
-    for category_name, _ in pairs(prototypes.recipe_category) do
-        add(category_name)
-    end
-
-    for category_name, _ in pairs(storage.virtuals.crafting_categories) do
-        add(category_name)
+        ::continue::
     end
 
     return ret

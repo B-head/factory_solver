@@ -141,16 +141,14 @@ end
 
 ---comment
 ---@param typed_name TypedName
----@return LuaEntityPrototype | VirtualMachine
+---@return LuaEntityPrototype
 function M.typed_name_to_machine(typed_name)
     local type = typed_name.type
     local name = typed_name.name
     if type == "machine" then
-        return prototypes.entity[name] or storage.virtuals.machine["<machine-unknown>"]
-    elseif type == "virtual_machine" then
-        return storage.virtuals.machine[name] or storage.virtuals.machine["<machine-unknown>"]
+        return prototypes.entity[name] or prototypes.entity["<entity-unknown>"]
     else
-        return storage.virtuals.machine["<machine-unknown>"]
+        return prototypes.entity["<entity-unknown>"]
     end
 end
 

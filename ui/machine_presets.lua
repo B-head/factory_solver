@@ -44,7 +44,7 @@ function handlers.on_make_fuel_presets(event)
                 local is_hidden = acc.is_hidden(value)
                 local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
 
-                local def = common.create_decorated_sprite_button{
+                local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
@@ -84,10 +84,10 @@ function handlers.on_make_machine_presets(event)
     local elem = event.element
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
-    local function add(category_name)
+    for category_name, _ in pairs(prototypes.recipe_category) do
         local machines = acc.get_machines_in_category(category_name)
         if #machines <= 1 then
-            return
+            goto continue
         end
 
         do
@@ -105,7 +105,7 @@ function handlers.on_make_machine_presets(event)
                 local is_hidden = acc.is_hidden(machine)
                 local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
-                local def = common.create_decorated_sprite_button{
+                local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
@@ -133,14 +133,7 @@ function handlers.on_make_machine_presets(event)
             }
             fs_util.add_gui(elem, def_table)
         end
-    end
-
-    for category_name, _ in pairs(prototypes.recipe_category) do
-        add(category_name)
-    end
-
-    for category_name, _ in pairs(storage.virtuals.crafting_categories) do
-        add(category_name)
+        ::continue::
     end
 
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))

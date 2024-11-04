@@ -56,16 +56,11 @@ function M.raw_ingredient_to_amount(ingredient, craft_energy, crafting_speed, ef
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@param quality QualityID
 ---@param effectivity_consumption number
 ---@return number
 function M.raw_energy_to_power(machine, quality, effectivity_consumption)
-    ---@diagnostic disable-next-line: param-type-mismatch
-    if not machine.object_name then
-        return machine.energy_source.power_per_second * effectivity_consumption -- TODO quality
-    end
-
     local energy_per_tick = machine.get_max_energy_usage(quality) * effectivity_consumption
 
     if machine.electric_energy_source_prototype then
@@ -86,21 +81,14 @@ function M.raw_energy_to_power(machine, quality, effectivity_consumption)
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@param pollutant_type string
 ---@param quality QualityID
 ---@param effectivity_consumption number
 ---@param effectivity_pollution number
 ---@return number
 function M.raw_emission_to_pollution(machine, pollutant_type, quality, effectivity_consumption, effectivity_pollution)
-    ---@diagnostic disable-next-line: param-type-mismatch
-    if not machine.object_name then
-        return machine.energy_source.pollution_per_second * effectivity_consumption *
-            effectivity_pollution -- TODO quality
-    end
-
-    local emission_per_tick = machine.get_max_energy_usage(quality)
-        * effectivity_consumption * effectivity_pollution
+    local emission_per_tick = machine.get_max_energy_usage(quality) * effectivity_consumption * effectivity_pollution
 
     if machine.electric_energy_source_prototype then
         emission_per_tick = emission_per_tick *
@@ -139,22 +127,29 @@ end
 
 ---comment
 ---@param category_name string
----@return (LuaEntityPrototype | VirtualMachine)[]
+---@return LuaEntityPrototype[]
 function M.get_machines_in_category(category_name)
-    local machines
-
-    if storage.virtuals.crafting_categories[category_name] then
-        machines = flib_table.filter(storage.virtuals.machine, function(value)
-            return value.crafting_categories[category_name]
-        end)
-    else
-        machines = prototypes.get_entity_filtered {
-            { filter = "crafting-category", crafting_category = category_name },
-        }
-    end
-
+    local machines = prototypes.get_entity_filtered {
+        { filter = "crafting-category", crafting_category = category_name },
+    }
     machines = fs_util.sort_prototypes(fs_util.to_list(machines))
     return machines
+end
+
+---comment
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@return LuaEntityPrototype[]
+function M.get_machines_for_recipe(recipe)
+    ---@diagnostic disable-next-line: param-type-mismatch
+    if recipe.object_name then
+        return M.get_machines_in_category(recipe.category)
+    elseif recipe.fixed_crafting_machine then
+        return { tn.typed_name_to_machine(recipe.fixed_crafting_machine) }
+    elseif recipe.resource_category then
+        return {} -- TODO
+    else
+        return assert()
+    end
 end
 
 ---comment
@@ -238,14 +233,9 @@ end
 ---comment
 ---@param power number
 ---@param material LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@return number
 function M.get_fuel_amount_per_second(power, material, machine)
-    ---@diagnostic disable: param-type-mismatch
-    if not machine.object_name and machine.energy_source.alternative_fuel_value then
-        return machine.energy_source.alternative_fuel_value
-    end
-
     local fuel_value = 1
     ---@diagnostic disable: param-type-mismatch
     if material.object_name == "LuaItemPrototype" then
@@ -278,66 +268,51 @@ function M.get_fuel_emissions_multiplier(material)
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@return EnergyType
 function M.get_energy_source_type(machine)
-    ---@diagnostic disable-next-line: param-type-mismatch
-    if machine.object_name then
-        if machine.electric_energy_source_prototype then
-            return "electric"
-        elseif machine.burner_prototype then
-            return "burner"
-        elseif machine.heat_energy_source_prototype then
-            return "heat"
-        elseif machine.fluid_energy_source_prototype then
-            return "fluid"
-        elseif machine.void_energy_source_prototype then
-            return "void"
-        else
-            return assert()
-        end
+    if machine.electric_energy_source_prototype then
+        return "electric"
+    elseif machine.burner_prototype then
+        return "burner"
+    elseif machine.heat_energy_source_prototype then
+        return "heat"
+    elseif machine.fluid_energy_source_prototype then
+        return "fluid"
+    elseif machine.void_energy_source_prototype then
+        return "void"
     else
-        return machine.energy_source.type
+        return assert()
     end
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@return { [string]: boolean }?
 function M.try_get_fuel_categories(machine)
-    ---@diagnostic disable-next-line: param-type-mismatch
-    if machine.object_name then
-        if machine.burner_prototype then
-            return machine.burner_prototype.fuel_categories
-        else
-            return nil
-        end
+    if machine.burner_prototype then
+        return machine.burner_prototype.fuel_categories
     else
-        return machine.energy_source.fuel_categories
+        return nil
     end
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@return TypedName?
 function M.try_get_fixed_fuel(machine)
-    ---@diagnostic disable-next-line: param-type-mismatch
-    if machine.object_name then
-        if machine.heat_energy_source_prototype then
-            return tn.create_typed_name("virtual_material", "<heat>")
-        elseif machine.fluid_energy_source_prototype then
-            local fluid_name = machine.fluid_energy_source_prototype.fluid_box.filter.name
-            return tn.create_typed_name("fluid", fluid_name)
-        else
-            return nil
-        end
+    if machine.heat_energy_source_prototype then
+        return tn.create_typed_name("virtual_material", "<heat>")
+    elseif machine.fluid_energy_source_prototype then
+        local fluid_name = machine.fluid_energy_source_prototype.fluid_box.filter.name
+        return tn.create_typed_name("fluid", fluid_name)
     else
-        return machine.energy_source.fixed_fuel_typed_name
+        return nil
     end
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@return boolean
 function M.is_use_fuel(machine)
     local energy_source_type = M.get_energy_source_type(machine)
@@ -345,24 +320,18 @@ function M.is_use_fuel(machine)
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@return boolean
 function M.is_generator(machine)
-    ---@diagnostic disable-next-line: param-type-mismatch
-    return not machine.object_name and machine.energy_source.is_generator
+    return machine.type == "generator" or machine.type == "burner-generator"
 end
 
 ---comment
----@param machine LuaEntityPrototype | VirtualMachine
+---@param machine LuaEntityPrototype
 ---@param quality QualityID
 ---@return number
 function M.get_crafting_speed(machine, quality)
-    ---@diagnostic disable-next-line: param-type-mismatch
-    if machine.object_name then
-        return machine.get_crafting_speed(quality)
-    else
-        return machine.crafting_speed -- TODO quality
-    end
+    return machine.get_crafting_speed(quality) or 1
 end
 
 return M
