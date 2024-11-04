@@ -371,7 +371,7 @@ function M.get_total_amounts(solution)
         for _, value in pairs(recipe.ingredients) do
             local amount_per_second = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed,
                 effectivity.speed)
-            amount_per_second = amount_per_second * effectivity.speed * quantity_of_machines_required
+            amount_per_second = amount_per_second * quantity_of_machines_required
 
             if value.type == "item" then
                 item_totals[value.name] = (item_totals[value.name] or 0) - amount_per_second

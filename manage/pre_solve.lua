@@ -81,7 +81,6 @@ function M.to_normalized_production_lines(production_lines)
         local ingredients = {}
         for _, value in pairs(recipe.ingredients) do
             local amount_per_second = info.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
-            amount_per_second = amount_per_second * effectivity.speed
 
             ---@type NormalizedAmount
             local amount = {
