@@ -1,5 +1,7 @@
 Calculate quantities of machine and ingredient required in a factory to achieve materials production speed.
 
+The powerful solver based on IPMs for LP allows factories with complex recipe chains and loops to be calculated without extra hassle.
+
 ## Feature
 
 - A recipe chain is configured to automatically calculate for each recipe.
@@ -23,3 +25,7 @@ Warning: Multiplayer games have not been tested. Note that solution data may be 
 The number in "Required" column is the quantity of machines required for each recipe. Use this as a guide to build your factory!
 
 Note: Constraints can be added by right-click on material or recipe buttons.
+
+## Why does the UI look like Factory Planner?
+
+I originally developed the solver for linear problems as an [additional feature of Factory Planner](https://github.com/ClaudeMetz/FactoryPlanner/pull/25). However, that solver was not merged, so I decided to develop another mod from scratch specifically for that solver.

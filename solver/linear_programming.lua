@@ -9,15 +9,16 @@ local debug_print = print
 local hmul, hpow, diag = Matrix.hadamard_product, Matrix.hadamard_power, SparseMatrix.diag
 
 local iterate_limit = 120
-local machine_epsilon = (2 ^ -51)
+local machine_upper_epsilon = (2 ^ 51)
+local machine_lower_epsilon = (2 ^ -51)
 local tolerance = (10 ^ -6) / 2
 
 local M = {}
 
-local function enforce_lower_limit(variables)
+local function enforce_epsilon_limit(variables)
     local height = variables.height
     for y = 1, height do
-        variables[y][1] = math.max(machine_epsilon, variables[y][1])
+        variables[y][1] = math.max(machine_lower_epsilon, math.min(machine_upper_epsilon, variables[y][1]))
     end
 end
 
@@ -70,8 +71,8 @@ function M.solve(problem, solver_state, raw_variables)
     local y = problem:make_dual_variables(raw_variables)
     local s = problem:make_slack_variables(raw_variables)
 
-    enforce_lower_limit(x)
-    enforce_lower_limit(s)
+    enforce_epsilon_limit(x)
+    enforce_epsilon_limit(s)
 
     local primal = A * x - b
     local dual = AT * y + s - c
@@ -235,7 +236,7 @@ function M.cholesky_factorization(A)
             local a = a_values[k] or 0
             local b = a - sum
             if i == k then
-                D:set(k, k, math.max(b, a * machine_epsilon))
+                D:set(k, k, math.max(b, a * machine_lower_epsilon))
                 L:set(i, k, 1)
             else
                 local c = D:get(k, k)
