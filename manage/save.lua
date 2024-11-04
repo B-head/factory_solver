@@ -345,8 +345,9 @@ function M.get_total_amounts(solution)
     for _, line in ipairs(solution.production_lines) do
         local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
+        local machine_quality = line.machine_typed_name.quality
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine, line.machine_typed_name.quality)
+        local crafting_speed = info.get_crafting_speed(machine, machine_quality)
         local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
@@ -385,7 +386,7 @@ function M.get_total_amounts(solution)
 
         if info.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
-            local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
+            local power = info.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
             power = power * quantity_of_machines_required
             local fuel = info.typed_name_to_material(line.fuel_typed_name)
             local amount_per_second = info.get_fuel_amount_per_second(power, fuel, machine)
@@ -417,12 +418,13 @@ function M.get_total_power(solution)
 
     for _, line in ipairs(solution.production_lines) do
         local machine = info.typed_name_to_machine(line.machine_typed_name)
+        local machine_quality = line.machine_typed_name.quality
         local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
         if not info.is_use_fuel(machine) or info.is_generator(machine) then
-            local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
+            local power = info.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
             power = power * quantity_of_machines_required
             total = total + power
         end
@@ -439,11 +441,12 @@ function M.get_total_pollution(solution)
 
     for _, line in ipairs(solution.production_lines) do
         local machine = info.typed_name_to_machine(line.machine_typed_name)
+        local machine_quality = line.machine_typed_name.quality
         local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        local pollution = info.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
+        local pollution = info.raw_emission_to_pollution(machine, "pollution", machine_quality,
             effectivity.consumption, effectivity.pollution)
         pollution = pollution * quantity_of_machines_required
 

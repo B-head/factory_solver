@@ -56,8 +56,9 @@ function M.to_normalized_production_lines(production_lines)
     for _, line in ipairs(production_lines) do
         local recipe = info.typed_name_to_recipe(line.recipe_typed_name)
         local machine = info.typed_name_to_machine(line.machine_typed_name)
+        local machine_quality = line.machine_typed_name.quality
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = info.get_crafting_speed(machine, line.machine_typed_name.quality)
+        local crafting_speed = info.get_crafting_speed(machine, machine_quality)
         local module_counts = info.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = info.get_total_effectivity(module_counts)
 
@@ -91,7 +92,7 @@ function M.to_normalized_production_lines(production_lines)
             flib_table.insert(ingredients, amount)
         end
 
-        local power = info.raw_energy_to_power(machine, line.machine_typed_name.quality, effectivity.consumption)
+        local power = info.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
         if info.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
             local fuel = info.typed_name_to_material(ftn)
@@ -116,7 +117,7 @@ function M.to_normalized_production_lines(production_lines)
             products = products,
             ingredients = ingredients,
             power_per_second = power,
-            pollution_per_second = info.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality, effectivity.consumption, effectivity.pollution),
+            pollution_per_second = info.raw_emission_to_pollution(machine, "pollution", machine_quality, effectivity.consumption, effectivity.pollution),
         }
 
         flib_table.insert(normalized_production_lines, normalized_line)
