@@ -37,21 +37,7 @@ function M.create_virtuals()
     }
 
     ---@type table<string, VirtualRecipe>
-    local recipes = {
-        ["<solar-power>"] = {
-            type = "virtual_recipe",
-            name = "<solar-power>",
-            localised_name = "Solar power", --TODO
-            sprite_path = "factory-solver-solar-panel",
-            energy = 1,
-            products = {},
-            ingredients = {},
-            order = "b",
-            group_name = "other",
-            subgroup_name = "other",
-            category = "<solar-power>",
-        },
-    }
+    local recipes = {}
 
     ---@type table<string, VirtualMachine>
     local machines = {
@@ -94,9 +80,6 @@ function M.create_virtuals()
         elseif entity.type == "reactor" then
             local recipe, machine = M.create_reactor_virtual(entity)
             recipes[recipe.name] = recipe
-            machines[machine.name] = machine
-        elseif entity.type == "solar-panel" then
-            local machine = M.create_solar_panel_virtual(entity)
             machines[machine.name] = machine
         elseif entity.type == "offshore-pump" then
             local recipe, machine = M.create_offshore_pump_virtual(entity)
@@ -476,34 +459,6 @@ function M.create_reactor_virtual(reactor_prototype)
     }
 
     return recipe, machine
-end
-
----@param solar_panel_prototype LuaEntityPrototype
----@return VirtualMachine
-function M.create_solar_panel_virtual(solar_panel_prototype)
-    local daylight_coefficient = 42 / 60 -- TODO calculate
-
-    ---@type VirtualMachine
-    local machine = {
-        type = "virtual_machine",
-        name = solar_panel_prototype.name,
-        localised_name = solar_panel_prototype.localised_name,
-        sprite_path = "entity/" .. solar_panel_prototype.name,
-        module_inventory_size = 0,
-        crafting_speed = 1,
-        energy_source = {
-            type = "electric",
-            is_generator = true,
-            power_per_second = -solar_panel_prototype.get_max_energy_production() * acc.second_per_tick *
-                daylight_coefficient,
-            pollution_per_second = 0,
-        },
-        crafting_categories = {
-            ["<solar-power>"] = true,
-        },
-    }
-
-    return machine
 end
 
 ---@param offshore_pump_prototype LuaEntityPrototype

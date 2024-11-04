@@ -21,14 +21,6 @@ end
 
 data:extend({
     {
-        type = "sprite",
-        name = "factory-solver-solar-panel",
-        filename = "__factory_solver__/graphics/solar-panel.png",
-        flags = { "gui-icon" },
-        size = 64,
-        mipmap_count = 4,
-    },
-    {
         type = "custom-input",
         name = "factory-solver-toggle-main-window",
         key_sequence = "CONTROL + R",
