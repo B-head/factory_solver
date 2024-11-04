@@ -5,9 +5,14 @@ Date: ????
     - Remove virtual recipe for solar panels.
       Not useful because they cannot be part of recipe chain.
 ---------------------------------------------------------------------------------------------------
-Version: 0.2.2
+Version: 0.2.3
 Date: ????
   Changes:
+---------------------------------------------------------------------------------------------------
+Version: 0.2.2
+Date: 2024-11-04
+  Bugfixes:
+    - Fix power consumption that does not reflect the impact of machine quality.
 ---------------------------------------------------------------------------------------------------
 Version: 0.2.1
 Date: 2024-11-04

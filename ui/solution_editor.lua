@@ -47,8 +47,9 @@ function handlers.make_production_line_table(event)
     for line_index, line in ipairs(solution.production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
+        local machine_quality = line.machine_typed_name.quality
         local craft_energy = assert(recipe.energy)
-        local crafting_speed = acc.get_crafting_speed(machine, line.machine_typed_name.quality)
+        local crafting_speed = acc.get_crafting_speed(machine, machine_quality)
         local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = save.get_total_effectivity(module_counts)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
@@ -90,7 +91,7 @@ function handlers.make_production_line_table(event)
             local is_hidden = acc.is_hidden(recipe)
             local is_unresearched = acc.is_unresearched(recipe, relation_to_recipes)
 
-            local def = common.create_decorated_sprite_button{
+            local def = common.create_decorated_sprite_button {
                 typed_name = typed_name,
                 is_hidden = is_hidden,
                 is_unresearched = is_unresearched,
@@ -124,7 +125,7 @@ function handlers.make_production_line_table(event)
             local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
             do
-                local def = common.create_decorated_sprite_button{
+                local def = common.create_decorated_sprite_button {
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
@@ -142,7 +143,7 @@ function handlers.make_production_line_table(event)
                 for quality, count in pairs(inner) do
                     local module_typed_name = tn.create_typed_name("item", name, quality)
 
-                    local def = common.create_decorated_sprite_button{
+                    local def = common.create_decorated_sprite_button {
                         typed_name = module_typed_name,
                         number = count,
                         tags = recipe_tags,
@@ -171,7 +172,7 @@ function handlers.make_production_line_table(event)
                 local raw_amount = acc.raw_product_to_amount(value, craft_energy, crafting_speed,
                     effectivity.speed, effectivity.productivity)
 
-                local def = common.create_decorated_sprite_button{
+                local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
@@ -208,7 +209,7 @@ function handlers.make_production_line_table(event)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
                 local raw_amount = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
 
-                local def = common.create_decorated_sprite_button{
+                local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
@@ -239,7 +240,7 @@ function handlers.make_production_line_table(event)
         do
             local children = {}
 
-            local power = acc.raw_energy_to_power(machine, "normal", effectivity.consumption)
+            local power = acc.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
 
             if not acc.is_use_fuel(machine) or acc.is_generator(machine) then
                 local def = {
@@ -268,7 +269,7 @@ function handlers.make_production_line_table(event)
                     amount_per_second = -amount_per_second
                 end
 
-                local def = common.create_decorated_sprite_button{
+                local def = common.create_decorated_sprite_button {
                     typed_name = fuel_typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
@@ -298,7 +299,7 @@ function handlers.make_production_line_table(event)
         end
 
         do
-            local pollution = acc.raw_emission_to_pollution(machine, "pollution", line.machine_typed_name.quality,
+            local pollution = acc.raw_emission_to_pollution(machine, "pollution", machine_quality,
                 effectivity.consumption, effectivity.pollution)
 
             if acc.is_use_fuel(machine) then
