@@ -163,7 +163,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         energy_source = {
             type = acc.get_energy_source_type(rocket_silo_prototype),
             is_generator = false,
-            power_per_second = acc.raw_energy_to_power(rocket_silo_prototype, "normal", 1),
+            power_per_second = acc.raw_energy_usage_to_power(rocket_silo_prototype, "normal", 1),
             pollution_per_second = acc.raw_emission_to_pollution(rocket_silo_prototype, "pollution", "normal", 1, 1),
             fuel_categories = acc.try_get_fuel_categories(rocket_silo_prototype),
             fixed_fuel_typed_name = acc.try_get_fixed_fuel(rocket_silo_prototype)
@@ -230,7 +230,7 @@ function M.create_boiler_virtual(boiler_prototype)
             energy_source = {
                 type = acc.get_energy_source_type(boiler_prototype),
                 is_generator = false,
-                power_per_second = acc.raw_energy_to_power(boiler_prototype, "normal", 1),
+                power_per_second = acc.raw_energy_usage_to_power(boiler_prototype, "normal", 1),
                 pollution_per_second = acc.raw_emission_to_pollution(boiler_prototype, "pollution", "normal", 1, 1),
                 fuel_categories = acc.try_get_fuel_categories(boiler_prototype),
                 fixed_fuel_typed_name = acc.try_get_fixed_fuel(boiler_prototype)
@@ -287,7 +287,7 @@ function M.create_boiler_virtual(boiler_prototype)
             energy_source = {
                 type = acc.get_energy_source_type(boiler_prototype),
                 is_generator = false,
-                power_per_second = acc.raw_energy_to_power(boiler_prototype, "normal", 1),
+                power_per_second = acc.raw_energy_usage_to_power(boiler_prototype, "normal", 1),
                 pollution_per_second = acc.raw_emission_to_pollution(boiler_prototype, "pollution", "normal", 1, 1),
                 fuel_categories = acc.try_get_fuel_categories(boiler_prototype),
                 fixed_fuel_typed_name = acc.try_get_fixed_fuel(boiler_prototype)
@@ -448,7 +448,7 @@ function M.create_reactor_virtual(reactor_prototype)
         energy_source = {
             type = acc.get_energy_source_type(reactor_prototype),
             is_generator = false,
-            power_per_second = acc.raw_energy_to_power(reactor_prototype, "normal", 1),
+            power_per_second = acc.raw_energy_usage_to_power(reactor_prototype, "normal", 1),
             pollution_per_second = acc.raw_emission_to_pollution(reactor_prototype, "pollution", "normal", 1, 1),
             fuel_categories = acc.try_get_fuel_categories(reactor_prototype),
             fixed_fuel_typed_name = acc.try_get_fixed_fuel(reactor_prototype)
@@ -505,7 +505,7 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
         energy_source = {
             type = "void",
             is_generator = false,
-            power_per_second = acc.raw_energy_to_power(offshore_pump_prototype, "normal", 1),
+            power_per_second = acc.raw_energy_usage_to_power(offshore_pump_prototype, "normal", 1),
             pollution_per_second = 0,
         },
         crafting_categories = {
@@ -578,7 +578,7 @@ function M.create_mining_drill_virtual(mining_drill_prototype)
         energy_source = {
             type = acc.get_energy_source_type(mining_drill_prototype),
             is_generator = false,
-            power_per_second = acc.raw_energy_to_power(mining_drill_prototype, "normal", 1),
+            power_per_second = acc.raw_energy_usage_to_power(mining_drill_prototype, "normal", 1),
             pollution_per_second = acc.raw_emission_to_pollution(mining_drill_prototype, "pollution", "normal", 1, 1),
             fuel_categories = acc.try_get_fuel_categories(mining_drill_prototype),
             fixed_fuel_typed_name = acc.try_get_fixed_fuel(mining_drill_prototype)

@@ -256,8 +256,7 @@ function M.get_total_amounts(solution)
 
         for _, value in pairs(recipe.products) do
             local amount_per_second = acc.raw_product_to_amount(value, craft_energy, crafting_speed,
-                effectivity.speed, effectivity.productivity)
-            amount_per_second = amount_per_second * quantity_of_machines_required
+                effectivity.speed, effectivity.productivity) * quantity_of_machines_required
 
             if value.type == "item" then
                 item_totals[value.name] = (item_totals[value.name] or 0) + amount_per_second
@@ -272,8 +271,7 @@ function M.get_total_amounts(solution)
 
         for _, value in pairs(recipe.ingredients) do
             local amount_per_second = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed,
-                effectivity.speed)
-            amount_per_second = amount_per_second * effectivity.speed * quantity_of_machines_required
+                effectivity.speed) * quantity_of_machines_required
 
             if value.type == "item" then
                 item_totals[value.name] = (item_totals[value.name] or 0) - amount_per_second
@@ -288,21 +286,16 @@ function M.get_total_amounts(solution)
 
         if acc.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
-            local power = acc.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
-            power = power * quantity_of_machines_required
-            local fuel = tn.typed_name_to_material(line.fuel_typed_name)
-            local amount_per_second = acc.get_fuel_amount_per_second(power, fuel, machine)
-
-            if acc.is_generator(machine) then
-                amount_per_second = -amount_per_second
-            end
+            local fuel = tn.typed_name_to_material(ftn)
+            local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
+                fuel, ftn.quality, effectivity.consumption) * quantity_of_machines_required
 
             if fuel.type == "item" then
-                item_totals[fuel.name] = (item_totals[fuel.name] or 0) - amount_per_second
+                item_totals[ftn.name] = (item_totals[ftn.name] or 0) - amount_per_second
             elseif fuel.type == "fluid" then
-                fluid_totals[fuel.name] = (fluid_totals[fuel.name] or 0) - amount_per_second
+                fluid_totals[ftn.name] = (fluid_totals[ftn.name] or 0) - amount_per_second
             elseif fuel.type == "virtual_material" then
-                virtual_totals[fuel.name] = (virtual_totals[fuel.name] or 0) - amount_per_second
+                virtual_totals[ftn.name] = (virtual_totals[ftn.name] or 0) - amount_per_second
             else
                 virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + amount_per_second
             end
@@ -325,10 +318,12 @@ function M.get_total_power(solution)
         local effectivity = M.get_total_effectivity(module_counts)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        if not acc.is_use_fuel(machine) or acc.is_generator(machine) then
-            local power = acc.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
-            power = power * quantity_of_machines_required
-            total = total + power
+        if not acc.is_use_fuel(machine) then
+            local power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
+            total = total + power * quantity_of_machines_required
+        elseif acc.is_generator(machine) then
+            local power = acc.raw_energy_production_to_power(machine, machine_quality)
+            total = total + power * quantity_of_machines_required
         end
     end
 
@@ -466,8 +461,7 @@ function M.get_total_effectivity(module_counts)
             end
 
             local effects = assert(module.module_effects)
-            local quality_prototype = prototypes.quality[quality]
-            local quality_level = quality_prototype and quality_prototype.level or 0
+            local quality_level = acc.get_quality_level(quality)
 
             ret.speed = ret.speed + modify(effects.speed, count, quality_level, false)
             ret.consumption = ret.consumption + modify(effects.consumption, count, quality_level, true)

@@ -240,9 +240,14 @@ function handlers.make_production_line_table(event)
         do
             local children = {}
 
-            local power = acc.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
-
             if not acc.is_use_fuel(machine) or acc.is_generator(machine) then
+                local power
+                if acc.is_generator(machine) then
+                    power = acc.raw_energy_production_to_power(machine, machine_quality)
+                else
+                    power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
+                end
+
                 local def = {
                     type = "label",
                     tags = {
@@ -259,23 +264,20 @@ function handlers.make_production_line_table(event)
             end
 
             if acc.is_use_fuel(machine) then
-                local fuel_typed_name = assert(line.fuel_typed_name)
-                local fuel = tn.typed_name_to_material(fuel_typed_name)
+                local ftn = assert(line.fuel_typed_name)
+                local fuel = tn.typed_name_to_material(ftn)
                 local is_hidden = acc.is_hidden(fuel)
                 local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)
-                local amount_per_second = acc.get_fuel_amount_per_second(power, fuel, machine)
-
-                if acc.is_generator(machine) then
-                    amount_per_second = -amount_per_second
-                end
+                local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
+                    fuel, ftn.quality, effectivity.consumption)
 
                 local def = common.create_decorated_sprite_button {
-                    typed_name = fuel_typed_name,
+                    typed_name = ftn,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
                     tags = {
                         line_index = line_index,
-                        typed_name = fuel_typed_name,
+                        typed_name = ftn,
                         is_product = false,
                         result_key = line.recipe_typed_name.name,
                         raw_amount = amount_per_second,

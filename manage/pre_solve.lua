@@ -81,7 +81,8 @@ function M.to_normalized_production_lines(production_lines)
         ---@type NormalizedAmount[]
         local ingredients = {}
         for _, value in pairs(recipe.ingredients) do
-            local amount_per_second = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
+            local amount_per_second = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity
+                .speed)
             amount_per_second = amount_per_second * effectivity.speed
 
             ---@type NormalizedAmount
@@ -93,15 +94,12 @@ function M.to_normalized_production_lines(production_lines)
             flib_table.insert(ingredients, amount)
         end
 
-        local power = acc.raw_energy_to_power(machine, machine_quality, effectivity.consumption)
+        local power = 0
         if acc.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
             local fuel = tn.typed_name_to_material(ftn)
-            local amount_per_second = acc.get_fuel_amount_per_second(power, fuel, machine)
-
-            if acc.is_generator(machine) then
-                amount_per_second = -amount_per_second
-            end
+            local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
+                fuel, ftn.quality, effectivity.consumption)
 
             ---@type NormalizedAmount
             local amount = {
@@ -110,6 +108,10 @@ function M.to_normalized_production_lines(production_lines)
                 amount_per_second = amount_per_second,
             }
             flib_table.insert(ingredients, amount)
+        elseif acc.is_generator(machine) then
+            power = acc.raw_energy_production_to_power(machine, machine_quality)
+        else
+            power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
         end
 
         ---@type NormalizedProductionLine
@@ -118,7 +120,8 @@ function M.to_normalized_production_lines(production_lines)
             products = products,
             ingredients = ingredients,
             power_per_second = power,
-            pollution_per_second = acc.raw_emission_to_pollution(machine, "pollution", machine_quality, effectivity.consumption, effectivity.pollution),
+            pollution_per_second = acc.raw_emission_to_pollution(machine, "pollution", machine_quality,
+                effectivity.consumption, effectivity.pollution),
         }
 
         flib_table.insert(normalized_production_lines, normalized_line)

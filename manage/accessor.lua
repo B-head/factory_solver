@@ -60,12 +60,10 @@ end
 ---@param quality QualityID
 ---@param effectivity_consumption number
 ---@return number
-function M.raw_energy_to_power(machine, quality, effectivity_consumption)
+function M.raw_energy_usage_to_power(machine, quality, effectivity_consumption)
     local energy_per_tick = machine.get_max_energy_usage(quality) * effectivity_consumption
 
-    if machine.electric_energy_source_prototype then
-        energy_per_tick = energy_per_tick + machine.electric_energy_source_prototype.drain
-    elseif machine.burner_prototype then
+    if machine.burner_prototype then
         energy_per_tick = energy_per_tick / machine.burner_prototype.effectivity
     elseif machine.heat_energy_source_prototype then
         -- no operation
@@ -73,6 +71,9 @@ function M.raw_energy_to_power(machine, quality, effectivity_consumption)
         energy_per_tick = energy_per_tick / machine.fluid_energy_source_prototype.effectivity
     elseif machine.void_energy_source_prototype then
         energy_per_tick = 0
+    elseif machine.electric_energy_source_prototype then
+        -- Last to not be applied to generators.
+        energy_per_tick = energy_per_tick + machine.electric_energy_source_prototype.drain
     else
         assert()
     end
@@ -88,25 +89,33 @@ end
 ---@param effectivity_pollution number
 ---@return number
 function M.raw_emission_to_pollution(machine, pollutant_type, quality, effectivity_consumption, effectivity_pollution)
-    local emission_per_tick = machine.get_max_energy_usage(quality) * effectivity_consumption * effectivity_pollution
+    local energy_per_tick = machine.get_max_energy_usage(quality) * effectivity_consumption * effectivity_pollution
+    local emissions_per_joule
 
-    if machine.electric_energy_source_prototype then
-        emission_per_tick = emission_per_tick *
-            machine.electric_energy_source_prototype.emissions_per_joule[pollutant_type]
-    elseif machine.burner_prototype then
-        emission_per_tick = emission_per_tick * machine.burner_prototype.emissions_per_joule[pollutant_type]
+    if machine.burner_prototype then
+        emissions_per_joule = machine.burner_prototype.emissions_per_joule
     elseif machine.heat_energy_source_prototype then
-        emission_per_tick = emission_per_tick * machine.heat_energy_source_prototype.emissions_per_joule[pollutant_type]
+        emissions_per_joule = machine.heat_energy_source_prototype.emissions_per_joule
     elseif machine.fluid_energy_source_prototype then
-        emission_per_tick = emission_per_tick * machine.fluid_energy_source_prototype.emissions_per_joule
-            [pollutant_type]
+        emissions_per_joule = machine.fluid_energy_source_prototype.emissions_per_joule
     elseif machine.void_energy_source_prototype then
-        emission_per_tick = emission_per_tick * machine.void_energy_source_prototype.emissions_per_joule[pollutant_type]
+        emissions_per_joule = machine.void_energy_source_prototype.emissions_per_joule
+    elseif machine.electric_energy_source_prototype then
+        -- Last to not be applied to generators.
+        emissions_per_joule = machine.electric_energy_source_prototype.emissions_per_joule
     else
         assert()
     end
 
-    return emission_per_tick * M.second_per_tick
+    return emissions_per_joule[pollutant_type] * energy_per_tick * M.second_per_tick
+end
+
+---comment
+---@param machine LuaEntityPrototype
+---@param quality QualityID
+---@return number
+function M.raw_energy_production_to_power(machine, quality)
+    return -machine.get_max_energy_production(quality) * M.second_per_tick
 end
 
 ---comment
@@ -231,24 +240,28 @@ function M.is_unresearched(craft, relation_to_recipes)
 end
 
 ---comment
----@param power number
----@param material LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
 ---@param machine LuaEntityPrototype
+---@param machine_quality QualityID
+---@param fuel LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
+---@param fuel_quality QualityID
+---@param effectivity_consumption number
 ---@return number
-function M.get_fuel_amount_per_second(power, material, machine)
-    local fuel_value = 1
-    ---@diagnostic disable: param-type-mismatch
-    if material.object_name == "LuaItemPrototype" then
-        fuel_value = material.fuel_value
-    elseif material.object_name == "LuaFluidPrototype" then
-        fuel_value = material.fuel_value
-    end
-    ---@diagnostic enable: param-type-mismatch
-
-    if fuel_value == 0 then
-        return 0
+function M.get_fuel_amount_per_second(machine, machine_quality, fuel, fuel_quality, effectivity_consumption)
+    if machine.type == "generator" then
+        local multiplier = 1 + M.get_quality_level(machine_quality) * 0.3
+        return machine.fluid_usage_per_tick * M.second_per_tick * multiplier
     else
-        return power / fuel_value
+        ---@diagnostic disable: param-type-mismatch
+        local fuel_value = 1
+        if fuel.object_name == "LuaItemPrototype" then
+            fuel_value = fuel.fuel_value
+        elseif fuel.object_name == "LuaFluidPrototype" then
+            fuel_value = fuel.fuel_value
+        end
+        ---@diagnostic enable: param-type-mismatch
+
+        local power = M.raw_energy_usage_to_power(machine, machine_quality, effectivity_consumption)
+        return (fuel_value == 0) and 0 or power / fuel_value
     end
 end
 
@@ -271,9 +284,7 @@ end
 ---@param machine LuaEntityPrototype
 ---@return EnergyType
 function M.get_energy_source_type(machine)
-    if machine.electric_energy_source_prototype then
-        return "electric"
-    elseif machine.burner_prototype then
+    if machine.burner_prototype then
         return "burner"
     elseif machine.heat_energy_source_prototype then
         return "heat"
@@ -281,6 +292,13 @@ function M.get_energy_source_type(machine)
         return "fluid"
     elseif machine.void_energy_source_prototype then
         return "void"
+    elseif machine.electric_energy_source_prototype then
+        -- Last to not be applied to generators.
+        if machine.type == "generator" then
+            return "fluid"
+        else
+            return "electric"
+        end
     else
         return assert()
     end
@@ -305,6 +323,9 @@ function M.try_get_fixed_fuel(machine)
         return tn.create_typed_name("virtual_material", "<heat>")
     elseif machine.fluid_energy_source_prototype then
         local fluid_name = machine.fluid_energy_source_prototype.fluid_box.filter.name
+        return tn.create_typed_name("fluid", fluid_name)
+    elseif machine.type == "generator" then
+        local fluid_name = machine.fluidbox_prototypes[1].filter.name
         return tn.create_typed_name("fluid", fluid_name)
     else
         return nil
@@ -331,7 +352,18 @@ end
 ---@param quality QualityID
 ---@return number
 function M.get_crafting_speed(machine, quality)
-    return machine.get_crafting_speed(quality) or 1
+    local ret = machine.get_crafting_speed(quality)
+    if not ret then
+        ret = 1 + M.get_quality_level(quality) * 0.3
+    end
+    return ret
+end
+
+---comment
+---@param quality QualityID
+function M.get_quality_level(quality)
+    local quality_prototype = (type(quality) == "string") and prototypes.quality[quality] or quality
+    return quality_prototype and quality_prototype.level or 0
 end
 
 return M
