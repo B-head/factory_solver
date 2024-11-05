@@ -79,9 +79,9 @@ function M.reinit_force_data(force_index)
 
         for _, solution in pairs(force_data.solutions) do
             for _, line in pairs(solution.production_lines) do
-                M.typed_name_migration(line.recipe_typed_name)
-                M.typed_name_migration(line.machine_typed_name)
-                M.typed_name_migration(line.fuel_typed_name)
+                tn.typed_name_migration(line.recipe_typed_name)
+                tn.typed_name_migration(line.machine_typed_name)
+                tn.typed_name_migration(line.fuel_typed_name)
 
                 if line.module_names then
                     local module_typed_names = {}
@@ -93,7 +93,7 @@ function M.reinit_force_data(force_index)
                     line.module_names = nil
                 else
                     for _, typed_name in pairs(line.module_typed_names) do
-                        M.typed_name_migration(typed_name)
+                        tn.typed_name_migration(typed_name)
                     end
                 end
 
@@ -102,7 +102,7 @@ function M.reinit_force_data(force_index)
                         affected.beacon_typed_name = tn.create_typed_name("machine", affected.beacon_name)
                         affected.beacon_name = nil
                     else
-                        M.typed_name_migration(affected.beacon_typed_name)
+                        tn.typed_name_migration(affected.beacon_typed_name)
                     end
 
                     if affected.module_names then
@@ -115,7 +115,7 @@ function M.reinit_force_data(force_index)
                         affected.module_names = nil
                     else
                         for _, typed_name in pairs(affected.module_typed_names) do
-                            M.typed_name_migration(typed_name)
+                            tn.typed_name_migration(typed_name)
                         end
                     end
                 end

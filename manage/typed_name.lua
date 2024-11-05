@@ -92,8 +92,8 @@ function M.typed_name_migration(typed_name)
         type = "virtual_material"
     elseif type == "virtual-recipe" then
         type = "virtual_recipe"
-    elseif type == "virtual-machine" then
-        type = "virtual_machine"
+    elseif type == "virtual-machine" or type == "virtual_machine" then
+        type = "machine"
     end
 
     if not quality then
