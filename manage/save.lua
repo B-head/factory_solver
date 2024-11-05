@@ -27,6 +27,7 @@ function M.init_player_data(player_index)
             time_scale = "minute",
             amount_unit = "time",
             fuel_presets = info.create_fuel_presets(),
+            resource_presets = info.create_resource_presets(),
             machine_presets = info.create_machine_presets(),
             opened_gui = {},
         }
@@ -45,6 +46,7 @@ function M.reinit_player_data(player_index)
             player_data.amount_unit = "time"
         end
         player_data.fuel_presets = info.create_fuel_presets(player_data.fuel_presets)
+        player_data.resource_presets = info.create_resource_presets(player_data.resource_presets)
         player_data.machine_presets = info.create_machine_presets(player_data.machine_presets)
     else
         M.init_player_data(player_index)

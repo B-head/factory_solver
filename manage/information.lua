@@ -235,7 +235,34 @@ function M.create_fuel_presets(origin)
         if first then
             ret[category_name] = tn.craft_to_typed_name(fuels[first])
         end
+        ::continue::
+    end
 
+    return ret
+end
+
+---comment
+---@param origin table<string, TypedName>?
+---@return table<string, TypedName>
+function M.create_resource_presets(origin)
+    local ret = {}
+    if origin then
+        ret = flib_table.deep_copy(origin)
+    end
+
+    for category_name, _ in pairs(prototypes.resource_category) do
+        tn.typed_name_migration(ret[category_name])
+        if tn.validate_typed_name(ret[category_name]) then
+            goto continue
+        end
+
+        local machines = acc.get_machines_in_resource_category(category_name)
+        local first = fs_util.find(machines, function(value)
+            return not acc.is_hidden(value)
+        end)
+        if first then
+            ret[category_name] = tn.craft_to_typed_name(machines[first])
+        end
         ::continue::
     end
 

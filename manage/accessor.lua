@@ -146,6 +146,20 @@ function M.get_machines_in_category(category_name)
 end
 
 ---comment
+---@param category_name string
+---@return LuaEntityPrototype[]
+function M.get_machines_in_resource_category(category_name)
+    local machines = prototypes.get_entity_filtered {
+        { filter = "type", type = "mining-drill" },
+    }
+    machines = flib_table.filter(machines, function(value)
+        return value.resource_categories[category_name]
+    end)
+    machines = fs_util.sort_prototypes(fs_util.to_list(machines))
+    return machines
+end
+
+---comment
 ---@param recipe LuaRecipePrototype | VirtualRecipe
 ---@return LuaEntityPrototype[]
 function M.get_machines_for_recipe(recipe)
@@ -155,7 +169,7 @@ function M.get_machines_for_recipe(recipe)
     elseif recipe.fixed_crafting_machine then
         return { tn.typed_name_to_machine(recipe.fixed_crafting_machine) }
     elseif recipe.resource_category then
-        return {} -- TODO
+        return M.get_machines_in_resource_category(recipe.resource_category)
     else
         return assert()
     end
@@ -352,7 +366,7 @@ end
 ---@param quality QualityID
 ---@return number
 function M.get_crafting_speed(machine, quality)
-    local ret = machine.get_crafting_speed(quality)
+    local ret = machine.get_crafting_speed(quality) or machine.mining_speed
     if not ret then
         ret = 1 + M.get_quality_level(quality) * 0.3
     end

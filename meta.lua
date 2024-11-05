@@ -32,6 +32,7 @@ __factory_solver__storage = {}
 ---@field time_scale TimeScale
 ---@field amount_unit AmountUnit
 ---@field fuel_presets table<string, TypedName>
+---@field resource_presets table<string, TypedName>
 ---@field machine_presets table<string, TypedName>
 ---@field opened_gui string[]
 local PlayerLocalData = {}
