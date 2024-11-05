@@ -5,9 +5,14 @@ Date: ????
     - Remove virtual recipe for solar panels.
       Not useful because they cannot be part of recipe chain.
 ---------------------------------------------------------------------------------------------------
-Version: 0.2.3
+Version: 0.2.4
 Date: ????
   Changes:
+---------------------------------------------------------------------------------------------------
+Version: 0.2.3
+Date: 2024-11-05
+  Bugfixes:
+    - Fix the double effect of speed modules on ingredients.
 ---------------------------------------------------------------------------------------------------
 Version: 0.2.2
 Date: 2024-11-04
