@@ -72,8 +72,6 @@ function M.validate_typed_name(typed_name)
         return storage.virtuals.material[name] ~= nil
     elseif type == "virtual_recipe" then
         return storage.virtuals.recipe[name] ~= nil
-    elseif type == "virtual_machine" then
-        return storage.virtuals.machine[name] ~= nil
     else
         return false
     end
@@ -223,9 +221,6 @@ function M.get_sprite_path(typed_name)
     elseif typed_name.type == "virtual_recipe" then
         local recipe = storage.virtuals.recipe[typed_name.name]
         return recipe.sprite_path
-    elseif typed_name.type == "virtual_machine" then
-        local machine = storage.virtuals.machine[typed_name.name]
-        return machine.sprite_path
     elseif typed_name.type == "machine" then
         return "entity" .. "/" .. typed_name.name
     else

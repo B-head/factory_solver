@@ -213,8 +213,6 @@ function M.is_hidden(craft)
         return false --TODO
     elseif craft.type == "virtual_recipe" then
         return false --TODO
-    elseif craft.type == "virtual_machine" then
-        return false --TODO
     else
         return assert()
     end
@@ -244,8 +242,6 @@ function M.is_unresearched(craft, relation_to_recipes)
     elseif craft.type == "virtual_material" then
         return false --TODO
     elseif craft.type == "virtual_recipe" then
-        return false --TODO
-    elseif craft.type == "virtual_machine" then
         return false --TODO
     else
         return assert()

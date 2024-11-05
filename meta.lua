@@ -1,12 +1,12 @@
 ---@meta
 
----@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"|"virtual_machine"
+---@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"
 ---@alias LimitType "upper"|"lower"|"equal"
 ---@alias TimeScale "second"|"five_seconds"|"minute"|"ten_minutes"|"hour"|"ten_hours"|"fifty_hours"|"two_hundred_fifty_hours"|"thousand_hours"
 ---@alias AmountUnit "time"|"belt"|"storage"
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
----@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaEntityPrototype | VirtualMaterial | VirtualRecipe | VirtualMachine
+---@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaEntityPrototype | VirtualMaterial | VirtualRecipe
 ---@alias TypedName { type: FilterType, name: string, quality: string }
 
 ---@class EventDataTrait
@@ -125,8 +125,6 @@ local NormalizedAmount = {}
 ---@class Virtuals
 ---@field material table<string, VirtualMaterial>
 ---@field recipe table<string, VirtualRecipe>
----@field machine table<string, VirtualMachine>
----@field crafting_categories { [string]: boolean }
 local Virtuals = {}
 
 ---@class VirtualMaterial
@@ -153,17 +151,6 @@ local VirtualMaterial = {}
 ---@field fixed_crafting_machine TypedName?
 ---@field resource_category string?
 local VirtualRecipe = {}
-
----@class VirtualMachine
----@field type "virtual_machine"
----@field name string
----@field localised_name LocalisedString
----@field sprite_path string
----@field module_inventory_size integer
----@field crafting_speed number
----@field energy_source EnergySource
----@field crafting_categories { [string]: boolean }
-local VirtualMachine = {}
 
 ---@class EnergySource
 ---@field type EnergyType
