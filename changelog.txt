@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.2.4
-Date: ????
+Date: 2024-11-06
   Bugfixes:
     - Fix the silent change of quality to normal when you change the machine.
     - Fix prototypes defined as item subclasses being shown as unknown item.
