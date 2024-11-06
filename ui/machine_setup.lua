@@ -48,7 +48,8 @@ function handlers.on_machine_button_click(event)
 
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local dialog_tags = dialog.tags
-    dialog_tags.machine_typed_name = typed_name
+    dialog_tags.machine_typed_name.type = typed_name.type
+    dialog_tags.machine_typed_name.name = typed_name.name
     dialog.tags = dialog_tags
 
     fs_util.dispatch_to_subtree(dialog, "on_machine_setup_changed")
