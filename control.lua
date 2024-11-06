@@ -121,7 +121,6 @@ local function toggle_main_window(player_index)
     local window = player.gui.screen["factory_solver_main_window"]
     if window == nil then
         common.open_gui(player_index, false, main_window)
-        player.set_shortcut_toggled("factory-solver-toggle-main-window", true)
     else
         common.on_close_self {
             element = window,
@@ -130,7 +129,6 @@ local function toggle_main_window(player_index)
             tick = game.tick,
             mod_name = window.get_mod()
         }
-        player.set_shortcut_toggled("factory-solver-toggle-main-window", false)
     end
 end
 

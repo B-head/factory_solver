@@ -193,6 +193,7 @@ function M.on_close_self(event)
     local opened_gui = storage.players[event.player_index].opened_gui
 
     if elem.name == opened_gui[#opened_gui] then
+        fs_util.dispatch_to_subtree(elem, "on_close")
         flib_table.remove(opened_gui)
         elem.destroy()
         if opened_gui[#opened_gui] then
