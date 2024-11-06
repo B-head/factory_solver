@@ -17,11 +17,19 @@ script.on_init(function()
     storage.players = {}
     for _, player in pairs(game.players) do
         save.init_player_data(player.index)
+        if __DebugAdapter then
+            player.cheat_mode = true
+        end
     end
 
     storage.forces = {}
     for _, force in pairs(game.forces) do
         save.init_force_data(force.index)
+        if __DebugAdapter then
+            for _, quality in pairs(prototypes.quality) do
+                force.unlock_quality(quality)
+            end
+        end
     end
 
     if __DebugAdapter then
@@ -65,6 +73,11 @@ end)
 
 script.on_event(defines.events.on_player_changed_force, function(event)
     save.init_force_data(event.force.index)
+    if __DebugAdapter then
+        for _, quality in pairs(prototypes.quality) do
+            event.force.unlock_quality(quality)
+        end
+    end
 end)
 
 script.on_event(defines.events.on_player_removed, function(event)
@@ -121,7 +134,6 @@ local function toggle_main_window(player_index)
     local window = player.gui.screen["factory_solver_main_window"]
     if window == nil then
         common.open_gui(player_index, false, main_window)
-        player.set_shortcut_toggled("factory-solver-toggle-main-window", true)
     else
         common.on_close_self {
             element = window,
@@ -130,7 +142,6 @@ local function toggle_main_window(player_index)
             tick = game.tick,
             mod_name = window.get_mod()
         }
-        player.set_shortcut_toggled("factory-solver-toggle-main-window", false)
     end
 end
 

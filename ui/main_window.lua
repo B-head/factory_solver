@@ -8,7 +8,17 @@ local solution_settings = require "ui/solution_settings"
 
 local handlers = {}
 
+---@param event EventDataTrait
+function handlers.on_main_window_added(event)
+    local player = game.players[event.player_index]
+    player.set_shortcut_toggled("factory-solver-toggle-main-window", true)
+end
 
+---@param event EventDataTrait
+function handlers.on_main_window_close(event)
+    local player = game.players[event.player_index]
+    player.set_shortcut_toggled("factory-solver-toggle-main-window", false)
+end
 
 fs_util.add_handlers(handlers)
 
@@ -21,6 +31,8 @@ return {
     direction = "vertical",
     handler = {
         [defines.events.on_gui_closed] = common.on_close_self,
+        on_added = handlers.on_main_window_added,
+        on_close = handlers.on_main_window_close,
     },
     {
         type = "flow",
