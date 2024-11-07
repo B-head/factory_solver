@@ -24,20 +24,17 @@ M.tolerance = (10 ^ -5)
 ---@param product Product | NormalizedAmount
 ---@param craft_energy number
 ---@param crafting_speed number
----@param effectivity_speed number
 ---@param effectivity_productivity number
 ---@return number
-function M.raw_product_to_amount(product, craft_energy, crafting_speed, effectivity_speed, effectivity_productivity)
+function M.raw_product_to_amount(product, craft_energy, crafting_speed, effectivity_productivity)
     if product.amount_per_second then
-        return product.amount_per_second * crafting_speed *
-            effectivity_speed * effectivity_productivity / craft_energy
+        return product.amount_per_second * crafting_speed * effectivity_productivity / craft_energy
     else
         local amount = product.amount
         if not amount then
             amount = (product.amount_min + product.amount_max) / 2
         end
-        amount = amount * product.probability * crafting_speed / craft_energy
-        return amount * effectivity_speed * effectivity_productivity
+        return amount * product.probability * crafting_speed * effectivity_productivity / craft_energy
     end
 end
 
@@ -45,13 +42,12 @@ end
 ---@param ingredient Ingredient | NormalizedAmount
 ---@param craft_energy number
 ---@param crafting_speed number
----@param effectivity_speed number
 ---@return number
-function M.raw_ingredient_to_amount(ingredient, craft_energy, crafting_speed, effectivity_speed)
+function M.raw_ingredient_to_amount(ingredient, craft_energy, crafting_speed)
     if ingredient.amount_per_second then
-        return ingredient.amount_per_second * crafting_speed * effectivity_speed / craft_energy -- TODO quality
+        return ingredient.amount_per_second * crafting_speed / craft_energy -- TODO quality
     else
-        return ingredient.amount * crafting_speed * effectivity_speed / craft_energy
+        return ingredient.amount * crafting_speed / craft_energy
     end
 end
 
@@ -357,16 +353,28 @@ function M.is_generator(machine)
     return machine.type == "generator" or machine.type == "burner-generator"
 end
 
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@return number
+function M.get_crafting_energy(recipe)
+    ---@diagnostic disable-next-line: param-type-mismatch
+    if recipe.object_name == "LuaRecipePrototype" then
+        return assert(recipe.energy)
+    else
+        return 1
+    end
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@param quality QualityID
+---@param effectivity_speed number
 ---@return number
-function M.get_crafting_speed(machine, quality)
+function M.get_crafting_speed(machine, quality, effectivity_speed)
     local ret = machine.get_crafting_speed(quality) or machine.mining_speed
     if not ret then
         ret = 1 + M.get_quality_level(quality) * 0.3
     end
-    return ret
+    return ret * effectivity_speed
 end
 
 ---comment

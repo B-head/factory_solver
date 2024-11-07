@@ -58,20 +58,20 @@ function M.to_normalized_production_lines(production_lines)
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
-        local craft_energy = assert(recipe.energy)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality)
         local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = save.get_total_effectivity(module_counts)
+        local crafting_energy = acc.get_crafting_energy(recipe)
+        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed)
 
         ---@type NormalizedAmount[]
         local products = {}
         for _, value in pairs(recipe.products) do
-            local amount_per_second = acc.raw_product_to_amount(value, craft_energy, crafting_speed,
-                effectivity.speed, effectivity.productivity)
+            local amount_per_second = acc.raw_product_to_amount(value, crafting_energy, crafting_speed,
+                effectivity.productivity)
 
             ---@type NormalizedAmount
             local amount = {
-                type = value.type,
+                type = value.type, -- TODO research-progress
                 name = value.name,
                 amount_per_second = amount_per_second,
             }
@@ -81,8 +81,7 @@ function M.to_normalized_production_lines(production_lines)
         ---@type NormalizedAmount[]
         local ingredients = {}
         for _, value in pairs(recipe.ingredients) do
-            local amount_per_second = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed,
-                effectivity.speed)
+            local amount_per_second = acc.raw_ingredient_to_amount(value, crafting_energy, crafting_speed)
 
             ---@type NormalizedAmount
             local amount = {

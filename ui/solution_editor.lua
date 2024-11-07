@@ -48,10 +48,10 @@ function handlers.make_production_line_table(event)
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
-        local craft_energy = assert(recipe.energy)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality)
         local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = save.get_total_effectivity(module_counts)
+        local crafting_energy = acc.get_crafting_energy(recipe)
+        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
         do
@@ -165,12 +165,12 @@ function handlers.make_production_line_table(event)
         do
             local buttons = {}
             for _, value in pairs(recipe.products) do
-                local typed_name = tn.create_typed_name(value.type, value.name)
+                local typed_name = tn.create_typed_name(value.type, value.name) -- TODO research-progress
                 local craft = tn.typed_name_to_material(typed_name)
                 local is_hidden = acc.is_hidden(craft)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
-                local raw_amount = acc.raw_product_to_amount(value, craft_energy, crafting_speed,
-                    effectivity.speed, effectivity.productivity)
+                local raw_amount = acc.raw_product_to_amount(value, crafting_energy, crafting_speed,
+                    effectivity.productivity)
 
                 local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
@@ -207,7 +207,7 @@ function handlers.make_production_line_table(event)
                 local craft = tn.typed_name_to_material(typed_name)
                 local is_hidden = acc.is_hidden(craft)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
-                local raw_amount = acc.raw_ingredient_to_amount(value, craft_energy, crafting_speed, effectivity.speed)
+                local raw_amount = acc.raw_ingredient_to_amount(value, crafting_energy, crafting_speed)
 
                 local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,

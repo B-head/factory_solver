@@ -193,7 +193,6 @@ function M.create_boiler_virtual(boiler_prototype)
         order = boiler_prototype.order,
         group_name = boiler_prototype.group.name,
         subgroup_name = boiler_prototype.subgroup.name,
-        energy = 1,
         products = products,
         ingredients = ingredients,
         fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
@@ -214,7 +213,6 @@ function M.create_generator_virtual(generator_prototype)
         order = generator_prototype.order,
         group_name = generator_prototype.group.name,
         subgroup_name = generator_prototype.subgroup.name,
-        energy = 1,
         products = {},
         ingredients = {},
         fixed_crafting_machine = tn.craft_to_typed_name(generator_prototype),
@@ -235,7 +233,6 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
         order = burner_generator_prototype.order,
         group_name = burner_generator_prototype.group.name,
         subgroup_name = burner_generator_prototype.subgroup.name,
-        energy = 1,
         products = {},
         ingredients = {},
         fixed_crafting_machine = tn.craft_to_typed_name(burner_generator_prototype),
@@ -256,7 +253,6 @@ function M.create_reactor_virtual(reactor_prototype)
         order = reactor_prototype.order,
         group_name = reactor_prototype.group.name,
         subgroup_name = reactor_prototype.subgroup.name,
-        energy = 1,
         products = {
             {
                 type = "virtual_material",
@@ -289,7 +285,6 @@ function M.create_offshore_pump_virtual(offshore_pump_prototype)
         order = offshore_pump_prototype.order,
         group_name = offshore_pump_prototype.group.name,
         subgroup_name = offshore_pump_prototype.subgroup.name,
-        energy = 1,
         products = {
             {
                 type = "fluid",
@@ -314,7 +309,7 @@ function M.create_resource_virtual(resource_prototype)
         local data = {
             type = value.type,
             name = value.name,
-            amount_per_second = acc.raw_product_to_amount(value, mineable.mining_time, 1, 1, 1),
+            amount_per_second = acc.raw_product_to_amount(value, mineable.mining_time, 1, 1),
         }
         flib_table.insert(products, data)
     end
@@ -338,7 +333,6 @@ function M.create_resource_virtual(resource_prototype)
         order = resource_prototype.order,
         group_name = resource_prototype.group.name,
         subgroup_name = resource_prototype.subgroup.name,
-        energy = 1,
         products = products,
         ingredients = ingredients,
         resource_category = resource_prototype.resource_category,

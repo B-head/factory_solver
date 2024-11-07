@@ -145,7 +145,6 @@ local VirtualMaterial = {}
 ---@field order string
 ---@field group_name string
 ---@field subgroup_name string
----@field energy number
 ---@field products NormalizedAmount[]
 ---@field ingredients NormalizedAmount[]
 ---@field fixed_crafting_machine TypedName?
