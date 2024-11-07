@@ -332,8 +332,8 @@ function M.create_resource_virtual(resource_prototype)
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
-        name = "<minable>" .. resource_prototype.name,
-        localised_name = "<minable>" .. resource_prototype.name, --TODO
+        name = "<mine>" .. resource_prototype.name,
+        localised_name = "<mine>" .. resource_prototype.name, --TODO
         sprite_path = "entity/" .. resource_prototype.name,
         order = resource_prototype.order,
         group_name = resource_prototype.group.name,

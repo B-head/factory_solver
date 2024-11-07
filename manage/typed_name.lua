@@ -92,6 +92,7 @@ function M.typed_name_migration(typed_name)
         type = "virtual_material"
     elseif type == "virtual-recipe" then
         type = "virtual_recipe"
+        name = string.gsub(name, "<minable>", "<mine>")
     elseif type == "virtual-machine" or type == "virtual_machine" then
         type = "machine"
     end
