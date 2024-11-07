@@ -323,6 +323,18 @@ end
 
 ---comment
 ---@param machine LuaEntityPrototype
+---@param index integer
+---@return LuaFluidPrototype?
+function M.get_fluidbox_filter_prototype(machine, index)
+    if machine.fluid_energy_source_prototype then
+        index = index + 1
+    end
+    local fluidbox = machine.fluidbox_prototypes[index]
+    return fluidbox and fluidbox.filter
+end
+
+---comment
+---@param machine LuaEntityPrototype
 ---@return TypedName?
 function M.try_get_fixed_fuel(machine)
     if machine.heat_energy_source_prototype then

@@ -49,12 +49,26 @@ function M.create_virtuals()
         elseif entity.type == "reactor" then
             local recipe = M.create_reactor_virtual(entity)
             recipes[recipe.name] = recipe
-        elseif entity.type == "offshore-pump" then
-            local recipe = M.create_offshore_pump_virtual(entity)
-            recipes[recipe.name] = recipe
         elseif entity.type == "resource" then
             local recipe = M.create_resource_virtual(entity)
             recipes[recipe.name] = recipe
+        end
+
+        for _, craft in ipairs(result_crafts) do
+            if craft.type == "virtual_material" then
+                materials[craft.name] = craft
+            elseif craft.type == "virtual_recipe" then
+                recipes[craft.name] = craft
+            else
+                assert()
+            end
+        end
+    end
+
+    for _, tile in pairs(prototypes.tile) do
+        local result_crafts = {}
+        if tile.fluid then
+            result_crafts = M.create_offshore_tile_virtual(tile)
         end
 
         for _, craft in ipairs(result_crafts) do
@@ -322,38 +336,6 @@ function M.create_reactor_virtual(reactor_prototype)
     return recipe
 end
 
----@param offshore_pump_prototype LuaEntityPrototype
----@return VirtualRecipe
-function M.create_offshore_pump_virtual(offshore_pump_prototype)
-    local fluidbox = offshore_pump_prototype.fluidbox_prototypes[1]
-    local fluid_name = "water" -- TODO
-    if fluidbox.filter then
-        fluid_name = fluidbox.filter.name
-    end
-
-    ---@type VirtualRecipe
-    local recipe = {
-        type = "virtual_recipe",
-        name = "<run>" .. offshore_pump_prototype.name,
-        localised_name = "<run>" .. offshore_pump_prototype.name, --TODO
-        sprite_path = "entity/" .. offshore_pump_prototype.name,
-        order = offshore_pump_prototype.order,
-        group_name = offshore_pump_prototype.group.name,
-        subgroup_name = offshore_pump_prototype.subgroup.name,
-        products = {
-            {
-                type = "fluid",
-                name = fluid_name,
-                amount_per_second = offshore_pump_prototype.pumping_speed * acc.second_per_tick,
-            }
-        },
-        ingredients = {},
-        fixed_crafting_machine = tn.craft_to_typed_name(offshore_pump_prototype),
-    }
-
-    return recipe
-end
-
 ---@param resource_prototype LuaEntityPrototype
 ---@return VirtualRecipe
 function M.create_resource_virtual(resource_prototype)
@@ -394,6 +376,47 @@ function M.create_resource_virtual(resource_prototype)
     }
 
     return recipe
+end
+
+---@param tile_prototype LuaTilePrototype
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_offshore_tile_virtual(tile_prototype)
+    local fluid_prototype = assert(tile_prototype.fluid)
+    local offshore_pump_prototypes = prototypes.get_entity_filtered {
+        { filter = "type", type = "offshore-pump" }
+    }
+
+    local crafts = {}
+    for _, offshore_pump_prototype in pairs(offshore_pump_prototypes) do
+        local fluidbox_filter = acc.get_fluidbox_filter_prototype(offshore_pump_prototype, 1)
+        if fluidbox_filter and fluidbox_filter.name ~= fluid_prototype.name then
+            goto continue
+        end
+
+        ---@type VirtualRecipe
+        local recipe = {
+            type = "virtual_recipe",
+            name = string.format("<pump>%s:%s", offshore_pump_prototype.name, tile_prototype.name),
+            localised_name = "<pump>" .. tile_prototype.name, --TODO
+            sprite_path = "tile/" .. tile_prototype.name,
+            order = tile_prototype.order,
+            group_name = tile_prototype.group.name,
+            subgroup_name = tile_prototype.subgroup.name,
+            products = {
+                {
+                    type = "fluid",
+                    name = fluid_prototype.name,
+                    amount_per_second = offshore_pump_prototype.pumping_speed,
+                }
+            },
+            ingredients = {},
+            fixed_crafting_machine = tn.craft_to_typed_name(offshore_pump_prototype),
+        }
+        flib_table.insert(crafts, recipe)
+        ::continue::
+    end
+
+    return crafts
 end
 
 return M

@@ -4,6 +4,7 @@ Date: ????
   Features:
     - Support machine quality with virtual recipes.
     - Add virtual recipes for rocket silos.
+    - Add virtual recipes for non-water pumping.
   Changes:
     - Remove virtual recipe for solar panels.
       Not useful because they cannot be part of recipe chain.
