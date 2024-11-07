@@ -32,10 +32,9 @@ function M.create_virtuals()
     local recipes = {}
 
     for _, entity in pairs(prototypes.entity) do
+        local result_crafts = {}
         if entity.type == "rocket-silo" then
-            -- local recipe, machine = M.create_rocket_silo_virtual(entity)
-            -- recipes[recipe.name] = recipe
-            -- machines[machine.name] = machine
+            result_crafts = M.create_rocket_silo_virtual(entity)
         elseif entity.type == "boiler" then
             local recipe = M.create_boiler_virtual(entity)
             recipes[recipe.name] = recipe
@@ -57,6 +56,16 @@ function M.create_virtuals()
             local recipe = M.create_resource_virtual(entity)
             recipes[recipe.name] = recipe
         end
+
+        for _, craft in ipairs(result_crafts) do
+            if craft.type == "virtual_material" then
+                materials[craft.name] = craft
+            elseif craft.type == "virtual_recipe" then
+                recipes[craft.name] = craft
+            else
+                assert()
+            end
+        end
     end
 
     return {
@@ -66,67 +75,113 @@ function M.create_virtuals()
 end
 
 ---@param rocket_silo_prototype LuaEntityPrototype
----@return VirtualRecipe
+---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_rocket_silo_virtual(rocket_silo_prototype)
-    local crafting_category = "<dedicated>" .. rocket_silo_prototype.name
-    local rocket_part = prototypes.recipe[rocket_silo_prototype.fixed_recipe] -- TODO if the recipe is not fixed.
     local rocket_parts_required = assert(rocket_silo_prototype.rocket_parts_required)
+    local has_rocket_launch_products = prototypes.get_item_filtered { { filter = "has-rocket-launch-products" } }
 
-    local ingredients = {}
-    for _, value in pairs(rocket_part.ingredients) do
-        local amount = {
-            type = value.type,
-            name = value.name,
-            amount_per_second = acc.raw_ingredient_to_amount(value, rocket_part.energy, rocket_parts_required, 1),
-        }
-        flib_table.insert(ingredients, amount)
+    local time_to_quick_launch_per_tick = 1632 -- TODO calculate
+
+    local rocket_parts
+    if rocket_silo_prototype.fixed_recipe then
+        rocket_parts = { prototypes.recipe[rocket_silo_prototype.fixed_recipe] }
+    else
+        local filters = {}
+        for key, _ in pairs(rocket_silo_prototype.crafting_categories) do
+            flib_table.insert(filters, { filter = "category", category = key })
+        end
+        rocket_parts = prototypes.get_recipe_filtered(filters)
     end
 
-    ---@type VirtualRecipe
-    local recipe = {
-        type = "virtual_recipe",
-        name = "<space-science-pack>" .. rocket_silo_prototype.name,
-        localised_name = { "item-name.space-science-pack" },
-        sprite_path = "item/space-science-pack",
-        order = rocket_silo_prototype.order,
-        group_name = rocket_silo_prototype.group.name,
-        subgroup_name = rocket_silo_prototype.subgroup.name,
-        energy = 1,
-        products = {
-            {
-                type = "item",
-                name = "space-science-pack",
-                amount_per_second = 1000,
+    local crafts = {}
+    for _, rocket_part in pairs(rocket_parts) do
+        local energy = rocket_part.energy
+        local crafting_speed_cap = energy * rocket_parts_required * acc.second_per_tick / time_to_quick_launch_per_tick
+
+        local ingredients = {}
+        for _, value in pairs(rocket_part.ingredients) do
+            local amount = {
+                type = value.type,
+                name = value.name,
+                amount_per_second = acc.raw_ingredient_to_amount(value, energy, 1),
             }
-        },
-        ingredients = ingredients,
-        fixed_crafting_machine = tn.craft_to_typed_name(rocket_silo_prototype),
-    }
+            flib_table.insert(ingredients, amount)
+        end
 
-    -- ---@type VirtualMachine
-    -- local machine = {
-    --     type = "virtual_machine",
-    --     name = rocket_silo_prototype.name,
-    --     localised_name = rocket_silo_prototype.localised_name,
-    --     sprite_path = "entity/" .. rocket_silo_prototype.name,
-    --     module_inventory_size = rocket_silo_prototype.module_inventory_size,
-    --     crafting_speed = rocket_silo_prototype.get_crafting_speed("normal") / rocket_parts_required,
-    --     -- crafting_interval_delay = 2420, -- TODO calculate
-    --     -- interval_power_per_second = rocket_silo_prototype.active_energy_usage * acc.ticks_per_second,
-    --     energy_source = {
-    --         type = acc.get_energy_source_type(rocket_silo_prototype),
-    --         is_generator = false,
-    --         power_per_second = acc.raw_energy_usage_to_power(rocket_silo_prototype, "normal", 1),
-    --         pollution_per_second = acc.raw_emission_to_pollution(rocket_silo_prototype, "pollution", "normal", 1, 1),
-    --         fuel_categories = acc.try_get_fuel_categories(rocket_silo_prototype),
-    --         fixed_fuel_typed_name = acc.try_get_fixed_fuel(rocket_silo_prototype)
-    --     },
-    --     crafting_categories = {
-    --         [crafting_category] = true,
-    --     },
-    -- }
+        if script.active_mods["space-age"] ~= nil then -- TODO use launch_to_space_platforms
+            local rocket_entity_prototype = assert(rocket_silo_prototype.rocket_entity_prototype)
+            local space_rocket_name = "<launch>" .. rocket_entity_prototype.name
+            -- local sprite_path = "entity/" .. rocket_entity_prototype.name -- TODO
+            local sprite_path = "entity/" .. rocket_silo_prototype.name
 
-    return recipe
+            ---@type VirtualMaterial
+            local space_rocket = {
+                type = "virtual_material",
+                name = space_rocket_name,
+                localised_name = "Space rocket",
+                sprite_path = sprite_path,
+                order = rocket_entity_prototype.order,
+                group_name = rocket_entity_prototype.group.name,
+                subgroup_name = rocket_entity_prototype.subgroup.name,
+            }
+            flib_table.insert(crafts, space_rocket)
+
+            -- TODO Add note that power consumption is calculated to be higher.
+            ---@type VirtualRecipe
+            local recipe = {
+                type = "virtual_recipe",
+                name = string.format("<run>%s:%s:space-age", rocket_silo_prototype.name, rocket_part.name),
+                localised_name = { "item-name.space-science-pack" },
+                sprite_path = sprite_path,
+                order = rocket_silo_prototype.order,
+                group_name = rocket_silo_prototype.group.name,
+                subgroup_name = rocket_silo_prototype.subgroup.name,
+                products = {
+                    {
+                        type = "virtual_material",
+                        name = space_rocket_name,
+                        amount_per_second = 1 / (energy * rocket_parts_required),
+                    }
+                },
+                ingredients = ingredients,
+                fixed_crafting_machine = tn.craft_to_typed_name(rocket_silo_prototype),
+                crafting_speed_cap = crafting_speed_cap,
+            }
+            flib_table.insert(crafts, recipe)
+        else
+            for _, has_rocket_launch_product in pairs(has_rocket_launch_products) do
+                local products = {}
+                for _, value in pairs(has_rocket_launch_product.rocket_launch_products) do
+                    local amount = {
+                        type = value.type, -- TODO research-progress
+                        name = value.name,
+                        amount_per_second = acc.raw_product_to_amount(value, energy * rocket_parts_required, 1, 1),
+                    }
+                    flib_table.insert(products, amount)
+                end
+
+                -- TODO Add note that power consumption is calculated to be higher.
+                ---@type VirtualRecipe
+                local recipe = {
+                    type = "virtual_recipe",
+                    name = string.format("<run>%s:%s:%s", rocket_silo_prototype.name,
+                        rocket_part.name, has_rocket_launch_product.name),
+                    localised_name = { "item-name.space-science-pack" },
+                    sprite_path = tn.get_sprite_path(products[1]),
+                    order = rocket_silo_prototype.order,
+                    group_name = rocket_silo_prototype.group.name,
+                    subgroup_name = rocket_silo_prototype.subgroup.name,
+                    products = products,
+                    ingredients = ingredients,
+                    fixed_crafting_machine = tn.craft_to_typed_name(rocket_silo_prototype),
+                    crafting_speed_cap = crafting_speed_cap,
+                }
+                flib_table.insert(crafts, recipe)
+            end
+        end
+    end
+
+    return crafts
 end
 
 ---@param boiler_prototype LuaEntityPrototype

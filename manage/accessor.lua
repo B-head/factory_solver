@@ -364,17 +364,29 @@ function M.get_crafting_energy(recipe)
     end
 end
 
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@return number
+function M.get_crafting_speed_cap(recipe)
+    ---@diagnostic disable-next-line: param-type-mismatch
+    if recipe.object_name == "LuaRecipePrototype" then
+        return math.huge
+    else
+        return recipe.crafting_speed_cap or math.huge
+    end
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@param quality QualityID
 ---@param effectivity_speed number
+---@param crafting_speed_cap number
 ---@return number
-function M.get_crafting_speed(machine, quality, effectivity_speed)
+function M.get_crafting_speed(machine, quality, effectivity_speed, crafting_speed_cap)
     local ret = machine.get_crafting_speed(quality) or machine.mining_speed
     if not ret then
         ret = 1 + M.get_quality_level(quality) * 0.3
     end
-    return ret * effectivity_speed
+    return math.min(ret * effectivity_speed, crafting_speed_cap)
 end
 
 ---comment

@@ -149,6 +149,7 @@ local VirtualMaterial = {}
 ---@field ingredients NormalizedAmount[]
 ---@field fixed_crafting_machine TypedName?
 ---@field resource_category string?
+---@field crafting_speed_cap number?
 local VirtualRecipe = {}
 
 ---@class EnergySource

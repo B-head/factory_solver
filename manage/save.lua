@@ -253,7 +253,8 @@ function M.get_total_amounts(solution)
         local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = M.get_total_effectivity(module_counts)
         local crafting_energy = acc.get_crafting_energy(recipe)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed)
+        local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
+        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
         for _, value in pairs(recipe.products) do
@@ -315,16 +316,17 @@ function M.get_total_power(solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
+        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = M.get_total_effectivity(module_counts)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed)
+        local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
+        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
         if not acc.is_use_fuel(machine) then
-            local power = acc.raw_energy_usage_to_power(machine, machine_quality, crafting_speed,
-                effectivity.consumption)
+            local power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
             total = total + power * quantity_of_machines_required
         elseif acc.is_generator(machine) then
             local power = acc.raw_energy_production_to_power(machine, machine_quality)
