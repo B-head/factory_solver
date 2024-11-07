@@ -39,10 +39,8 @@ function M.create_virtuals()
             local recipe = M.create_boiler_virtual(entity)
             recipes[recipe.name] = recipe
         elseif entity.type == "generator" then
-            if entity.fluidbox_prototypes[1].filter then
-                local recipe = M.create_generator_virtual(entity)
-                recipes[recipe.name] = recipe
-            end
+            local recipe = M.create_generator_virtual(entity)
+            recipes[recipe.name] = recipe
         elseif entity.type == "burner-generator" then
             local recipe = M.create_burner_generator_virtual(entity)
             recipes[recipe.name] = recipe
@@ -201,57 +199,16 @@ end
 ---@param boiler_prototype LuaEntityPrototype
 ---@return VirtualRecipe
 function M.create_boiler_virtual(boiler_prototype)
-    local products, ingredients
+    local input_fluid = assert(acc.get_fluidbox_filter_prototype(boiler_prototype, 1)) -- TODO any fluid
+    local output_fluid = acc.get_fluidbox_filter_prototype(boiler_prototype, 2) or input_fluid
 
-    if boiler_prototype.boiler_mode == "output-to-separate-pipe" then
-        local input_fluidbox = boiler_prototype.fluidbox_prototypes[1]
-        local output_fluidbox = boiler_prototype.fluidbox_prototypes[2]
-        local input_fluid = prototypes.fluid[input_fluidbox.filter.name]
-        local output_fluid = prototypes.fluid[output_fluidbox.filter.name]
-
-        -- TODO virtual temperatue
-        local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
-            boiler_prototype.get_max_energy_usage()
-
-        products = {
-            {
-                type = "fluid",
-                name = output_fluidbox.filter.name,
-                amount_per_second = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
-            }
-        }
-        ingredients = {
-            {
-                type = "fluid",
-                name = input_fluidbox.filter.name,
-                amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
-            }
-        }
-    elseif boiler_prototype.boiler_mode == "heat-water-inside" then
-        local input_fluidbox = boiler_prototype.fluidbox_prototypes[1]
-        local input_fluid = prototypes.fluid[input_fluidbox.filter.name]
-
-        -- TODO virtual temperatue
-        local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
-            boiler_prototype.get_max_energy_usage()
-
-        products = {
-            {
-                type = "fluid",
-                name = input_fluidbox.filter.name,
-                amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
-            }
-        }
-        ingredients = {
-            {
-                type = "fluid",
-                name = input_fluidbox.filter.name,
-                amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
-            }
-        }
-    else
-        assert()
+    if not input_fluid then
+        return {}
     end
+
+    -- TODO virtual temperatue
+    local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
+        boiler_prototype.get_max_energy_usage()
 
     ---@type VirtualRecipe
     local recipe = {
@@ -262,8 +219,20 @@ function M.create_boiler_virtual(boiler_prototype)
         order = boiler_prototype.order,
         group_name = boiler_prototype.group.name,
         subgroup_name = boiler_prototype.subgroup.name,
-        products = products,
-        ingredients = ingredients,
+        products = {
+            {
+                type = "fluid",
+                name = output_fluid.name,
+                amount_per_second = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
+            }
+        },
+        ingredients = {
+            {
+                type = "fluid",
+                name = input_fluid.name,
+                amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
+            }
+        },
         fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
     }
 
@@ -273,6 +242,7 @@ end
 ---@param generator_prototype LuaEntityPrototype
 ---@return VirtualRecipe
 function M.create_generator_virtual(generator_prototype)
+    -- TODO virtual temperatue
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",

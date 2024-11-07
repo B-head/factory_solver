@@ -8,6 +8,8 @@ Date: ????
   Changes:
     - Remove virtual recipe for solar panels.
       Not useful because they cannot be part of recipe chain.
+  Bugfixes:
+    - Fix crash when fluid power is used in boiler.
 ---------------------------------------------------------------------------------------------------
 Version: 0.2.5
 Date: ????

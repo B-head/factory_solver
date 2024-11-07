@@ -340,11 +340,11 @@ function M.try_get_fixed_fuel(machine)
     if machine.heat_energy_source_prototype then
         return tn.create_typed_name("virtual_material", "<heat>")
     elseif machine.fluid_energy_source_prototype then
-        local fluid_name = machine.fluid_energy_source_prototype.fluid_box.filter.name
-        return tn.create_typed_name("fluid", fluid_name)
+        local fluidbox_filter = machine.fluid_energy_source_prototype.fluid_box.filter
+        return fluidbox_filter and tn.create_typed_name("fluid", fluidbox_filter.name)
     elseif machine.type == "generator" then
-        local fluid_name = machine.fluidbox_prototypes[1].filter.name
-        return tn.create_typed_name("fluid", fluid_name)
+        local fluidbox_filter = M.get_fluidbox_filter_prototype(machine, 1)
+        return fluidbox_filter and tn.create_typed_name("fluid", fluidbox_filter.name)
     else
         return nil
     end
