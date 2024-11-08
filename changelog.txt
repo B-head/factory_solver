@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.0
-Date: ????
+Date: 2024-11-08
   Features:
     - Support machine quality with virtual recipes.
     - Add virtual recipes for rocket silos.
