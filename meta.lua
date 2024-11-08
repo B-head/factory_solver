@@ -31,11 +31,15 @@ __factory_solver__storage = {}
 ---@field hidden_craft_visible boolean
 ---@field time_scale TimeScale
 ---@field amount_unit AmountUnit
----@field fuel_presets table<string, TypedName>
----@field resource_presets table<string, TypedName>
----@field machine_presets table<string, TypedName>
+---@field presets Presets
 ---@field opened_gui string[]
 local PlayerLocalData = {}
+
+---@class Presets
+---@field fuel table<string, TypedName>
+---@field resource table<string, TypedName>
+---@field machine table<string, TypedName>
+local Presets = {}
 
 ---@class ForceLocalData
 ---@field relation_to_recipes RelationToRecipes

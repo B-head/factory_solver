@@ -13,9 +13,7 @@ function handlers.on_memorize_machine_presets(event)
     local player_data = save.get_player_data(event.player_index)
 
     elem.tags = {
-        fuel_presets = flib_table.deep_copy(player_data.fuel_presets),
-        resource_presets = flib_table.deep_copy(player_data.resource_presets),
-        machine_presets = flib_table.deep_copy(player_data.machine_presets),
+        presets = flib_table.deep_copy(player_data.presets),
     }
 end
 
@@ -112,13 +110,13 @@ function handlers.on_preset_button_click(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
 
     local dialog_tags = dialog.tags
-    local presets = dialog_tags.fuel_presets
+    local presets
     if preset_type == "fuel" then
-        presets = dialog_tags.fuel_presets
+        presets = dialog_tags.presets.fuel
     elseif preset_type == "resource" then
-        presets = dialog_tags.resource_presets
+        presets = dialog_tags.presets.resource
     elseif preset_type == "machine" then
-        presets = dialog_tags.machine_presets
+        presets = dialog_tags.presets.machine
     else
         assert()
     end
@@ -140,11 +138,11 @@ function handlers.on_preset_change_toggle(event)
     local dialog_tags = dialog.tags
     local presets
     if preset_type == "fuel" then
-        presets = dialog_tags.fuel_presets
+        presets = dialog_tags.presets.fuel
     elseif preset_type == "resource" then
-        presets = dialog_tags.resource_presets
+        presets = dialog_tags.presets.resource
     elseif preset_type == "machine" then
-        presets = dialog_tags.machine_presets
+        presets = dialog_tags.presets.machine
     else
         assert()
     end
@@ -157,9 +155,7 @@ function handlers.on_machine_presets_confirm(event)
     local player_data = save.get_player_data(event.player_index)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
 
-    player_data.fuel_presets = dialog.tags.fuel_presets --[[@as table<string, TypedName>]]
-    player_data.resource_presets = dialog.tags.resource_presets --[[@as table<string, TypedName>]]
-    player_data.machine_presets = dialog.tags.machine_presets --[[@as table<string, TypedName>]]
+    player_data.presets = dialog.tags.presets --[[@as Presets]]
 
     local re_event = fs_util.create_gui_event(dialog)
     common.on_close_self(re_event)

@@ -4,7 +4,6 @@ local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local info = require "manage/information"
 local tn = require "manage/typed_name"
-local virtual = require "manage/virtual"
 local problem_generator = require "solver/problem_generator"
 
 local M = {}
@@ -26,9 +25,11 @@ function M.init_player_data(player_index)
             hidden_craft_visible = __DebugAdapter ~= nil,
             time_scale = "minute",
             amount_unit = "time",
-            fuel_presets = info.create_fuel_presets(),
-            resource_presets = info.create_resource_presets(),
-            machine_presets = info.create_machine_presets(),
+            presets = {
+                fuel = info.create_fuel_presets(),
+                resource = info.create_resource_presets(),
+                machine = info.create_machine_presets(),
+            },
             opened_gui = {},
         }
     end
@@ -37,6 +38,8 @@ end
 ---comment
 ---@param player_index integer
 function M.reinit_player_data(player_index)
+    ---@diagnostic disable: undefined-field
+    ---@diagnostic disable: inject-field
     local player_data = storage.players[player_index]
     if player_data then
         if not acc.scale_per_second[player_data.time_scale] then
@@ -45,12 +48,26 @@ function M.reinit_player_data(player_index)
         if false then
             player_data.amount_unit = "time"
         end
-        player_data.fuel_presets = info.create_fuel_presets(player_data.fuel_presets)
-        player_data.resource_presets = info.create_resource_presets(player_data.resource_presets)
-        player_data.machine_presets = info.create_machine_presets(player_data.machine_presets)
+        local presets = player_data.presets
+        if presets then
+            presets.fuel = info.create_fuel_presets(presets.fuel)
+            presets.resource = info.create_resource_presets(presets.resource)
+            presets.machine = info.create_machine_presets(presets.machine)
+        else
+            player_data.presets = {
+                fuel = info.create_fuel_presets(player_data.fuel_presets),
+                resource = info.create_resource_presets(player_data.resource_presets),
+                machine = info.create_machine_presets(player_data.machine_presets),
+            }
+            player_data.fuel_presets = nil
+            player_data.resource_presets = nil
+            player_data.machine_presets = nil
+        end
     else
         M.init_player_data(player_index)
     end
+    ---@diagnostic enable: undefined-field
+    ---@diagnostic enable: inject-field
 end
 
 ---comment
@@ -209,7 +226,7 @@ function M.get_fuel_preset(player_index, machine_typed_name)
     local fuel_categories = acc.try_get_fuel_categories(machine)
     if fuel_categories then
         local joined_fuel_category = info.join_fuel_categories(fuel_categories)
-        return assert(player_data.fuel_presets[joined_fuel_category])
+        return assert(player_data.presets.fuel[joined_fuel_category])
     end
 
     return nil
@@ -226,13 +243,13 @@ function M.get_machine_preset(player_index, recipe_typed_name)
         if recipe.fixed_crafting_machine then
             return recipe.fixed_crafting_machine
         elseif recipe.resource_category then
-            return assert(player_data.resource_presets[recipe.resource_category])
+            return assert(player_data.presets.resource[recipe.resource_category])
         else
             return assert()
         end
     elseif recipe_typed_name.type == "recipe" then
         local recipe = prototypes.recipe[recipe_typed_name.name]
-        return assert(player_data.machine_presets[recipe.category])
+        return assert(player_data.presets.machine[recipe.category])
     else
         return assert()
     end
