@@ -371,6 +371,16 @@ end
 ---comment
 ---@param machine LuaEntityPrototype
 ---@return boolean
+function M.is_use_any_fluid_fuel(machine)
+    if not machine.fluid_energy_source_prototype then
+        return false
+    end
+    return machine.fluid_energy_source_prototype.fluid_box.filter == nil
+end
+
+---comment
+---@param machine LuaEntityPrototype
+---@return boolean
 function M.is_generator(machine)
     return machine.type == "generator" or machine.type == "burner-generator"
 end

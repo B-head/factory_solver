@@ -226,7 +226,7 @@ function M.get_fuel_preset(player_index, machine_typed_name)
         return fixed_fuel
     end
 
-    if machine.fluid_energy_source_prototype then
+    if acc.is_use_any_fluid_fuel(machine) then
         return assert(player_data.presets.fluid_fuel)
     end
 

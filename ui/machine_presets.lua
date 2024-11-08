@@ -39,7 +39,7 @@ function handlers.on_make_preset_tables(event)
     for category_name, _ in pairs(categories) do
         local crafts
         if preset_type == "fuel" then
-            crafts = acc.get_fuels_in_categories { [category_name] = true }
+            crafts = acc.get_fuels_in_categories(category_name)
         elseif preset_type == "fluid_fuel" then
             crafts = acc.get_any_fluid_fuels()
         elseif preset_type == "resource" then

@@ -412,7 +412,7 @@ function handlers.on_make_fuel_table(event)
     local fuels
     if fuel_categories then
         fuels = acc.get_fuels_in_categories(fuel_categories)
-    else
+    elseif acc.is_use_any_fluid_fuel(machine) then
         fuels = acc.get_any_fluid_fuels()
     end
 
