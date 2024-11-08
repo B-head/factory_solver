@@ -242,6 +242,26 @@ function M.create_fuel_presets(origin)
 end
 
 ---comment
+---@param origin TypedName?
+---@return TypedName
+function M.create_fluid_fuel_preset(origin)
+    tn.typed_name_migration(origin)
+    if tn.validate_typed_name(origin) then
+        return assert(origin)
+    end
+
+    local fluid_fuels = acc.get_any_fluid_fuels()
+    local first = fs_util.find(fluid_fuels, function(value)
+        return not acc.is_hidden(value)
+    end)
+    if first then
+        return tn.craft_to_typed_name(fluid_fuels[first])
+    else
+        return tn.create_typed_name("fluid", "unknown-fluid")
+    end
+end
+
+---comment
 ---@param origin table<string, TypedName>?
 ---@return table<string, TypedName>
 function M.create_resource_presets(origin)

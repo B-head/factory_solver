@@ -23,7 +23,7 @@ function handlers.on_make_machine_table(event)
         local is_hidden = acc.is_hidden(machine)
         local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
-        local def = common.create_decorated_sprite_button{
+        local def = common.create_decorated_sprite_button {
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
@@ -369,7 +369,7 @@ function handlers.on_make_total_effectivity(event)
         for quality, count in pairs(inner) do
             local module_typed_name = tn.create_typed_name("item", name, quality)
 
-            local def = common.create_decorated_sprite_button{
+            local def = common.create_decorated_sprite_button {
                 typed_name = module_typed_name,
                 number = count,
             }
@@ -385,7 +385,12 @@ function handlers.on_fuel_visible(event)
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = tn.typed_name_to_machine(machine_typed_name)
-    elem.visible = acc.get_energy_source_type(machine) == "burner"
+    local energy_source_type = acc.get_energy_source_type(machine)
+    if energy_source_type == "burner" or energy_source_type == "fluid" then
+        elem.visible = acc.try_get_fixed_fuel(machine) == nil
+    else
+        elem.visible = false
+    end
 end
 
 ---@param event EventDataTrait
@@ -397,22 +402,28 @@ function handlers.on_make_fuel_table(event)
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = tn.typed_name_to_machine(machine_typed_name)
-
     local fuel_typed_name = dialog_tags.fuel_typed_name --[[@as TypedName?]]
-    if not fuel_typed_name then
-        fuel_typed_name = save.get_fuel_preset(event.player_index, machine_typed_name)
+
+    if not elem.visible then
+        return
     end
 
     local fuel_categories = acc.try_get_fuel_categories(machine)
+    local fuels
     if fuel_categories then
-        local fuels = acc.get_fuels_in_categories(fuel_categories)
+        fuels = acc.get_fuels_in_categories(fuel_categories)
+    else
+        fuels = acc.get_any_fluid_fuels()
+    end
 
-        assert(fuel_typed_name)
+    if fuels then
+        local fuel_name = fuel_typed_name and fuel_typed_name.name
         local pos = fs_util.find(fuels, function(value)
-            return value.name == fuel_typed_name.name
+            return value.name == fuel_name
         end)
         if not pos then
-            fuel_typed_name = save.get_fuel_preset(event.player_index, machine_typed_name)
+            fuel_typed_name = assert(save.get_fuel_preset(event.player_index, machine_typed_name))
+            dialog_tags.fuel_typed_name = fuel_typed_name
         end
 
         elem.clear()
@@ -421,7 +432,7 @@ function handlers.on_make_fuel_table(event)
             local is_hidden = acc.is_hidden(fuel)
             local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)
 
-            local def = common.create_decorated_sprite_button{
+            local def = common.create_decorated_sprite_button {
                 typed_name = typed_name,
                 is_hidden = is_hidden,
                 is_unresearched = is_unresearched,
@@ -437,10 +448,7 @@ function handlers.on_make_fuel_table(event)
         end
     end
 
-    ---@diagnostic disable-next-line: assign-type-mismatch
-    dialog_tags.fuel_typed_name = fuel_typed_name
     dialog.tags = dialog_tags
-
     fs_util.dispatch_to_subtree(dialog, "on_fuel_setup_changed")
 end
 

@@ -26,6 +26,8 @@ function handlers.on_make_preset_tables(event)
     local categories
     if preset_type == "fuel" then
         categories = prototypes.fuel_category
+    elseif preset_type == "fluid_fuel" then
+        categories = { ["<any-fluid-fuel>"] = true }
     elseif preset_type == "resource" then
         categories = prototypes.resource_category
     elseif preset_type == "machine" then
@@ -38,6 +40,8 @@ function handlers.on_make_preset_tables(event)
         local crafts
         if preset_type == "fuel" then
             crafts = acc.get_fuels_in_categories { [category_name] = true }
+        elseif preset_type == "fluid_fuel" then
+            crafts = acc.get_any_fluid_fuels()
         elseif preset_type == "resource" then
             crafts = acc.get_machines_in_resource_category(category_name)
         elseif preset_type == "machine" then
@@ -110,20 +114,19 @@ function handlers.on_preset_button_click(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
 
     local dialog_tags = dialog.tags
-    local presets
     if preset_type == "fuel" then
-        presets = dialog_tags.presets.fuel
+        dialog_tags.presets.fuel[category_name] = typed_name
+    elseif preset_type == "fluid_fuel" then
+        dialog_tags.presets.fluid_fuel = typed_name
     elseif preset_type == "resource" then
-        presets = dialog_tags.presets.resource
+        dialog_tags.presets.resource[category_name] = typed_name
     elseif preset_type == "machine" then
-        presets = dialog_tags.presets.machine
+        dialog_tags.presets.machine[category_name] = typed_name
     else
         assert()
     end
 
-    presets[category_name] = typed_name
     dialog.tags = dialog_tags
-
     fs_util.dispatch_to_subtree(dialog, "on_preset_changed")
 end
 
@@ -136,18 +139,20 @@ function handlers.on_preset_change_toggle(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
 
     local dialog_tags = dialog.tags
-    local presets
+    local preset
     if preset_type == "fuel" then
-        presets = dialog_tags.presets.fuel
+        preset = dialog_tags.presets.fuel[category_name]
+    elseif preset_type == "fluid_fuel" then
+        preset = dialog_tags.presets.fluid_fuel
     elseif preset_type == "resource" then
-        presets = dialog_tags.presets.resource
+        preset = dialog_tags.presets.resource[category_name]
     elseif preset_type == "machine" then
-        presets = dialog_tags.presets.machine
+        preset = dialog_tags.presets.machine[category_name]
     else
         assert()
     end
 
-    elem.toggled = tn.equals_typed_name(presets[category_name], typed_name)
+    elem.toggled = tn.equals_typed_name(preset, typed_name)
 end
 
 ---@param event EventData.on_gui_click
@@ -218,6 +223,17 @@ return {
                     column_count = 2,
                     tags = {
                         preset_type = "fuel",
+                    },
+                    handler = {
+                        on_added = handlers.on_make_preset_tables,
+                    },
+                },
+                {
+                    type = "table",
+                    style = "factory_solver_preset_layout_table",
+                    column_count = 2,
+                    tags = {
+                        preset_type = "fluid_fuel",
                     },
                     handler = {
                         on_added = handlers.on_make_preset_tables,

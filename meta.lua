@@ -37,6 +37,7 @@ local PlayerLocalData = {}
 
 ---@class Presets
 ---@field fuel table<string, TypedName>
+---@field fluid_fuel TypedName
 ---@field resource table<string, TypedName>
 ---@field machine table<string, TypedName>
 local Presets = {}

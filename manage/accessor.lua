@@ -193,6 +193,16 @@ function M.get_fuels_in_categories(fuel_categories)
 end
 
 ---comment
+---@return LuaFluidPrototype[]
+function M.get_any_fluid_fuels()
+    local fluid_fuels = prototypes.get_fluid_filtered {
+        { filter = "fuel-value", comparison = ">", value = 0 }
+    }
+    fluid_fuels = fs_util.sort_prototypes(fs_util.to_list(fluid_fuels))
+    return fluid_fuels
+end
+
+---comment
 ---@param craft Craft
 ---@return boolean
 function M.is_hidden(craft)

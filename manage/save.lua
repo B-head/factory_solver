@@ -27,6 +27,7 @@ function M.init_player_data(player_index)
             amount_unit = "time",
             presets = {
                 fuel = info.create_fuel_presets(),
+                fluid_fuel = info.create_fluid_fuel_preset(),
                 resource = info.create_resource_presets(),
                 machine = info.create_machine_presets(),
             },
@@ -51,11 +52,13 @@ function M.reinit_player_data(player_index)
         local presets = player_data.presets
         if presets then
             presets.fuel = info.create_fuel_presets(presets.fuel)
+            presets.fluid_fuel = info.create_fluid_fuel_preset(presets.fluid_fuel)
             presets.resource = info.create_resource_presets(presets.resource)
             presets.machine = info.create_machine_presets(presets.machine)
         else
             player_data.presets = {
                 fuel = info.create_fuel_presets(player_data.fuel_presets),
+                fluid_fuel = info.create_fluid_fuel_preset(),
                 resource = info.create_resource_presets(player_data.resource_presets),
                 machine = info.create_machine_presets(player_data.machine_presets),
             }
@@ -221,6 +224,10 @@ function M.get_fuel_preset(player_index, machine_typed_name)
     local fixed_fuel = acc.try_get_fixed_fuel(machine)
     if fixed_fuel then
         return fixed_fuel
+    end
+
+    if machine.fluid_energy_source_prototype then
+        return assert(player_data.presets.fluid_fuel)
     end
 
     local fuel_categories = acc.try_get_fuel_categories(machine)
