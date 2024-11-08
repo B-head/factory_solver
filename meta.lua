@@ -151,12 +151,3 @@ local VirtualMaterial = {}
 ---@field resource_category string?
 ---@field crafting_speed_cap number?
 local VirtualRecipe = {}
-
----@class EnergySource
----@field type EnergyType
----@field is_generator boolean
----@field power_per_second number
----@field pollution_per_second number
----@field fuel_categories { [string]: boolean }?
----@field fixed_fuel_typed_name TypedName?
----@field alternative_fuel_value number?
