@@ -135,8 +135,9 @@ local Virtuals = {}
 ---@class VirtualMaterial
 ---@field type "virtual_material"
 ---@field name string
----@field localised_name LocalisedString
 ---@field sprite_path string
+---@field tooltip LocalisedString?
+---@field elem_tooltip ElemID?
 ---@field order string
 ---@field group_name string
 ---@field subgroup_name string
@@ -145,8 +146,9 @@ local VirtualMaterial = {}
 ---@class VirtualRecipe
 ---@field type "virtual_recipe"
 ---@field name string
----@field localised_name LocalisedString
 ---@field sprite_path string
+---@field tooltip LocalisedString?
+---@field elem_tooltip ElemID?
 ---@field order string
 ---@field group_name string
 ---@field subgroup_name string

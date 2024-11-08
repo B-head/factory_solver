@@ -19,13 +19,39 @@ local type_dictionary = {
 
 ---comment
 ---@param typed_name TypedName
----@return ElemID?
-function M.typed_name_to_elem_id(typed_name)
-    local elem_type = type_dictionary[typed_name.type]
-    if elem_type and M.validate_typed_name(typed_name) then
-        return { type = elem_type, name = typed_name.name, quality = typed_name.quality }
+---@return LocalisedString?
+function M.typed_name_to_tooltip(typed_name)
+    if not M.validate_typed_name(typed_name) then
+        return nil
+    end
+
+    if typed_name.type == "virtual_material" then
+        local material = storage.virtuals.material[typed_name.name]
+        return material and material.tooltip
+    elseif typed_name.type == "virtual_recipe" then
+        local recipe = storage.virtuals.recipe[typed_name.name]
+        return recipe and recipe.tooltip
     else
         return nil
+    end
+end
+
+---comment
+---@param typed_name TypedName
+---@return ElemID?
+function M.typed_name_to_elem_id(typed_name)
+    if not M.validate_typed_name(typed_name) then
+        return nil
+    end
+
+    if typed_name.type == "virtual_material" then
+        local material = storage.virtuals.material[typed_name.name]
+        return material and material.elem_tooltip
+    elseif typed_name.type == "virtual_recipe" then
+        local recipe = storage.virtuals.recipe[typed_name.name]
+        return recipe and recipe.elem_tooltip
+    else
+        return { type = type_dictionary[typed_name.type], name = typed_name.name, quality = typed_name.quality }
     end
 end
 

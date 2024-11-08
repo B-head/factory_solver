@@ -11,8 +11,8 @@ function M.create_virtuals()
         ["<heat>"] = {
             type = "virtual_material",
             name = "<heat>",
-            localised_name = "Heat", --TODO
             sprite_path = "utility/heat_exchange_indication",
+            tooltip = "Heat energy",
             order = "a",
             group_name = "other",
             subgroup_name = "other",
@@ -20,8 +20,8 @@ function M.create_virtuals()
         ["<material-unknown>"] = {
             type = "virtual_material",
             name = "<material-unknown>",
-            localised_name = "Unknown material",
             sprite_path = "utility/questionmark",
+            tooltip = "Unknown virtual material",
             order = "z",
             group_name = "other",
             subgroup_name = "other",
@@ -130,8 +130,8 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             local space_rocket = {
                 type = "virtual_material",
                 name = space_rocket_name,
-                localised_name = "Space rocket",
                 sprite_path = sprite_path,
+                elem_tooltip = { type = "entity", name = rocket_entity_prototype.name },
                 order = rocket_entity_prototype.order,
                 group_name = rocket_entity_prototype.group.name,
                 subgroup_name = rocket_entity_prototype.subgroup.name,
@@ -143,8 +143,8 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             local recipe = {
                 type = "virtual_recipe",
                 name = string.format("<run>%s:%s:space-age", rocket_silo_prototype.name, rocket_part.name),
-                localised_name = { "item-name.space-science-pack" },
                 sprite_path = sprite_path,
+                elem_tooltip = { type = "recipe", name = rocket_part.name },
                 order = rocket_silo_prototype.order,
                 group_name = rocket_silo_prototype.group.name,
                 subgroup_name = rocket_silo_prototype.subgroup.name,
@@ -178,8 +178,8 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     type = "virtual_recipe",
                     name = string.format("<run>%s:%s:%s", rocket_silo_prototype.name,
                         rocket_part.name, has_rocket_launch_product.name),
-                    localised_name = { "item-name.space-science-pack" },
                     sprite_path = tn.get_sprite_path(products[1]),
+                    elem_tooltip = { type = "recipe", name = rocket_part.name },
                     order = rocket_silo_prototype.order,
                     group_name = rocket_silo_prototype.group.name,
                     subgroup_name = rocket_silo_prototype.subgroup.name,
@@ -214,8 +214,8 @@ function M.create_boiler_virtual(boiler_prototype)
     local recipe = {
         type = "virtual_recipe",
         name = "<run>" .. boiler_prototype.name,
-        localised_name = "<run>" .. boiler_prototype.name, --TODO
         sprite_path = "entity/" .. boiler_prototype.name,
+        elem_tooltip = { type = "entity", name = boiler_prototype.name },
         order = boiler_prototype.order,
         group_name = boiler_prototype.group.name,
         subgroup_name = boiler_prototype.subgroup.name,
@@ -247,8 +247,8 @@ function M.create_generator_virtual(generator_prototype)
     local recipe = {
         type = "virtual_recipe",
         name = "<run>" .. generator_prototype.name,
-        localised_name = "<run>" .. generator_prototype.name, --TODO
         sprite_path = "entity/" .. generator_prototype.name,
+        elem_tooltip = { type = "entity", name = generator_prototype.name },
         order = generator_prototype.order,
         group_name = generator_prototype.group.name,
         subgroup_name = generator_prototype.subgroup.name,
@@ -267,8 +267,8 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
     local recipe = {
         type = "virtual_recipe",
         name = "<run>" .. burner_generator_prototype.name,
-        localised_name = "<run>" .. burner_generator_prototype.name, --TODO
         sprite_path = "entity/" .. burner_generator_prototype.name,
+        elem_tooltip = { type = "entity", name = burner_generator_prototype.name },
         order = burner_generator_prototype.order,
         group_name = burner_generator_prototype.group.name,
         subgroup_name = burner_generator_prototype.subgroup.name,
@@ -287,8 +287,8 @@ function M.create_reactor_virtual(reactor_prototype)
     local recipe = {
         type = "virtual_recipe",
         name = "<run>" .. reactor_prototype.name,
-        localised_name = "<run>" .. reactor_prototype.name, --TODO
         sprite_path = "entity/" .. reactor_prototype.name,
+        elem_tooltip = { type = "entity", name = reactor_prototype.name },
         order = reactor_prototype.order,
         group_name = reactor_prototype.group.name,
         subgroup_name = reactor_prototype.subgroup.name,
@@ -335,8 +335,8 @@ function M.create_resource_virtual(resource_prototype)
     local recipe = {
         type = "virtual_recipe",
         name = "<mine>" .. resource_prototype.name,
-        localised_name = "<mine>" .. resource_prototype.name, --TODO
         sprite_path = "entity/" .. resource_prototype.name,
+        elem_tooltip = { type = "entity", name = resource_prototype.name },
         order = resource_prototype.order,
         group_name = resource_prototype.group.name,
         subgroup_name = resource_prototype.subgroup.name,
@@ -369,6 +369,7 @@ function M.create_offshore_tile_virtual(tile_prototype)
             name = string.format("<pump>%s:%s", offshore_pump_prototype.name, tile_prototype.name),
             localised_name = "<pump>" .. tile_prototype.name, --TODO
             sprite_path = "tile/" .. tile_prototype.name,
+            elem_tooltip = { type = "tile", name = tile_prototype.name },
             order = tile_prototype.order,
             group_name = tile_prototype.group.name,
             subgroup_name = tile_prototype.subgroup.name,
