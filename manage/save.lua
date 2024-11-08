@@ -635,8 +635,9 @@ end
 ---@param player_index integer
 ---@param solution Solution
 ---@param recipe_typed_name TypedName
+---@param fuel_typed_name TypedName?
 ---@param line_index integer?
-function M.new_production_line(player_index, solution, recipe_typed_name, line_index)
+function M.new_production_line(player_index, solution, recipe_typed_name, fuel_typed_name, line_index)
     local production_lines = solution.production_lines
     line_index = line_index or #production_lines + 1
 
@@ -650,7 +651,7 @@ function M.new_production_line(player_index, solution, recipe_typed_name, line_i
     end
 
     local machine_typed_name = M.get_machine_preset(player_index, recipe_typed_name)
-    local fuel_typed_name = M.get_fuel_preset(player_index, machine_typed_name)
+    fuel_typed_name = fuel_typed_name or M.get_fuel_preset(player_index, machine_typed_name)
 
     ---@type ProductionLine
     local line = {

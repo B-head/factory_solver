@@ -10,29 +10,45 @@ local handlers = {}
 ---@param event EventDataTrait
 function handlers.on_init_choose_visiblity(event)
     local elem = event.element
-    local kind = elem.tags.kind --[[@as string]]
-
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
     local dialog_tags = dialog.tags
 
-    if kind == "product" then
-        elem.visible = dialog_tags.is_choose_product --[[@as boolean]]
+    local kind = elem.tags.kind --[[@as string]]
+    local typed_name = dialog_tags.typed_name --[[@as TypedName]]
+    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
+
+    local relation_to_recipe
+    if typed_name.type == "item" then
+        relation_to_recipe = relation_to_recipes.item[typed_name.name]
+    elseif typed_name.type == "fluid" then
+        relation_to_recipe = relation_to_recipes.fluid[typed_name.name]
+    elseif typed_name.type == "virtual_material" then
+        relation_to_recipe = relation_to_recipes.virtual_recipe[typed_name.name]
     else
-        elem.visible = dialog_tags.is_choose_ingredient --[[@as boolean]]
+        assert()
+    end
+
+    if kind == "product" then
+        elem.visible = dialog_tags.is_choose_product and 0 < #relation_to_recipe.recipe_for_product
+    elseif kind == "ingredient" then
+        elem.visible = dialog_tags.is_choose_ingredient and 0 < #relation_to_recipe.recipe_for_ingredient
+    elseif kind == "fuel" then
+        elem.visible = dialog_tags.is_choose_ingredient and 0 < #relation_to_recipe.recipe_for_fuel
+    else
+        assert()
     end
 end
 
 ---@param event EventDataTrait
 function handlers.on_make_choose_table(event)
     local elem = event.element
-    local player_data = save.get_player_data(event.player_index)
-    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
-
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
     local dialog_tags = dialog.tags
 
+    local player_data = save.get_player_data(event.player_index)
     local kind = elem.tags.kind --[[@as string]]
     local typed_name = dialog_tags.typed_name --[[@as TypedName]]
+    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     local relation_to_recipe
     if typed_name.type == "item" then
@@ -46,12 +62,14 @@ function handlers.on_make_choose_table(event)
     end
 
     local recipe_names
-    if not relation_to_recipe then
-        recipe_names = {}
-    elseif kind == "product" then
+    if kind == "product" then
         recipe_names = relation_to_recipe.recipe_for_product
-    else
+    elseif kind == "ingredient" then
         recipe_names = relation_to_recipe.recipe_for_ingredient
+    elseif kind == "fuel" then
+        recipe_names = relation_to_recipe.recipe_for_fuel
+    else
+        assert()
     end
 
     local used_recipes = flib_table.map(recipe_names, function(name)
@@ -97,12 +115,13 @@ function handlers.on_make_choose_table(event)
                     goto inner_continue
                 end
 
-                local def = common.create_decorated_sprite_button{
+                local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
                     tags = {
                         recipe_typed_name = typed_name,
+                        kind = kind
                     },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_picker_button_click,
@@ -151,8 +170,11 @@ function handlers.on_production_line_picker_button_click(event)
 
     local recipe_typed_name = tags.recipe_typed_name --[[@as TypedName]]
     local line_index = dialog.tags.line_index --[[@as integer?]]
+    local kind = tags.kind --[[@as string]]
+    local typed_name = dialog.tags.typed_name --[[@as TypedName]]
 
-    save.new_production_line(event.player_index, solution, recipe_typed_name, line_index)
+    local fuel_typed_name = (kind == "fuel") and typed_name or nil
+    save.new_production_line(event.player_index, solution, recipe_typed_name, fuel_typed_name, line_index)
 
     local re_event = fs_util.create_gui_event(dialog)
     common.on_close_self(re_event)
@@ -279,6 +301,43 @@ return {
                         draw_horizontal_lines = true,
                         tags = {
                             kind = "ingredient",
+                        },
+                        handler = {
+                            on_added = handlers.on_make_choose_table,
+                            on_craft_visible_changed = handlers.on_make_choose_table,
+                        },
+                    },
+                },
+            },
+            {
+                type = "frame",
+                name = "recipe_for_fuel",
+                style = "flib_shallow_frame_in_shallow_frame",
+                direction = "vertical",
+                visible = false,
+                tags = {
+                    kind = "fuel",
+                },
+                handler = {
+                    on_added = handlers.on_init_choose_visiblity,
+                },
+                {
+                    type = "scroll-pane",
+                    style = "factory_solver_scroll_pane",
+                    horizontal_scroll_policy = "never",
+                    vertical_scroll_policy = "auto-and-reserve-space",
+                    {
+                        type = "label",
+                        style = "caption_label",
+                        caption = "Recipe for fuel",
+                    },
+                    {
+                        type = "table",
+                        style = "factory_solver_choose_table",
+                        column_count = 2,
+                        draw_horizontal_lines = true,
+                        tags = {
+                            kind = "fuel",
                         },
                         handler = {
                             on_added = handlers.on_make_choose_table,

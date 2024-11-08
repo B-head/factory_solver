@@ -11,6 +11,7 @@ Date: ????
       Not useful because they cannot be part of recipe chain.
   Gui:
     - Add a tooltip to virtual recipes.
+    - Be able to select a recipe from fuels.
   Bugfixes:
     - Fix crash when fluid power is used in boiler.
 ---------------------------------------------------------------------------------------------------

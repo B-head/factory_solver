@@ -58,9 +58,10 @@ local ForceLocalData = {}
 local RelationToRecipes = {}
 
 ---@class RelationToRecipe
----@field enabled_recipe_used_count integer
+---@field craftable_count integer
 ---@field recipe_for_product string[]
 ---@field recipe_for_ingredient string[]
+---@field recipe_for_fuel string[]
 local RelationToRecipe = {}
 
 ---@class GroupInfos

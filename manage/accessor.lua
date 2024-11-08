@@ -232,16 +232,16 @@ end
 function M.is_unresearched(craft, relation_to_recipes)
     ---@diagnostic disable: param-type-mismatch
     if craft.object_name == "LuaItemPrototype" then
-        return not (0 < relation_to_recipes.item[craft.name].enabled_recipe_used_count)
+        return not (0 < relation_to_recipes.item[craft.name].craftable_count)
     elseif craft.object_name == "LuaFluidPrototype" then
-        return not (0 < relation_to_recipes.fluid[craft.name].enabled_recipe_used_count)
+        return not (0 < relation_to_recipes.fluid[craft.name].craftable_count)
     elseif craft.object_name == "LuaRecipePrototype" then
         return not relation_to_recipes.enabled_recipe[craft.name]
     elseif craft.object_name == "LuaEntityPrototype" then
         local ret = true
         for _, value in ipairs(craft.items_to_place_this) do
             local item = prototypes.item[value.name]
-            local is_researched = 0 < relation_to_recipes.item[item.name].enabled_recipe_used_count
+            local is_researched = 0 < relation_to_recipes.item[item.name].craftable_count
             ret = ret and not is_researched
         end
         return ret

@@ -5,6 +5,60 @@ local tn = require "manage/typed_name"
 
 local M = {}
 
+---comment
+---@return table<string, string[]>, table<string, string[]>, string[]
+function M.cache_fuel_names()
+    local cache_crafting_fuels = {}
+    for crafting_category_name, _ in pairs(prototypes.recipe_category) do
+        local machines = acc.get_machines_in_category(crafting_category_name)
+
+        local fuel_categories = {}
+        for _, machine in pairs(machines) do
+            local res = acc.try_get_fuel_categories(machine)
+            if not res then
+                goto continue
+            end
+            for key, _ in pairs(res) do
+                fuel_categories[key] = true
+            end
+            ::continue::
+        end
+
+        local fuels = acc.get_fuels_in_categories(fuel_categories)
+        cache_crafting_fuels[crafting_category_name] = flib_table.map(fuels, function(value)
+            return value.name
+        end)
+    end
+
+    local cache_resource_fuels = {}
+    for resource_category_name, _ in pairs(prototypes.resource_category) do
+        local machines = acc.get_machines_in_resource_category(resource_category_name)
+
+        local fuel_categories = {}
+        for _, machine in pairs(machines) do
+            local res = acc.try_get_fuel_categories(machine)
+            if not res then
+                goto continue
+            end
+            for key, _ in pairs(res) do
+                fuel_categories[key] = true
+            end
+            ::continue::
+        end
+
+        local fuels = acc.get_fuels_in_categories(fuel_categories)
+        cache_resource_fuels[resource_category_name] = flib_table.map(fuels, function(value)
+            return value.name
+        end)
+    end
+
+    local any_fluid_fuels = flib_table.map(acc.get_any_fluid_fuels(), function(value)
+        return value.name
+    end)
+
+    return cache_crafting_fuels, cache_resource_fuels, any_fluid_fuels
+end
+
 ---Create caches of relation to recipe for items, fluids and virtuals.
 ---@param force_index integer
 ---@return RelationToRecipes
@@ -15,114 +69,108 @@ function M.create_relation_to_recipes(force_index)
     local fluids = {} ---@type table<string, RelationToRecipe>
     local virtuals = {} ---@type table<string, RelationToRecipe>
 
+    local cache_crafting_fuels, cache_resource_fuels, any_fluid_fuels = M.cache_fuel_names()
+
+    ---@return RelationToRecipe
+    local function create_relation_table()
+        ---@type RelationToRecipe
+        return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_fuel = {} }
+    end
+
+    ---@param filter_type FilterType|"research-progress"
+    ---@param name string
+    ---@return RelationToRecipe
+    local function get_info(filter_type, name)
+        if filter_type == "item" then
+            return items[name]
+        elseif filter_type == "fluid" then
+            return fluids[name]
+        elseif filter_type == "virtual_material" then
+            return virtuals[name]
+        else
+            return assert()
+        end
+    end
+
     for key, _ in pairs(prototypes.item) do
-        items[key] = { enabled_recipe_used_count = 0, recipe_for_ingredient = {}, recipe_for_product = {} }
+        items[key] = create_relation_table()
     end
-
     for key, _ in pairs(prototypes.fluid) do
-        fluids[key] = { enabled_recipe_used_count = 0, recipe_for_ingredient = {}, recipe_for_product = {} }
+        fluids[key] = create_relation_table()
     end
-
     for key, _ in pairs(storage.virtuals.material) do
-        virtuals[key] = { enabled_recipe_used_count = 0, recipe_for_ingredient = {}, recipe_for_product = {} }
+        virtuals[key] = create_relation_table()
     end
 
     for _, recipe in pairs(force.recipes) do
         enabled_recipe[recipe.name] = recipe.enabled
 
         for _, value in ipairs(recipe.products) do
-            local info
-            if value.type == "item" then
-                info = items[value.name]
-            elseif value.type == "fluid" then
-                info = fluids[value.name]
-            else
-                assert()
-            end
-
+            local info = get_info(value.type, value.name)
             flib_table.insert(info.recipe_for_product, recipe.name)
             if recipe.enabled and not recipe.hidden then
-                info.enabled_recipe_used_count = info.enabled_recipe_used_count + 1
+                info.craftable_count = info.craftable_count + 1
             end
         end
 
         for _, value in ipairs(recipe.ingredients) do
-            local info
-            if value.type == "item" then
-                info = items[value.name]
-            elseif value.type == "fluid" then
-                info = fluids[value.name]
-            else
-                assert()
-            end
-
+            local info = get_info(value.type, value.name)
             flib_table.insert(info.recipe_for_ingredient, recipe.name)
-            if recipe.enabled and not recipe.hidden then
-                info.enabled_recipe_used_count = info.enabled_recipe_used_count + 1
-            end
+        end
+
+        for _, value in ipairs(cache_crafting_fuels[recipe.category]) do
+            local info = get_info("item", value) -- TODO fluid fuels
+            flib_table.insert(info.recipe_for_fuel, recipe.name)
         end
     end
 
     for _, recipe in pairs(storage.virtuals.recipe) do
         for _, value in pairs(recipe.products) do
-            local info
-            if value.type == "item" then
-                info = items[value.name]
-            elseif value.type == "fluid" then
-                info = fluids[value.name]
-            elseif value.type == "virtual_material" then
-                info = virtuals[value.name]
-            else
-                assert()
-            end
-
+            local info = get_info(value.type, value.name)
             flib_table.insert(info.recipe_for_product, recipe.name)
-            -- if recipe.enabled then -- TODO
-            --     info.enabled_recipe_used_count = info.enabled_recipe_used_count + 1
-            -- end
+            if true then -- TODO
+                info.craftable_count = info.craftable_count + 1
+            end
         end
 
         for _, value in pairs(recipe.ingredients) do
-            local info
-            if value.type == "item" then
-                info = items[value.name]
-            elseif value.type == "fluid" then
-                info = fluids[value.name]
-            elseif value.type == "virtual_material" then
-                info = virtuals[value.name]
-            else
-                assert()
+            local info = get_info(value.type, value.name)
+            flib_table.insert(info.recipe_for_ingredient, recipe.name)
+        end
+
+        if recipe.fixed_crafting_machine then
+            local machine = tn.typed_name_to_machine(recipe.fixed_crafting_machine)
+
+            local fixed_fuel = acc.try_get_fixed_fuel(machine)
+            if fixed_fuel then
+                local info = get_info(fixed_fuel.type, fixed_fuel.name)
+                flib_table.insert(info.recipe_for_fuel, recipe.name)
             end
 
-            flib_table.insert(info.recipe_for_ingredient, recipe.name)
-            -- if recipe.enabled then -- TODO
-            --     info.enabled_recipe_used_count = info.enabled_recipe_used_count + 1
-            -- end
+            if acc.is_use_any_fluid_fuel(machine) then
+                for _, value in ipairs(any_fluid_fuels) do
+                    local info = get_info("fluid", value)
+                    flib_table.insert(info.recipe_for_fuel, recipe.name)
+                end
+            end
+
+            local fuel_categories = acc.try_get_fuel_categories(machine)
+            if fuel_categories then
+                local fuels = acc.get_fuels_in_categories(fuel_categories)
+                for _, value in ipairs(fuels) do
+                    local info = get_info("item", value.name)
+                    flib_table.insert(info.recipe_for_fuel, recipe.name)
+                end
+            end
+        end
+
+        if recipe.resource_category then
+            for _, value in ipairs(cache_resource_fuels[recipe.resource_category]) do
+                local info = get_info("item", value) -- TODO fluid fuels
+                flib_table.insert(info.recipe_for_fuel, recipe.name)
+            end
         end
     end
-
-    -- for _, machine in pairs(storage.virtuals.machine) do
-    --     local value = machine.energy_source.fixed_fuel_typed_name
-    --     if value then
-    --         local info
-    --         if value.type == "item" then
-    --             info = items[value.name]
-    --         elseif value.type == "fluid" then
-    --             info = fluids[value.name]
-    --         elseif value.type == "virtual_material" then
-    --             info = virtuals[value.name]
-    --         else
-    --             assert()
-    --         end
-
-    --         local categories = machine.crafting_categories
-    --         for _, recipe in pairs(storage.virtuals.recipe) do
-    --             if categories[recipe.category] then
-    --                 flib_table.insert(info.recipe_for_ingredient, recipe.name)
-    --             end
-    --         end
-    --     end
-    -- end
 
     return { enabled_recipe = enabled_recipe, item = items, fluid = fluids, virtual_recipe = virtuals }
 end
@@ -163,7 +211,7 @@ function M.create_group_infos(force_index, relation_to_recipes)
             local item_group = items[item.group.name]
             if item.hidden then
                 item_group.hidden_count = item_group.hidden_count + 1
-            elseif 0 < relation_to_recipes.item[key].enabled_recipe_used_count then
+            elseif 0 < relation_to_recipes.item[key].craftable_count then
                 item_group.researched_count = item_group.researched_count + 1
             else
                 item_group.unresearched_count = item_group.unresearched_count + 1
@@ -176,7 +224,7 @@ function M.create_group_infos(force_index, relation_to_recipes)
             local fluid_group = fluids[fluid.group.name]
             if fluid.hidden then
                 fluid_group.hidden_count = fluid_group.hidden_count + 1
-            elseif 0 < relation_to_recipes.fluid[key].enabled_recipe_used_count then
+            elseif 0 < relation_to_recipes.fluid[key].craftable_count then
                 fluid_group.researched_count = fluid_group.researched_count + 1
             else
                 fluid_group.unresearched_count = fluid_group.unresearched_count + 1
