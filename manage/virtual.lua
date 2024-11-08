@@ -36,20 +36,15 @@ function M.create_virtuals()
         if entity.type == "rocket-silo" then
             result_crafts = M.create_rocket_silo_virtual(entity)
         elseif entity.type == "boiler" then
-            local recipe = M.create_boiler_virtual(entity)
-            recipes[recipe.name] = recipe
+            result_crafts = M.create_boiler_virtual(entity)
         elseif entity.type == "generator" then
-            local recipe = M.create_generator_virtual(entity)
-            recipes[recipe.name] = recipe
+            result_crafts = M.create_generator_virtual(entity)
         elseif entity.type == "burner-generator" then
-            local recipe = M.create_burner_generator_virtual(entity)
-            recipes[recipe.name] = recipe
+            result_crafts = M.create_burner_generator_virtual(entity)
         elseif entity.type == "reactor" then
-            local recipe = M.create_reactor_virtual(entity)
-            recipes[recipe.name] = recipe
+            result_crafts = M.create_reactor_virtual(entity)
         elseif entity.type == "resource" then
-            local recipe = M.create_resource_virtual(entity)
-            recipes[recipe.name] = recipe
+            result_crafts = M.create_resource_virtual(entity)
         end
 
         for _, craft in ipairs(result_crafts) do
@@ -197,14 +192,15 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
 end
 
 ---@param boiler_prototype LuaEntityPrototype
----@return VirtualRecipe
+---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_boiler_virtual(boiler_prototype)
-    local input_fluid = assert(acc.get_fluidbox_filter_prototype(boiler_prototype, 1)) -- TODO any fluid
+    local input_fluid = acc.get_fluidbox_filter_prototype(boiler_prototype, 1) -- TODO any fluid
     local output_fluid = acc.get_fluidbox_filter_prototype(boiler_prototype, 2) or input_fluid
 
     if not input_fluid then
         return {}
     end
+    assert(output_fluid)
 
     -- TODO virtual temperatue
     local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
@@ -236,11 +232,11 @@ function M.create_boiler_virtual(boiler_prototype)
         fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
     }
 
-    return recipe
+    return { recipe }
 end
 
 ---@param generator_prototype LuaEntityPrototype
----@return VirtualRecipe
+---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_generator_virtual(generator_prototype)
     -- TODO virtual temperatue
     ---@type VirtualRecipe
@@ -257,11 +253,11 @@ function M.create_generator_virtual(generator_prototype)
         fixed_crafting_machine = tn.craft_to_typed_name(generator_prototype),
     }
 
-    return recipe
+    return { recipe }
 end
 
 ---@param burner_generator_prototype LuaEntityPrototype
----@return VirtualRecipe
+---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_burner_generator_virtual(burner_generator_prototype)
     ---@type VirtualRecipe
     local recipe = {
@@ -277,11 +273,11 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
         fixed_crafting_machine = tn.craft_to_typed_name(burner_generator_prototype),
     }
 
-    return recipe
+    return { recipe }
 end
 
 ---@param reactor_prototype LuaEntityPrototype
----@return VirtualRecipe
+---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_reactor_virtual(reactor_prototype)
     ---@type VirtualRecipe
     local recipe = {
@@ -303,11 +299,11 @@ function M.create_reactor_virtual(reactor_prototype)
         fixed_crafting_machine = tn.craft_to_typed_name(reactor_prototype),
     }
 
-    return recipe
+    return { recipe }
 end
 
 ---@param resource_prototype LuaEntityPrototype
----@return VirtualRecipe
+---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_resource_virtual(resource_prototype)
     local mineable = resource_prototype.mineable_properties
 
@@ -345,7 +341,7 @@ function M.create_resource_virtual(resource_prototype)
         resource_category = resource_prototype.resource_category,
     }
 
-    return recipe
+    return { recipe }
 end
 
 ---@param tile_prototype LuaTilePrototype
