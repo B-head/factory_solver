@@ -167,6 +167,14 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     flib_table.insert(products, amount)
                 end
 
+                local payload = {
+                    type = "item",
+                    name = has_rocket_launch_product.name,
+                    amount_per_second = 1 / (energy * rocket_parts_required)
+                }
+                local modify_ingredients = flib_table.deep_copy(ingredients)
+                flib_table.insert(modify_ingredients, payload)
+
                 -- TODO Add note that power consumption is calculated to be higher.
                 ---@type VirtualRecipe
                 local recipe = {
@@ -179,7 +187,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     group_name = rocket_silo_prototype.group.name,
                     subgroup_name = rocket_silo_prototype.subgroup.name,
                     products = products,
-                    ingredients = ingredients,
+                    ingredients = modify_ingredients,
                     fixed_crafting_machine = tn.craft_to_typed_name(rocket_silo_prototype),
                     crafting_speed_cap = crafting_speed_cap,
                 }
