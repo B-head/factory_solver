@@ -1,6 +1,6 @@
 {
     "name": "factory_solver",
-    "version": "0.3.2",
+    "version": "0.3.3",
     "title": "Factory solver based on IPMs for LP",
     "author": "B_head",
     "description": "Calculate quantities of machine and ingredient required in a factory to achieve materials production speed.",
