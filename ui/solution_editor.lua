@@ -109,7 +109,7 @@ function handlers.make_production_line_table(event)
             local def = {
                 type = "label",
                 tags = {
-                    result_key = line.recipe_typed_name.name,
+                    result_typed_name = line.recipe_typed_name,
                 },
                 handler = {
                     on_added = handlers.update_machines_required,
@@ -219,7 +219,7 @@ function handlers.make_production_line_table(event)
                         line_index = line_index,
                         typed_name = typed_name,
                         is_product = false,
-                        result_key = line.recipe_typed_name.name,
+                        result_typed_name = line.recipe_typed_name,
                         raw_amount = raw_amount,
                     },
                     handler = {
@@ -253,7 +253,7 @@ function handlers.make_production_line_table(event)
                 local def = {
                     type = "label",
                     tags = {
-                        result_key = line.recipe_typed_name.name,
+                        result_typed_name = line.recipe_typed_name,
                         raw_amount = power,
                     },
                     handler = {
@@ -281,7 +281,7 @@ function handlers.make_production_line_table(event)
                         line_index = line_index,
                         typed_name = ftn,
                         is_product = false,
-                        result_key = line.recipe_typed_name.name,
+                        result_typed_name = line.recipe_typed_name,
                         raw_amount = amount_per_second,
                     },
                     handler = {
@@ -314,7 +314,7 @@ function handlers.make_production_line_table(event)
             local def = {
                 type = "label",
                 tags = {
-                    result_key = line.recipe_typed_name.name,
+                    result_typed_name = line.recipe_typed_name,
                     raw_amount = pollution,
                 },
                 handler = {
@@ -351,8 +351,8 @@ function handlers.update_machines_required(event)
     local tags = elem.tags
     local solution = assert(save.get_selected_solution(event.player_index))
 
-    local result_key = tags.result_key --[[@as string]]
-    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key)
+    local result_typed_name = tags.result_typed_name --[[@as TypedName]]
+    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
     elem.caption = flib_format.number(quantity_of_machines_required, false, 5)
 end
 
@@ -363,9 +363,9 @@ function handlers.update_amount(event)
     local player_data = save.get_player_data(event.player_index)
     local solution = assert(save.get_selected_solution(event.player_index))
 
-    local result_key = tags.result_key --[[@as string]]
+    local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
-    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key) + acc.tolerance
+    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name) + acc.tolerance
     elem.number = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
 end
 
@@ -376,9 +376,9 @@ function handlers.update_power(event)
     local player_data = save.get_player_data(event.player_index)
     local solution = assert(save.get_selected_solution(event.player_index))
 
-    local result_key = tags.result_key --[[@as string]]
+    local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
-    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key)
+    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
     local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = common.format_power(amount)
 end
@@ -390,9 +390,9 @@ function handlers.update_pollution(event)
     local player_data = save.get_player_data(event.player_index)
     local solution = assert(save.get_selected_solution(event.player_index))
 
-    local result_key = tags.result_key --[[@as string]]
+    local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
-    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key)
+    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
     local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = flib_format.number(amount, false, 5)
 end

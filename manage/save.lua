@@ -279,7 +279,7 @@ function M.get_total_amounts(solution)
         local crafting_energy = acc.get_crafting_energy(recipe)
         local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
-        local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
+        local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
         for _, value in pairs(recipe.products) do
             local amount_per_second = acc.raw_product_to_amount(value, crafting_energy, crafting_speed,
@@ -347,7 +347,7 @@ function M.get_total_power(solution)
         local effectivity = M.get_total_effectivity(module_counts)
         local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
-        local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
+        local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
         if not acc.is_use_fuel(machine) then
             local power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
@@ -372,7 +372,7 @@ function M.get_total_pollution(solution)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
         local effectivity = M.get_total_effectivity(module_counts)
-        local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
+        local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
         local pollution = acc.raw_emission_to_pollution(machine, "pollution", machine_quality,
             effectivity.consumption, effectivity.pollution)
@@ -391,10 +391,11 @@ end
 
 ---comment
 ---@param solution Solution
----@param result_key string
+---@param typed_name TypedName
 ---@return number
-function M.get_quantity_of_machines_required(solution, result_key)
-    return solution.quantity_of_machines_required[result_key] or 1
+function M.get_quantity_of_machines_required(solution, typed_name)
+    local variable_name = string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
+    return solution.quantity_of_machines_required[variable_name] or 1
 end
 
 ---comment
