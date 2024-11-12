@@ -462,7 +462,7 @@ function M.get_total_effectivity(module_counts)
         consumption = 1,
         productivity = 1,
         pollution = 1,
-        quality = 1,
+        quality = 0,
     }
 
     ---@param effect number?
@@ -472,13 +472,14 @@ function M.get_total_effectivity(module_counts)
     ---@return number
     local function modify(effect, count, quality_level, is_negative)
         effect = effect or 0
+        local multiplier = (1 + quality_level * 0.3)
         if is_negative then
             if effect < 0 then
-                effect = effect * quality_level * 0.3
+                effect = effect * multiplier
             end
         else
             if effect > 0 then
-                effect = effect * quality_level * 0.3
+                effect = effect * multiplier
             end
         end
         return effect * count
@@ -507,7 +508,7 @@ function M.get_total_effectivity(module_counts)
     ret.consumption = math.max(ret.consumption, 0.2)
     ret.productivity = math.max(ret.productivity, 1)
     ret.pollution = math.max(ret.pollution, 0.2)
-    ret.quality = math.max(ret.quality, 1)
+    ret.quality = math.max(ret.quality / 10, 0) -- TODO bug report
 
     return ret
 end
