@@ -110,6 +110,27 @@ function M.create_decorated_sprite_button(data)
     }
 end
 
+---@param elem LuaGuiElement
+---@param initial_value string
+function M.make_quality_dropdown(elem, initial_value)
+    local dictionary = {}
+    local qualities = fs_util.sort_prototypes(fs_util.to_list(prototypes.quality))
+    for _, value in ipairs(qualities) do
+        if not value.hidden then
+            local localised_string = { "", "[quality=", value.name, "] ", value.localised_name }
+            elem.add_item(localised_string)
+            flib_table.insert(dictionary, value.name)
+            if initial_value == value.name then
+                elem.selected_index = #dictionary
+            end
+        end
+    end
+
+    local tags = elem.tags
+    tags.dictionary = dictionary
+    elem.tags = tags
+end
+
 ---comment
 ---@param player_index integer
 ---@param is_dialog boolean

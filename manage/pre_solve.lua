@@ -56,6 +56,7 @@ function M.to_normalized_production_lines(production_lines)
     local normalized_production_lines = {}
     for _, line in ipairs(production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+        local recipe_quality = line.recipe_typed_name.quality
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
@@ -71,12 +72,16 @@ function M.to_normalized_production_lines(production_lines)
                 effectivity.productivity)
 
             ---@type NormalizedAmount
-            local amount = {
+            local normalized_amount = {
                 type = value.type, -- TODO research-progress
                 name = value.name,
+                quality = recipe_quality,
                 amount_per_second = amount_per_second,
             }
-            flib_table.insert(products, amount)
+            local decomposed = M.quality_decomposition(normalized_amount, effectivity.quality)
+            for _, value in ipairs(decomposed) do
+                flib_table.insert(products, value)
+            end
         end
 
         ---@type NormalizedAmount[]
@@ -85,12 +90,13 @@ function M.to_normalized_production_lines(production_lines)
             local amount_per_second = acc.raw_ingredient_to_amount(value, crafting_energy, crafting_speed)
 
             ---@type NormalizedAmount
-            local amount = {
+            local normalized_amount = {
                 type = value.type,
                 name = value.name,
+                quality = recipe_quality,
                 amount_per_second = amount_per_second,
             }
-            flib_table.insert(ingredients, amount)
+            flib_table.insert(ingredients, normalized_amount)
         end
 
         local power = 0
@@ -101,12 +107,13 @@ function M.to_normalized_production_lines(production_lines)
                 fuel, ftn.quality, effectivity.consumption)
 
             ---@type NormalizedAmount
-            local amount = {
+            local normalized_amount = {
                 type = ftn.type,
                 name = ftn.name,
+                quality = ftn.quality,
                 amount_per_second = amount_per_second,
             }
-            flib_table.insert(ingredients, amount)
+            flib_table.insert(ingredients, normalized_amount)
         elseif acc.is_generator(machine) then
             power = acc.raw_energy_production_to_power(machine, machine_quality)
         else
@@ -126,6 +133,51 @@ function M.to_normalized_production_lines(production_lines)
         flib_table.insert(normalized_production_lines, normalized_line)
     end
     return normalized_production_lines
+end
+
+---comment
+---@param normalized_amount NormalizedAmount
+---@param effectivity_quality number
+---@return NormalizedAmount[]
+function M.quality_decomposition(normalized_amount, effectivity_quality)
+    if effectivity_quality <= 0 then
+        return { normalized_amount }
+    end
+
+    local current_quality = normalized_amount.quality
+    local current_probability = 1
+    local ret = {}
+
+    repeat
+        local next_quality
+        local next_probability
+        local quality_prototype = prototypes.quality[current_quality]
+        if quality_prototype.next then
+            next_quality = quality_prototype.next.name
+            if quality_prototype.name == normalized_amount.quality then
+                next_probability = math.min(effectivity_quality, 1)
+            else
+                next_probability = current_probability * quality_prototype.next_probability
+            end
+        else
+            next_quality = "unknown-quality"
+            next_probability = 0
+        end
+
+        ---@type NormalizedAmount
+        local add_value = {
+            type = normalized_amount.type,
+            name = normalized_amount.name,
+            quality = current_quality,
+            amount_per_second = current_probability - next_probability,
+        }
+        flib_table.insert(ret, add_value)
+
+        current_quality = next_quality
+        current_probability = next_probability
+    until 0 == current_probability
+
+    return ret
 end
 
 return M

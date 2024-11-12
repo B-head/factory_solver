@@ -90,6 +90,7 @@ local Solution = {}
 ---@class Constraint
 ---@field type FilterType
 ---@field name string
+---@field quality string
 ---@field limit_type LimitType
 ---@field limit_amount_per_second number
 local Constraint = {}
@@ -125,6 +126,7 @@ local NormalizedProductionLine
 ---@class NormalizedAmount
 ---@field type FilterType
 ---@field name string
+---@field quality string
 ---@field amount_per_second number
 local NormalizedAmount = {}
 

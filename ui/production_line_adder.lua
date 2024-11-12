@@ -13,17 +13,20 @@ function handlers.on_init_choose_visiblity(event)
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
     local dialog_tags = dialog.tags
 
+    local reference_typed_name = dialog_tags.typed_name --[[@as TypedName]]
+    dialog_tags.recipe_quality = reference_typed_name.quality
+    dialog.tags = dialog_tags
+
     local kind = elem.tags.kind --[[@as string]]
-    local typed_name = dialog_tags.typed_name --[[@as TypedName]]
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     local relation_to_recipe
-    if typed_name.type == "item" then
-        relation_to_recipe = relation_to_recipes.item[typed_name.name]
-    elseif typed_name.type == "fluid" then
-        relation_to_recipe = relation_to_recipes.fluid[typed_name.name]
-    elseif typed_name.type == "virtual_material" then
-        relation_to_recipe = relation_to_recipes.virtual_recipe[typed_name.name]
+    if reference_typed_name.type == "item" then
+        relation_to_recipe = relation_to_recipes.item[reference_typed_name.name]
+    elseif reference_typed_name.type == "fluid" then
+        relation_to_recipe = relation_to_recipes.fluid[reference_typed_name.name]
+    elseif reference_typed_name.type == "virtual_material" then
+        relation_to_recipe = relation_to_recipes.virtual_recipe[reference_typed_name.name]
     else
         assert()
     end
@@ -162,6 +165,25 @@ function handlers.on_make_choose_table(event)
     end
 end
 
+---@param event EventDataTrait
+function handlers.on_make_recipe_quality_dropdown(event)
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_production_line_adder"))
+    local initial_value = dialog.tags.recipe_quality --[[@as string]]
+
+    common.make_quality_dropdown(event.element, initial_value)
+end
+
+---@param event EventData.on_gui_selection_state_changed
+function handlers.on_recipe_quality_state_changed(event)
+    local elem = event.element
+    local dictionary = elem.tags.dictionary
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_production_line_adder"))
+
+    local dialog_tags = dialog.tags
+    dialog_tags.recipe_quality = dictionary[elem.selected_index]
+    dialog.tags = dialog_tags
+end
+
 ---@param event EventData.on_gui_click
 function handlers.on_production_line_picker_button_click(event)
     local tags = event.element.tags
@@ -169,11 +191,14 @@ function handlers.on_production_line_picker_button_click(event)
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
 
     local recipe_typed_name = tags.recipe_typed_name --[[@as TypedName]]
+    local recipe_quality = dialog.tags.recipe_quality --[[@as string]]
+    recipe_typed_name.quality = recipe_quality
+
     local line_index = dialog.tags.line_index --[[@as integer?]]
     local kind = tags.kind --[[@as string]]
-    local typed_name = dialog.tags.typed_name --[[@as TypedName]]
+    local reference_typed_name = dialog.tags.typed_name --[[@as TypedName]]
+    local fuel_typed_name = (kind == "fuel") and reference_typed_name or nil
 
-    local fuel_typed_name = (kind == "fuel") and typed_name or nil
     save.new_production_line(event.player_index, solution, recipe_typed_name, fuel_typed_name, line_index)
 
     local re_event = fs_util.create_gui_event(dialog)
@@ -344,6 +369,23 @@ return {
                             on_craft_visible_changed = handlers.on_make_choose_table,
                         },
                     },
+                },
+            },
+        },
+        {
+            type = "flow",
+            style = "factory_solver_centering_horizontal_flow",
+            direction = "horizontal",
+            visible = common.is_active_quality(),
+            {
+                type = "label",
+                caption = "Quality",
+            },
+            {
+                type = "drop-down",
+                handler = {
+                    on_added = handlers.on_make_recipe_quality_dropdown,
+                    [defines.events.on_gui_selection_state_changed] = handlers.on_recipe_quality_state_changed,
                 },
             },
         },

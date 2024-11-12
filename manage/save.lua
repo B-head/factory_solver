@@ -598,6 +598,7 @@ function M.new_constraint(solution, typed_name)
     local add_data = {
         type = typed_name.type,
         name = typed_name.name,
+        quality = typed_name.quality,
         limit_type = "upper",
         limit_amount_per_second = amount,
     }

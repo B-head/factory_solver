@@ -117,7 +117,7 @@ function handlers.on_make_constraint_picker(event)
             return
         end
 
-        local def = common.create_decorated_sprite_button{
+        local def = common.create_decorated_sprite_button {
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
@@ -221,16 +221,41 @@ function handlers.on_make_constraint_picker(event)
     end
 end
 
+---@param event EventDataTrait
+function handlers.on_make_craft_quality_dropdown(event)
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_constraint_adder"))
+    local initial_value = "normal" --[[@as string]]
+
+    common.make_quality_dropdown(event.element, initial_value)
+    
+    local dialog_tags = dialog.tags
+    dialog_tags.craft_quality = initial_value
+    dialog.tags = dialog_tags
+end
+
+---@param event EventData.on_gui_selection_state_changed
+function handlers.on_craft_quality_state_changed(event)
+    local elem = event.element
+    local dictionary = elem.tags.dictionary
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_constraint_adder"))
+
+    local dialog_tags = dialog.tags
+    dialog_tags.craft_quality = dictionary[elem.selected_index]
+    dialog.tags = dialog_tags
+end
+
 ---@param event EventData.on_gui_click
 function handlers.on_constraint_picker_button_click(event)
     local tags = event.element.tags
     local solution = assert(save.get_selected_solution(event.player_index))
+    local dialog = assert(common.find_root_element(event.player_index, "factory_solver_constraint_adder"))
 
     local typed_name = tags.typed_name --[[@as TypedName]]
+    local craft_quality = dialog.tags.craft_quality --[[@as string]]
+    typed_name.quality = craft_quality
 
     save.new_constraint(solution, typed_name)
 
-    local dialog = assert(common.find_root_element(event.player_index, "factory_solver_constraint_adder"))
     local re_event = fs_util.create_gui_event(dialog)
     common.on_close_self(re_event)
 
@@ -433,6 +458,23 @@ return {
                             on_filter_group_changed = handlers.on_make_constraint_picker,
                             on_craft_visible_changed = handlers.on_make_constraint_picker,
                         },
+                    },
+                },
+            },
+            {
+                type = "flow",
+                style = "factory_solver_centering_horizontal_flow",
+                direction = "horizontal",
+                visible = common.is_active_quality(),
+                {
+                    type = "label",
+                    caption = "Quality",
+                },
+                {
+                    type = "drop-down",
+                    handler = {
+                        on_added = handlers.on_make_craft_quality_dropdown,
+                        [defines.events.on_gui_selection_state_changed] = handlers.on_craft_quality_state_changed,
                     },
                 },
             },

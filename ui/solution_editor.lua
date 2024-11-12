@@ -46,6 +46,7 @@ function handlers.make_production_line_table(event)
 
     for line_index, line in ipairs(solution.production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+        local recipe_quality = line.recipe_typed_name.quality
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
@@ -166,7 +167,7 @@ function handlers.make_production_line_table(event)
         do
             local buttons = {}
             for _, value in pairs(recipe.products) do
-                local typed_name = tn.create_typed_name(value.type, value.name) -- TODO research-progress
+                local typed_name = tn.create_typed_name(value.type, value.name, recipe_quality) -- TODO research-progress
                 local craft = tn.typed_name_to_material(typed_name)
                 local is_hidden = acc.is_hidden(craft)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
@@ -181,7 +182,7 @@ function handlers.make_production_line_table(event)
                         line_index = line_index,
                         typed_name = typed_name,
                         is_product = true,
-                        result_key = line.recipe_typed_name.name,
+                        result_typed_name = line.recipe_typed_name,
                         raw_amount = raw_amount,
                     },
                     handler = {
@@ -204,7 +205,7 @@ function handlers.make_production_line_table(event)
         do
             local buttons = {}
             for _, value in pairs(recipe.ingredients) do
-                local typed_name = tn.create_typed_name(value.type, value.name)
+                local typed_name = tn.create_typed_name(value.type, value.name, recipe_quality)
                 local craft = tn.typed_name_to_material(typed_name)
                 local is_hidden = acc.is_hidden(craft)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)

@@ -107,9 +107,11 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
 
         local ingredients = {}
         for _, value in pairs(rocket_part.ingredients) do
+            ---@type NormalizedAmount
             local amount = {
                 type = value.type,
                 name = value.name,
+                quality = "quality-unknown",
                 amount_per_second = acc.raw_ingredient_to_amount(value, energy, 1),
             }
             flib_table.insert(ingredients, amount)
@@ -147,6 +149,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     {
                         type = "virtual_material",
                         name = space_rocket_name,
+                        quality = "quality-unknown",
                         amount_per_second = 1 / (energy * rocket_parts_required),
                     }
                 },
@@ -159,17 +162,21 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             for _, has_rocket_launch_product in pairs(has_rocket_launch_products) do
                 local products = {}
                 for _, value in pairs(has_rocket_launch_product.rocket_launch_products) do
+                    ---@type NormalizedAmount
                     local amount = {
                         type = value.type, -- TODO research-progress
                         name = value.name,
+                        quality = "quality-unknown",
                         amount_per_second = acc.raw_product_to_amount(value, energy * rocket_parts_required, 1, 1),
                     }
                     flib_table.insert(products, amount)
                 end
 
+                ---@type NormalizedAmount
                 local payload = {
                     type = "item",
                     name = has_rocket_launch_product.name,
+                    quality = "quality-unknown",
                     amount_per_second = 1 / (energy * rocket_parts_required)
                 }
                 local modify_ingredients = flib_table.deep_copy(ingredients)
@@ -227,6 +234,7 @@ function M.create_boiler_virtual(boiler_prototype)
             {
                 type = "fluid",
                 name = output_fluid.name,
+                quality = "quality-unknown",
                 amount_per_second = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
             }
         },
@@ -234,6 +242,7 @@ function M.create_boiler_virtual(boiler_prototype)
             {
                 type = "fluid",
                 name = input_fluid.name,
+                quality = "quality-unknown",
                 amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
             }
         },
@@ -300,6 +309,7 @@ function M.create_reactor_virtual(reactor_prototype)
             {
                 type = "virtual_material",
                 name = "<heat>",
+                quality = "quality-unknown",
                 amount_per_second = reactor_prototype.get_max_energy_usage() * acc.second_per_tick,
             },
         },
@@ -317,9 +327,11 @@ function M.create_resource_virtual(resource_prototype)
 
     local products = {}
     for _, value in pairs(mineable.products) do
+        ---@type NormalizedAmount
         local data = {
             type = value.type,
             name = value.name,
+            quality = "quality-unknown",
             amount_per_second = acc.raw_product_to_amount(value, mineable.mining_time, 1, 1),
         }
         flib_table.insert(products, data)
@@ -327,9 +339,11 @@ function M.create_resource_virtual(resource_prototype)
 
     local ingredients = {}
     if mineable.required_fluid then
+        ---@type NormalizedAmount
         local data = {
             type = "fluid",
             name = mineable.required_fluid,
+            quality = "quality-unknown",
             amount_per_second = mineable.fluid_amount,
         }
         flib_table.insert(ingredients, data)
@@ -381,6 +395,7 @@ function M.create_offshore_tile_virtual(tile_prototype)
                 {
                     type = "fluid",
                     name = fluid_prototype.name,
+                    quality = "quality-unknown",
                     amount_per_second = offshore_pump_prototype.pumping_speed,
                 }
             },

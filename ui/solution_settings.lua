@@ -33,7 +33,7 @@ function handlers.on_make_constraints_table(event)
 
     for index, data in ipairs(solution.constraints) do
         do
-            local typed_name = tn.create_typed_name(data.type, data.name)
+            local typed_name = tn.create_typed_name(data.type, data.name, data.quality)
 
             local def = common.create_decorated_sprite_button{
                 typed_name = typed_name,
