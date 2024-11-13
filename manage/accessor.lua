@@ -21,34 +21,62 @@ M.second_per_tick = 60
 M.tolerance = (10 ^ -5)
 
 ---comment
----@param product Product | NormalizedAmount
+---@param product ProductEx
+---@param quality string
 ---@param craft_energy number
 ---@param crafting_speed number
 ---@param effectivity_productivity number
----@return number
-function M.raw_product_to_amount(product, craft_energy, crafting_speed, effectivity_productivity)
-    if product.amount_per_second then
-        return product.amount_per_second * crafting_speed * effectivity_productivity / craft_energy
+---@return NormalizedAmount
+function M.raw_product_to_amount(product, quality, craft_energy, crafting_speed, effectivity_productivity)
+    if product.type == "research-progress" then
+        local amount = product.amount * effectivity_productivity * crafting_speed / craft_energy
+
+        ---@type NormalizedAmount
+        return {
+            type = "virtual_material", -- TODO research-progress virtuals
+            name = product.research_item,
+            quality = quality,
+            amount_per_second = amount,
+        }
     else
-        local amount = product.amount
-        if not amount then
-            amount = (product.amount_min + product.amount_max) / 2
-        end
-        return amount * product.probability * crafting_speed * effectivity_productivity / craft_energy
+        local amount_min = assert(product.amount_min or product.amount)
+        local amount_max = assert(product.amount_max or product.amount)
+
+        local ignored_by_productivity = (product.ignored_by_productivity or 0)
+        local target_by_productivity =
+            math.max(amount_min - ignored_by_productivity, 0) +
+            math.max(amount_max - ignored_by_productivity, 0)
+
+        local normal_amount = (amount_min + amount_max + target_by_productivity * effectivity_productivity) / 2
+        local extra_amount = (product.extra_count_fraction or 0) * (1 + effectivity_productivity)
+        local amount = (normal_amount * product.probability + extra_amount) * crafting_speed / craft_energy
+
+        ---@type NormalizedAmount
+        return {
+            type = product.type,
+            name = product.name,
+            quality = quality,
+            amount_per_second = amount,
+        }
     end
 end
 
 ---comment
----@param ingredient Ingredient | NormalizedAmount
+---@param ingredient IngredientEx
+---@param quality string
 ---@param craft_energy number
 ---@param crafting_speed number
----@return number
-function M.raw_ingredient_to_amount(ingredient, craft_energy, crafting_speed)
-    if ingredient.amount_per_second then
-        return ingredient.amount_per_second * crafting_speed / craft_energy -- TODO quality
-    else
-        return ingredient.amount * crafting_speed / craft_energy
-    end
+---@return NormalizedAmount
+function M.raw_ingredient_to_amount(ingredient, quality, craft_energy, crafting_speed)
+    local amount = ingredient.amount * crafting_speed / craft_energy
+
+    ---@type NormalizedAmount
+    return {
+        type = ingredient.type,
+        name = ingredient.name,
+        quality = quality,
+        amount_per_second = amount,
+    }
 end
 
 ---comment

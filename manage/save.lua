@@ -281,32 +281,46 @@ function M.get_total_amounts(solution)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        for _, value in pairs(recipe.products) do
-            local amount_per_second = acc.raw_product_to_amount(value, crafting_energy, crafting_speed,
-                effectivity.productivity) * quantity_of_machines_required
+        for _, product in pairs(recipe.products) do
+            local amount = acc.raw_product_to_amount(
+                product,
+                "unknown-quality",
+                crafting_energy,
+                crafting_speed,
+                effectivity.productivity
+            )
+            local filter_type = amount.type
+            local name = amount.name
+            local amount_per_second = amount.amount_per_second * quantity_of_machines_required
 
-            -- TODO research-progress
-            if value.type == "item" then
-                item_totals[value.name] = (item_totals[value.name] or 0) + amount_per_second
-            elseif value.type == "fluid" then
-                fluid_totals[value.name] = (fluid_totals[value.name] or 0) + amount_per_second
-            elseif value.type == "virtual_material" then
-                virtual_totals[value.name] = (virtual_totals[value.name] or 0) + amount_per_second
+            if filter_type == "item" then
+                item_totals[name] = (item_totals[name] or 0) + amount_per_second
+            elseif filter_type == "fluid" then
+                fluid_totals[name] = (fluid_totals[name] or 0) + amount_per_second
+            elseif filter_type == "virtual_material" then
+                virtual_totals[name] = (virtual_totals[name] or 0) + amount_per_second
             else
                 virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + amount_per_second
             end
         end
 
-        for _, value in pairs(recipe.ingredients) do
-            local amount_per_second = acc.raw_ingredient_to_amount(value, crafting_energy, crafting_speed) *
-                quantity_of_machines_required
+        for _, ingredient in pairs(recipe.ingredients) do
+            local amount = acc.raw_ingredient_to_amount(
+                ingredient,
+                "unknown-quality",
+                crafting_energy,
+                crafting_speed
+            )
+            local filter_type = amount.type
+            local name = amount.name
+            local amount_per_second = amount.amount_per_second * quantity_of_machines_required
 
-            if value.type == "item" then
-                item_totals[value.name] = (item_totals[value.name] or 0) - amount_per_second
-            elseif value.type == "fluid" then
-                fluid_totals[value.name] = (fluid_totals[value.name] or 0) - amount_per_second
-            elseif value.type == "virtual_material" then
-                virtual_totals[value.name] = (virtual_totals[value.name] or 0) - amount_per_second
+            if filter_type == "item" then
+                item_totals[name] = (item_totals[name] or 0) - amount_per_second
+            elseif filter_type == "fluid" then
+                fluid_totals[name] = (fluid_totals[name] or 0) - amount_per_second
+            elseif filter_type == "virtual_material" then
+                virtual_totals[name] = (virtual_totals[name] or 0) - amount_per_second
             else
                 virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + amount_per_second
             end
@@ -461,7 +475,7 @@ function M.get_total_effectivity(module_counts, effect_receiver)
     local ret = {
         speed = 1,
         consumption = 1,
-        productivity = 1,
+        productivity = 0,
         pollution = 1,
         quality = 0,
     }
@@ -516,7 +530,7 @@ function M.get_total_effectivity(module_counts, effect_receiver)
 
     ret.speed = math.max(ret.speed, 0.2)
     ret.consumption = math.max(ret.consumption, 0.2)
-    ret.productivity = math.max(ret.productivity, 1)
+    ret.productivity = math.max(ret.productivity, 0)
     ret.pollution = math.max(ret.pollution, 0.2)
     ret.quality = math.max(ret.quality / 10, 0) -- TODO bug report
 

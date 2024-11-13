@@ -56,6 +56,7 @@ function M.to_normalized_production_lines(production_lines)
     local normalized_production_lines = {}
     for _, line in ipairs(production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+        local recipe_quality = line.recipe_typed_name.quality
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
@@ -66,30 +67,28 @@ function M.to_normalized_production_lines(production_lines)
 
         ---@type NormalizedAmount[]
         local products = {}
-        for _, value in pairs(recipe.products) do
-            local amount_per_second = acc.raw_product_to_amount(value, crafting_energy, crafting_speed,
-                effectivity.productivity)
+        for _, product in pairs(recipe.products) do
+            local amount = acc.raw_product_to_amount(
+                product,
+                recipe_quality,
+                crafting_energy,
+                crafting_speed,
+                effectivity.productivity
+            )
 
-            ---@type NormalizedAmount
-            local amount = {
-                type = value.type, -- TODO research-progress
-                name = value.name,
-                amount_per_second = amount_per_second,
-            }
             flib_table.insert(products, amount)
         end
 
         ---@type NormalizedAmount[]
         local ingredients = {}
-        for _, value in pairs(recipe.ingredients) do
-            local amount_per_second = acc.raw_ingredient_to_amount(value, crafting_energy, crafting_speed)
+        for _, ingredient in pairs(recipe.ingredients) do
+            local amount = acc.raw_ingredient_to_amount(
+                ingredient,
+                recipe_quality,
+                crafting_energy,
+                crafting_speed
+            )
 
-            ---@type NormalizedAmount
-            local amount = {
-                type = value.type,
-                name = value.name,
-                amount_per_second = amount_per_second,
-            }
             flib_table.insert(ingredients, amount)
         end
 
@@ -102,8 +101,9 @@ function M.to_normalized_production_lines(production_lines)
 
             ---@type NormalizedAmount
             local amount = {
-                type = ftn.type,
+                type = ftn.type, ---@diagnostic disable-line: assign-type-mismatch
                 name = ftn.name,
+                quality = ftn.quality,
                 amount_per_second = amount_per_second,
             }
             flib_table.insert(ingredients, amount)

@@ -81,6 +81,31 @@ function M.create_virtuals()
     }
 end
 
+---comment
+---@param value Product|Ingredient
+---@param divisor number
+---@return Product|Ingredient
+function M.modify_product_or_ingredient(value, divisor)
+    local ret = flib_table.shallow_copy(value)
+
+    if ret.amount then
+        ret.amount = ret.amount / divisor
+    else
+        ret.amount_max = ret.amount_max / divisor
+        ret.amount_min = ret.amount_min / divisor
+    end
+
+    if ret.ignored_by_productivity then
+        ret.ignored_by_productivity = ret.ignored_by_productivity / divisor
+    end
+
+    if ret.extra_count_fraction then
+        ret.extra_count_fraction = ret.extra_count_fraction / divisor
+    end
+
+    return ret
+end
+
 ---@param rocket_silo_prototype LuaEntityPrototype
 ---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_rocket_silo_virtual(rocket_silo_prototype)
@@ -107,11 +132,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
 
         local ingredients = {}
         for _, value in pairs(rocket_part.ingredients) do
-            local amount = {
-                type = value.type,
-                name = value.name,
-                amount_per_second = acc.raw_ingredient_to_amount(value, energy, 1),
-            }
+            local amount = M.modify_product_or_ingredient(value, energy)
             flib_table.insert(ingredients, amount)
         end
 
@@ -147,7 +168,8 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     {
                         type = "virtual_material",
                         name = space_rocket_name,
-                        amount_per_second = 1 / (energy * rocket_parts_required),
+                        amount = 1 / (energy * rocket_parts_required),
+                        probability = 1,
                     }
                 },
                 ingredients = ingredients,
@@ -159,18 +181,16 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             for _, has_rocket_launch_product in pairs(has_rocket_launch_products) do
                 local products = {}
                 for _, value in pairs(has_rocket_launch_product.rocket_launch_products) do
-                    local amount = {
-                        type = value.type, -- TODO research-progress
-                        name = value.name,
-                        amount_per_second = acc.raw_product_to_amount(value, energy * rocket_parts_required, 1, 1),
-                    }
+                    local amount = M.modify_product_or_ingredient(value, energy * rocket_parts_required)
                     flib_table.insert(products, amount)
                 end
 
+                ---@type ItemProduct
                 local payload = {
                     type = "item",
                     name = has_rocket_launch_product.name,
-                    amount_per_second = 1 / (energy * rocket_parts_required)
+                    amount = 1 / (energy * rocket_parts_required),
+                    probability = 1,
                 }
                 local modify_ingredients = flib_table.deep_copy(ingredients)
                 flib_table.insert(modify_ingredients, payload)
@@ -227,14 +247,15 @@ function M.create_boiler_virtual(boiler_prototype)
             {
                 type = "fluid",
                 name = output_fluid.name,
-                amount_per_second = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
+                amount = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
+                probability = 1,
             }
         },
         ingredients = {
             {
                 type = "fluid",
                 name = input_fluid.name,
-                amount_per_second = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
+                amount = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
             }
         },
         fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
@@ -300,7 +321,8 @@ function M.create_reactor_virtual(reactor_prototype)
             {
                 type = "virtual_material",
                 name = "<heat>",
-                amount_per_second = reactor_prototype.get_max_energy_usage() * acc.second_per_tick,
+                amount = reactor_prototype.get_max_energy_usage() * acc.second_per_tick,
+                probability = 1,
             },
         },
         ingredients = {},
@@ -317,22 +339,19 @@ function M.create_resource_virtual(resource_prototype)
 
     local products = {}
     for _, value in pairs(mineable.products) do
-        local data = {
-            type = value.type,
-            name = value.name,
-            amount_per_second = acc.raw_product_to_amount(value, mineable.mining_time, 1, 1),
-        }
-        flib_table.insert(products, data)
+        local amount = M.modify_product_or_ingredient(value, mineable.mining_time)
+        flib_table.insert(products, amount)
     end
 
     local ingredients = {}
     if mineable.required_fluid then
-        local data = {
+        ---@type Ingredient
+        local amount = {
             type = "fluid",
             name = mineable.required_fluid,
-            amount_per_second = mineable.fluid_amount,
+            amount = mineable.fluid_amount,
         }
-        flib_table.insert(ingredients, data)
+        flib_table.insert(ingredients, amount)
     end
 
     ---@type VirtualRecipe
@@ -381,7 +400,8 @@ function M.create_offshore_tile_virtual(tile_prototype)
                 {
                     type = "fluid",
                     name = fluid_prototype.name,
-                    amount_per_second = offshore_pump_prototype.pumping_speed,
+                    amount = offshore_pump_prototype.pumping_speed,
+                    probability = 1,
                 }
             },
             ingredients = {},
