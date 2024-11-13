@@ -152,7 +152,7 @@ function handlers.on_preset_change_toggle(event)
         assert()
     end
 
-    elem.toggled = tn.equals_typed_name(preset, typed_name)
+    elem.toggled = tn.equals_typed_name(preset, typed_name, true)
 end
 
 ---@param event EventData.on_gui_click

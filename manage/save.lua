@@ -659,8 +659,7 @@ function M.new_production_line(player_index, solution, recipe_typed_name, fuel_t
     line_index = line_index or #production_lines + 1
 
     local pos = fs_util.find(production_lines, function(value)
-        return value.recipe_typed_name.type == recipe_typed_name.type and
-            value.recipe_typed_name.name == recipe_typed_name.name
+        return tn.equals_typed_name(value.recipe_typed_name, recipe_typed_name)
     end)
     if pos then
         M.move_production_line(solution, pos, line_index)

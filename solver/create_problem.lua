@@ -1,4 +1,5 @@
 local fs_util = require "fs_util"
+local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
 
 local final_product_cost = 2 ^ -10
@@ -124,7 +125,7 @@ end
 ---@param typed_name TypedName
 local function has_upper_limit(constraints, typed_name)
     local pos = fs_util.find(constraints, function(value)
-        return value.type == typed_name.type and value.name == typed_name.name and value.quality == typed_name.quality
+        return tn.equals_typed_name(value, typed_name)
     end)
     if pos then
         local c = constraints[pos]

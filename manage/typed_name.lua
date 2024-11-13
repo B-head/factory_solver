@@ -71,9 +71,14 @@ end
 ---comment
 ---@param value1 TypedName
 ---@param value2 TypedName
+---@param ignore_quality boolean?
 ---@return boolean
-function M.equals_typed_name(value1, value2)
-    return value1.type == value2.type and value1.name == value2.name
+function M.equals_typed_name(value1, value2, ignore_quality)
+    if ignore_quality then
+        return value1.type == value2.type and value1.name == value2.name
+    else
+        return value1.type == value2.type and value1.name == value2.name and value1.quality == value2.quality
+    end
 end
 
 ---comment

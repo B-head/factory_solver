@@ -62,7 +62,7 @@ function handlers.on_machine_change_toggle(event)
 
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    elem.toggled = tn.equals_typed_name(machine_typed_name, typed_name)
+    elem.toggled = tn.equals_typed_name(machine_typed_name, typed_name, true)
 end
 
 ---@param event EventDataTrait
@@ -454,7 +454,7 @@ function handlers.on_fuel_change_toggle(event)
 
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local fuel_typed_name = dialog.tags.fuel_typed_name --[[@as TypedName]]
-    elem.toggled = tn.equals_typed_name(fuel_typed_name, typed_name)
+    elem.toggled = tn.equals_typed_name(fuel_typed_name, typed_name, true)
 end
 
 ---@param event EventData.on_gui_click
