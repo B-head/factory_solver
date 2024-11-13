@@ -1,13 +1,15 @@
 ---@meta
 
----@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"
+---@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"|"transfer"
 ---@alias LimitType "upper"|"lower"|"equal"
 ---@alias TimeScale "second"|"five_seconds"|"minute"|"ten_minutes"|"hour"|"ten_hours"|"fifty_hours"|"two_hundred_fifty_hours"|"thousand_hours"
 ---@alias AmountUnit "time"|"belt"|"storage"
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
----@alias Craft LuaItemPrototype | LuaFluidPrototype | LuaRecipePrototype | LuaEntityPrototype | VirtualMaterial | VirtualRecipe
+---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
 ---@alias TypedName { type: FilterType, name: string, quality: string }
+---@alias ProductEx Product|VirtualProduct
+---@alias IngredientEx Ingredient|VirtualIngredient
 
 ---@class EventDataTrait
 ---@field element LuaGuiElement
@@ -124,7 +126,7 @@ local PackedVariables = {}
 local NormalizedProductionLine
 
 ---@class NormalizedAmount
----@field type FilterType
+---@field type "item"|"fluid"|"virtual_material"
 ---@field name string
 ---@field quality string
 ---@field amount_per_second number
@@ -155,9 +157,27 @@ local VirtualMaterial = {}
 ---@field order string
 ---@field group_name string
 ---@field subgroup_name string
----@field products NormalizedAmount[]
----@field ingredients NormalizedAmount[]
+---@field products ProductEx[]
+---@field ingredients IngredientEx[]
 ---@field fixed_crafting_machine TypedName?
 ---@field resource_category string?
 ---@field crafting_speed_cap number?
 local VirtualRecipe = {}
+
+---@class VirtualProduct
+---@field type "virtual_material"
+---@field name string
+---@field amount number?
+---@field amount_min number?
+---@field amount_max number?
+---@field probability number
+---@field ignored_by_productivity number?
+---@field temperature number?
+local VirtualProduct = {}
+
+---@class VirtualIngredient
+---@field type "virtual_material"
+---@field name string
+---@field amount number
+---@field minimum_temperature number?
+---@field maximum_temperature number?

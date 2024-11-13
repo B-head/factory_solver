@@ -166,13 +166,19 @@ function handlers.make_production_line_table(event)
 
         do
             local buttons = {}
-            for _, value in pairs(recipe.products) do
-                local typed_name = tn.create_typed_name(value.type, value.name, recipe_quality) -- TODO research-progress
+            for _, product in pairs(recipe.products) do
+                local amount = acc.raw_product_to_amount(
+                    product,
+                    recipe_quality,
+                    crafting_energy,
+                    crafting_speed,
+                    effectivity.productivity
+                )
+
+                local typed_name = tn.create_typed_name(amount.type, amount.name, amount.quality)
                 local craft = tn.typed_name_to_material(typed_name)
                 local is_hidden = acc.is_hidden(craft)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
-                local raw_amount = acc.raw_product_to_amount(value, crafting_energy, crafting_speed,
-                    effectivity.productivity)
 
                 local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
@@ -183,7 +189,7 @@ function handlers.make_production_line_table(event)
                         typed_name = typed_name,
                         is_product = true,
                         result_typed_name = line.recipe_typed_name,
-                        raw_amount = raw_amount,
+                        raw_amount = amount.amount_per_second,
                     },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_inout_click,
@@ -204,12 +210,18 @@ function handlers.make_production_line_table(event)
 
         do
             local buttons = {}
-            for _, value in pairs(recipe.ingredients) do
-                local typed_name = tn.create_typed_name(value.type, value.name, recipe_quality)
+            for _, ingredient in pairs(recipe.ingredients) do
+                local amount = acc.raw_ingredient_to_amount(
+                    ingredient,
+                    recipe_quality,
+                    crafting_energy,
+                    crafting_speed
+                )
+
+                local typed_name = tn.create_typed_name(amount.type, amount.name, amount.quality)
                 local craft = tn.typed_name_to_material(typed_name)
                 local is_hidden = acc.is_hidden(craft)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
-                local raw_amount = acc.raw_ingredient_to_amount(value, crafting_energy, crafting_speed)
 
                 local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
@@ -220,7 +232,7 @@ function handlers.make_production_line_table(event)
                         typed_name = typed_name,
                         is_product = false,
                         result_typed_name = line.recipe_typed_name,
-                        raw_amount = raw_amount,
+                        raw_amount = amount.amount_per_second,
                     },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_inout_click,
@@ -365,7 +377,8 @@ function handlers.update_amount(event)
 
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
-    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name) + acc.tolerance
+    local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name) +
+        acc.tolerance
     elem.number = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
 end
 

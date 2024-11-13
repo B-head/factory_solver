@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.4.0
+Date: ????
+  Bugfixes:
+    - Fix not to consider ignored_by_productivity.
+    - Fix not to consider extra_count_fraction.
+---------------------------------------------------------------------------------------------------
 Version: 0.3.4
 Date: ????
   Changes:
