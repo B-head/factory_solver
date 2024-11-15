@@ -4,6 +4,7 @@
 
 local Matrix = require "solver/Matrix"
 local SparseMatrix = require "solver/SparseMatrix"
+local csr_matrix = require "solver/csr_matrix"
 local fs_util = require "fs_util"
 
 ---@class Problem
@@ -28,6 +29,15 @@ local Primal = {}
 ---@field limit number
 local Dual = {}
 
+local metatable = { __index = M }
+
+---Setup metatable.
+---@param self Problem
+---@return Problem
+function M.setup_metatable(self)
+    return setmetatable(self, metatable)
+end
+
 ---Constructor.
 ---@param name string Name of the problem.
 ---@return Problem
@@ -40,13 +50,7 @@ function M.new(name)
         dual_length = 0,
         subject_terms = {},
     }
-    M.setup_metatable(self)
-    return self
-end
-
----Setup metatable.
-function M:setup_metatable()
-    setmetatable(self, { __index = M })
+    return M.setup_metatable(self)
 end
 
 ---Add the variables to optimize and a term for the objective function.
@@ -143,106 +147,96 @@ function M:add_subject_term(primal_variable, dual_variable, coefficient)
 end
 
 ---Make a vector of the coefficient of the primal problem.
----@return Matrix
+---@return CsrMatrix
 function M:generate_cost_vector()
-    local ret = Matrix.new_vector(self.primal_length)
+    local ret = {}
     for _, v in pairs(self.primals) do
-        ret[v.index][1] = v.cost
+        ret[v.index] = v.cost
     end
-    return ret
+    return csr_matrix.with_vector(ret, self.primal_length)
 end
 
 ---Make a vector of the coefficient of the dual problem.
----@return Matrix
+---@return CsrMatrix
 function M:generate_limit_vector()
-    local ret = Matrix.new_vector(self.dual_length)
+    local ret = {}
     for _, v in pairs(self.duals) do
-        ret[v.index][1] = v.limit
+        ret[v.index] = v.limit
     end
-    return ret
+    return csr_matrix.with_vector(ret, self.dual_length)
 end
 
 ---Make a sparse matrix of constraint equations.
----@return SparseMatrix
-function M:generate_subject_sparse_matrix()
-    local ret = SparseMatrix(self.dual_length, self.primal_length)
+---@return CsrMatrix
+function M:generate_subject_matrix()
+    local ret = {}
     for p, t in pairs(self.subject_terms) do
         if self.primals[p] then
             local x = self.primals[p].index
             for d, v in pairs(t) do
                 if self.duals[d] then
                     local y = self.duals[d].index
-                    ret:set(y, x, v)
+                    table.insert(ret, { y = y, x = x, value = v })
                 end
             end
         end
     end
-    return ret
+    return csr_matrix.from_coordinate_list(self.primal_length, ret)
 end
 
 ---Make primal variables.
----@param raw_variables PackedVariables? The value returned by @{pack_pdip_variables}.
----@return Matrix #Variables in vector form.
+---@param raw_variables PackedVariables? The value returned by @{pack_variables}.
+---@return CsrMatrix #Variables in vector form.
 function M:make_primal_variables(raw_variables)
     local prev_x = raw_variables and raw_variables.x or {}
-    local ret = Matrix.new_vector(self.primal_length)
+    local ret = {}
     for k, v in pairs(self.primals) do
-        local t = prev_x[k]
-        if t == nil or fs_util.is_infinite(t) or fs_util.is_nan(t) then
-            t = 1
-        end
-        ret[v.index][1] = t
+        ret[v.index] = prev_x[k] or 1
     end
-    return ret
+    return csr_matrix.with_vector(ret, self.primal_length)
 end
 
 ---Make dual variables.
----@param raw_variables PackedVariables? The value returned by @{pack_pdip_variables}.
----@return Matrix #Variables in vector form.
+---@param raw_variables PackedVariables? The value returned by @{pack_variables}.
+---@return CsrMatrix #Variables in vector form.
 function M:make_dual_variables(raw_variables)
     local prev_y = raw_variables and raw_variables.y or {}
-    local ret = Matrix.new_vector(self.dual_length)
+    local ret = {}
     for k, v in pairs(self.duals) do
-        local t = prev_y[k]
-        if t == nil or fs_util.is_infinite(t) or fs_util.is_nan(t) then
-            t = 0
-        end
-        ret[v.index][1] = t
+        ret[v.index] = prev_y[k] or 0
     end
-    return ret
+    return csr_matrix.with_vector(ret, self.dual_length)
 end
 
 ---Make slack variables.
----@param raw_variables PackedVariables? The value returned by @{pack_pdip_variables}.
----@return Matrix #Variables in vector form.
+---@param raw_variables PackedVariables? The value returned by @{pack_variables}.
+---@return CsrMatrix #Variables in vector form.
 function M:make_slack_variables(raw_variables)
     local prev_s = raw_variables and raw_variables.s or {}
-    local ret = Matrix.new_vector(self.primal_length)
+    local ret = {}
     for k, v in pairs(self.primals) do
-        local t = prev_s[k]
-        if t == nil or fs_util.is_infinite(t) or fs_util.is_nan(t) then
-            t = math.max(1, v.cost)
-        end
-        ret[v.index][1] = t
+        ret[v.index] = prev_s[k] or math.max(1, v.cost)
     end
-    return ret
+    return csr_matrix.with_vector(ret, self.primal_length)
 end
 
 ---Store the value of variables in a plain table.
----@param x Matrix Primal variables.
----@param y Matrix Dual variables.
----@param s Matrix Slack variables.
+---@param x CsrMatrix Primal variables.
+---@param y CsrMatrix Dual variables.
+---@param s CsrMatrix Slack variables.
 ---@return PackedVariables #Packed table.
 function M:pack_variables(x, y, s)
+    local list_x, list_s = x:to_list(), s:to_list()
     local ret_x, ret_s = {}, {}
     for k, v in pairs(self.primals) do
-        ret_x[k] = x[v.index][1]
-        ret_s[k] = s[v.index][1]
+        ret_x[k] = list_x[v.index]
+        ret_s[k] = list_s[v.index]
     end
 
+    local list_y = y:to_list()
     local ret_y = {}
     for k, v in pairs(self.duals) do
-        ret_y[k] = y[v.index][1]
+        ret_y[k] = list_y[v.index]
     end
 
     return {
@@ -270,25 +264,27 @@ function M:filter_result(raw_variables)
 end
 
 ---Put primal variables in readable format.
----@param vector Matrix
+---@param vector CsrMatrix
 ---@return string
 function M:dump_primal(vector)
-    local ret = ""
+    local list = vector:to_list()
+    local ret = {}
     for k, v in pairs(self.primals) do
-        ret = ret .. string.format("  %q = %f\n", k, vector[v.index][1])
+        table.insert(ret, string.format("  %q = %f\n", k, list[v.index]))
     end
-    return ret
+    return table.concat(ret)
 end
 
 ---Put dual variables in readable format.
----@param vector Matrix
+---@param vector CsrMatrix
 ---@return string
 function M:dump_dual(vector)
-    local ret = ""
+    local list = vector:to_list()
+    local ret = {}
     for k, v in pairs(self.duals) do
-        ret = ret .. string.format("  %q = %f\n", k, vector[v.index][1])
+        table.insert(ret, string.format("  %q = %f\n", k, list[v.index]))
     end
-    return ret
+    return table.concat(ret)
 end
 
 return M

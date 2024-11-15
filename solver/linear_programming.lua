@@ -4,9 +4,10 @@
 
 local Matrix = require("solver/Matrix")
 local SparseMatrix = require("solver/SparseMatrix")
+local csr_matrix = require("solver/csr_matrix")
 
 local debug_print = print
-local hmul, hpow, diag = Matrix.hadamard_product, Matrix.hadamard_power, SparseMatrix.diag
+local hmul, hdiv, hpow = csr_matrix.hadamard_product, csr_matrix.hadamard_division, csr_matrix.hadamard_power
 
 local iterate_limit = 600
 local machine_upper_epsilon = (2 ^ 52)
@@ -15,13 +16,6 @@ local tolerance = (10 ^ -6) / 2
 
 local M = {}
 
-local function enforce_epsilon_limit(variables)
-    local height = variables.height
-    for y = 1, height do
-        variables[y][1] = math.max(machine_lower_epsilon, math.min(machine_upper_epsilon, variables[y][1]))
-    end
-end
-
 local function sigmoid(value, min, max)
     min = min or 0
     max = max or 1
@@ -29,28 +23,22 @@ local function sigmoid(value, min, max)
 end
 
 ---comment
----@param variables Matrix
----@param laplacians Matrix
+---@param variables CsrMatrix
+---@param laplacians CsrMatrix
 ---@return number
 local function find_step(variables, laplacians)
-    local height = variables.height
-    local ret = 1
-
-    for y = 1, height do
-        local a, b = variables[y][1], laplacians[y][1]
-        if b < 0 then
-            ret = math.min(ret, a / -b)
-        end
-    end
-
-    return ret
+    ---@diagnostic disable-next-line: param-type-mismatch
+    local steps = hdiv(variables, -laplacians)
+    return steps:fold(1, function(a, b)
+        return (b <= 0) and a or math.min(a, b)
+    end)
 end
 
 ---Solve linear programming problems.
 ---Use primal dual interior point methods.
 ---@param problem Problem Problems to solve.
 ---@param solver_state SolverState
----@param raw_variables PackedVariables? The value returned by @{Problem:pack_pdip_variables}.
+---@param raw_variables PackedVariables? The value returned by @{Problem:pack_variables}.
 ---@return SolverState
 ---@return PackedVariables? #Packed table of raw solution.
 function M.solve(problem, solver_state, raw_variables)
@@ -61,7 +49,7 @@ function M.solve(problem, solver_state, raw_variables)
         return solver_state, raw_variables
     end
 
-    local A = problem:generate_subject_sparse_matrix()
+    local A = problem:generate_subject_matrix()
     local AT = A:T()
     local b = problem:generate_limit_vector()
     local c = problem:generate_cost_vector()
@@ -70,9 +58,6 @@ function M.solve(problem, solver_state, raw_variables)
     local x = problem:make_primal_variables(raw_variables)
     local y = problem:make_dual_variables(raw_variables)
     local s = problem:make_slack_variables(raw_variables)
-
-    enforce_epsilon_limit(x)
-    enforce_epsilon_limit(s)
 
     local primal = A * x - b
     local dual = AT * y + s - c
@@ -107,17 +92,15 @@ function M.solve(problem, solver_state, raw_variables)
         return "unfinished", problem:pack_variables(x, y, s)
     end
 
-    local SX = diag(hpow(hmul(hpow(s, -0.5), hpow(x, 0.5)), 2))
+    local SX = hpow(hmul(hpow(s, -0.5), hpow(x, 0.5)), 2):diag()
     local P = A * SX * AT
 
-    local L, FD, U = M.cholesky_factorization(P)
-    L = L * FD
-
-    local fvg = M.create_flee_value_generator(y)
+    local L, D = csr_matrix.cholesky_decomposition(P)
 
     local sic = hmul(hpow(s, -1), duality_gap)
     local aug_affine = A * (SX * -dual + sic) - primal
-    local y_affine = M.lu_solve_linear_equation(L, U, aug_affine, fvg)
+    local temp_affine = csr_matrix.forward_substitution(L * D, aug_affine)
+    local y_affine = csr_matrix.backward_substitution(L:T(), temp_affine)
     local s_affine = AT * -y_affine - dual
     local x_affine = SX * -s_affine - sic
 
@@ -133,6 +116,9 @@ function M.solve(problem, solver_state, raw_variables)
     x = x + step_scale * p_step * x_affine
     y = y + step_scale * d_step * y_affine
     s = s + step_scale * d_step * s_affine
+
+    x = x:clamp(machine_lower_epsilon, machine_upper_epsilon)
+    s = s:clamp(machine_lower_epsilon, machine_upper_epsilon)
 
     return solver_state + 1, problem:pack_variables(x, y, s)
 end
