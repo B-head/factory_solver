@@ -150,8 +150,7 @@ function M.create_problem(solution_name, constraints, production_lines)
                 local primal_variable = "|shortage_ingredient|" .. craft_name
                 problem:add_objective(primal_variable, shortage_cost)
                 problem:add_subject_term(primal_variable, craft_name, 1)
-                problem:add_subject_term(primal_variable, "|upper_limit|" .. craft_name, 1)
-                problem:add_subject_term(primal_variable, "|lower_limit|" .. craft_name, 1)
+                problem:add_subject_term(primal_variable, "|limit|" .. craft_name, 1)
             end
         elseif value.included_product then
             local primal_variable = "|final_product|" .. craft_name
@@ -161,8 +160,7 @@ function M.create_problem(solution_name, constraints, production_lines)
             local primal_variable = "|basic_ingredient|" .. craft_name
             problem:add_objective(primal_variable, basic_ingredient_cost)
             problem:add_subject_term(primal_variable, craft_name, 1)
-            problem:add_subject_term(primal_variable, "|upper_limit|" .. craft_name, 1)
-            problem:add_subject_term(primal_variable, "|lower_limit|" .. craft_name, 1)
+            problem:add_subject_term(primal_variable, "|limit|" .. craft_name, 1)
         else
             assert()
         end
@@ -172,8 +170,7 @@ function M.create_problem(solution_name, constraints, production_lines)
         local recipe_typed_name = line.recipe_typed_name
 
         problem:add_objective(recipe_typed_name.name, machine_count_cost, true)
-        problem:add_subject_term(recipe_typed_name.name, "|upper_limit|" .. recipe_typed_name.name, 1)
-        problem:add_subject_term(recipe_typed_name.name, "|lower_limit|" .. recipe_typed_name.name, 1)
+        problem:add_subject_term(recipe_typed_name.name, "|limit|" .. recipe_typed_name.name, 1)
 
         if has_upper_limit(constraints, recipe_typed_name) then
             problem:update_objective_cost(recipe_typed_name.name, target_profit)
@@ -183,8 +180,7 @@ function M.create_problem(solution_name, constraints, production_lines)
             local craft_name = value.type .. "/" .. value.name
             local amount = value.amount_per_second
             problem:add_subject_term(recipe_typed_name.name, craft_name, amount)
-            problem:add_subject_term(recipe_typed_name.name, "|upper_limit|" .. craft_name, amount)
-            problem:add_subject_term(recipe_typed_name.name, "|lower_limit|" .. craft_name, amount)
+            problem:add_subject_term(recipe_typed_name.name, "|limit|" .. craft_name, amount)
 
             if has_upper_limit(constraints, value) then
                 problem:update_objective_cost(recipe_typed_name.name, target_profit)
@@ -212,12 +208,11 @@ function M.create_problem(solution_name, constraints, production_lines)
         local limit = constraint.limit_amount_per_second
 
         if constraint.limit_type == "upper" then
-            problem:add_upper_limit_constraint("|upper_limit|" .. craft_name, limit)
+            problem:add_upper_limit_constraint("|limit|" .. craft_name, limit)
         elseif constraint.limit_type == "lower" then
-            problem:add_upper_limit_constraint("|lower_limit|" .. craft_name, limit)
+            problem:add_lower_limit_constraint("|limit|" .. craft_name, limit)
         elseif constraint.limit_type == "equal" then
-            problem:add_upper_limit_constraint("|upper_limit|" .. craft_name, limit)
-            problem:add_upper_limit_constraint("|lower_limit|" .. craft_name, limit)
+            problem:add_equivalence_constraint("|limit|" .. craft_name, limit)
         else
             assert()
         end
