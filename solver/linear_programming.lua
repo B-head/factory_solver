@@ -1,9 +1,3 @@
---- Create and solve linear programming problems (a.k.a linear optimization).
----@license MIT
----@author B_head
-
-local Matrix = require("solver/Matrix")
-local SparseMatrix = require("solver/SparseMatrix")
 local csr_matrix = require("solver/csr_matrix")
 
 local debug_print = print
@@ -16,13 +10,16 @@ local tolerance = (10 ^ -6) / 2
 
 local M = {}
 
+---@param value number
+---@param min number?
+---@param max number?
+---@return number
 local function sigmoid(value, min, max)
     min = min or 0
     max = max or 1
     return (max - min) / (1 + math.exp(-value)) + min
 end
 
----comment
 ---@param variables CsrMatrix
 ---@param laplacians CsrMatrix
 ---@return number
@@ -121,176 +118,6 @@ function M.solve(problem, solver_state, raw_variables)
     s = s:clamp(machine_lower_epsilon, machine_upper_epsilon)
 
     return solver_state + 1, problem:pack_variables(x, y, s)
-end
-
----Reduce an augmented matrix into row echelon form.
----@todo Refactoring for use in matrix solvers.
----@param A Matrix Matrix equation.
----@param b Matrix Column vector.
----@return Matrix #Matrix of row echelon form.
----@return Matrix
-function M.gaussian_elimination(A, b)
-    local height, width = A.height, A.width
-    local ret_A = A:clone():insert_column(b)
-
-    local function select_pivot(s, x)
-        local max_value, max_index, raw_max_value = 0, nil, nil
-        for y = s, height do
-            local r = ret_A:get(y, x)
-            local a = math.abs(r)
-            if max_value < a then
-                max_value = a
-                max_index = y
-                raw_max_value = r
-            end
-        end
-        return max_index, raw_max_value
-    end
-
-    local i = 1
-    for x = 1, width + 1 do
-        local pi, pv = select_pivot(i, x)
-        if pi then
-            ret_A:row_swap(i, pi)
-            for k = i + 1, height do
-                local f = -ret_A:get(k, x) / pv
-                ret_A:row_trans(k, i, f)
-                ret_A:set(k, x, 0)
-            end
-            i = i + 1
-        end
-    end
-
-    local ret_b = ret_A:remove_column()
-    return ret_A, ret_b
-end
-
----LDL decomposition of the symmetric matrix.
----@param A Matrix Symmetric matrix.
----@return Matrix #Lower triangular matrix.
----@return Matrix #Diagonal matrix.
----@return Matrix #Upper triangular matrix.
-function M.cholesky_factorization(A)
-    assert(A.height == A.width)
-    local size = A.height
-    local L, D = SparseMatrix(size, size), SparseMatrix(size, size)
-    for i = 1, size do
-        local a_values = {}
-        for x, v in A:iterate_row(i) do
-            a_values[x] = v
-        end
-
-        for k = 1, i do
-            local i_it, k_it = L:iterate_row(i), L:iterate_row(k)
-            local i_r, i_v = i_it()
-            local k_r, k_v = k_it()
-
-            local sum = 0
-            while i_r and k_r do
-                if i_r < k_r then
-                    i_r, i_v = i_it()
-                elseif i_r > k_r then
-                    k_r, k_v = k_it()
-                else -- i_r == k_r
-                    local d = D:get(i_r, k_r)
-                    sum = sum + i_v * k_v * d
-                    i_r, i_v = i_it()
-                    k_r, k_v = k_it()
-                end
-            end
-
-            local a = a_values[k] or 0
-            local b = a - sum
-            if i == k then
-                D:set(k, k, b)
-                L:set(i, k, 1)
-            else
-                local c = D:get(k, k)
-                local v = b / c
-                L:set(i, k, v)
-            end
-        end
-    end
-    return L, D, L:T()
-end
-
-local function substitution(s, e, m, A, b, flee_value_generator)
-    local sol = {}
-    for y = s, e, m do
-        local total, factors, indexes = b:get(y, 1), {}, {}
-        for x, v in A:iterate_row(y) do
-            if sol[x] then
-                total = total - sol[x] * v
-            elseif v ~= 0 then
-                table.insert(factors, v)
-                table.insert(indexes, x)
-            end
-        end
-
-        local l = #indexes
-        if l == 1 then
-            sol[indexes[1]] = total / factors[1]
-        elseif l >= 2 then
-            local res = flee_value_generator(total, factors, indexes)
-            for k, x in ipairs(indexes) do
-                sol[x] = res[k]
-            end
-        end
-    end
-    return Matrix.list_to_vector(sol, A.width)
-end
-
----Use LU-decomposed matrices to solve linear equations.
----@param L Matrix Lower triangular matrix.
----@param U Matrix Upper triangular matrix.
----@param b Matrix Column vector.
----@param flee_value_generator function Callback function that generates the value of free variable.
----@return Matrix #Solution of linear equations.
-function M.lu_solve_linear_equation(L, U, b, flee_value_generator)
-    local t = M.forward_substitution(L, b, flee_value_generator)
-    return M.backward_substitution(U, t, flee_value_generator)
-end
-
----Use lower triangular matrix to solve linear equations.
----@param L Matrix Lower triangular matrix.
----@param b Matrix Column vector.
----@param flee_value_generator function Callback function that generates the value of free variable.
----@return Matrix #Solution of linear equations.
-function M.forward_substitution(L, b, flee_value_generator)
-    return substitution(1, L.height, 1, L, b, flee_value_generator)
-end
-
----Use upper triangular matrix to solve linear equations.
----@param U Matrix Upper triangular matrix.
----@param b Matrix Column vector.
----@param flee_value_generator function Callback function that generates the value of free variable.
----@return Matrix #Solution of linear equations.
-function M.backward_substitution(U, b, flee_value_generator)
-    return substitution(U.height, 1, -1, U, b, flee_value_generator)
-end
-
----Create to callback function that generates the value of free variable.
----@param ... Matrix Vector to be referenced in debug output.
----@return function #Callback function.
-function M.create_flee_value_generator(...)
-    local currents = Matrix.join_vector { ... }
-    return function(target, factors, indexes)
-        debug_print(string.format("generate flee values: target = %f", target))
-        local tf = 0
-        for _, v in ipairs(factors) do
-            tf = tf + math.abs(v)
-        end
-        local ret = {}
-        local sol = target / tf
-        for i, k in ipairs(indexes) do
-            ret[i] = sol * factors[i] / math.abs(factors[i])
-            debug_print(string.format(
-                "index = %i, factor = %f, current = %f, solution = %f",
-                k, factors[i], currents[k][1], sol
-            ))
-        end
-        return ret
-    end
 end
 
 return M

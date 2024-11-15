@@ -1,11 +1,4 @@
----Helper for generating linear programming problems.
----@license MIT
----@author B_head
-
-local Matrix = require "solver/Matrix"
-local SparseMatrix = require "solver/SparseMatrix"
 local csr_matrix = require "solver/csr_matrix"
-local fs_util = require "fs_util"
 
 ---@class Problem
 ---@field name string
@@ -38,7 +31,7 @@ function M.setup_metatable(self)
     return setmetatable(self, metatable)
 end
 
----Constructor.
+---Helper for generating linear programming problems.
 ---@param name string Name of the problem.
 ---@return Problem
 function M.new(name)

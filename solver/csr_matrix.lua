@@ -544,13 +544,13 @@ function M.to_matrix(matrix)
     local row_ranges = matrix.row_ranges
 
     for y = 1, #row_ranges - 1 do
-        local a, i = {}, row_ranges[y]
-        local u = column_indexes[i]
+        local a, i, ie = {}, row_ranges[y], row_ranges[y + 1]
+        local u = (i < ie) and column_indexes[i] or int_max
         for x = 1, width do
             if x == u then
                 a[x] = values[i]
                 i = i + 1
-                u = column_indexes[i]
+                u = (i < ie) and column_indexes[i] or int_max
             else
                 a[x] = 0
             end
@@ -682,7 +682,7 @@ end
 ---@param augment_column CsrMatrix
 ---@return CsrMatrix
 function M.forward_substitution(lower_triangular_matrix, augment_column)
-    local solved, augment_column_list = {}, augment_column:to_list()
+    local solved, augment_column_list = {}, M.to_list(augment_column)
 
     local values = lower_triangular_matrix.values
     local column_indexes = lower_triangular_matrix.column_indexes
@@ -708,7 +708,7 @@ end
 ---@param augment_column CsrMatrix
 ---@return CsrMatrix
 function M.backward_substitution(upper_triangular_matrix, augment_column)
-    local solved, augment_column_list = {}, augment_column:to_list()
+    local solved, augment_column_list = {}, M.to_list(augment_column)
 
     local values = upper_triangular_matrix.values
     local column_indexes = upper_triangular_matrix.column_indexes
