@@ -11,6 +11,17 @@ function P:__new(height, width)
     end
 end
 
+function S.from_raw(matrix)
+    local height, width = #matrix, #matrix[1]
+    local ret = S(height, width)
+    for y = 1, height do
+        for x = 1, width do
+            ret[y][x] = matrix[y][x]
+        end
+    end
+    return ret
+end
+
 function S.new_vector(degree)
     return S(degree, 1)
 end

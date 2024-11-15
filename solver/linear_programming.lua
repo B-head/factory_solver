@@ -179,7 +179,7 @@ function M.gaussian_elimination(A, b)
     return ret_A, ret_b
 end
 
----LU decomposition of the symmetric matrix.
+---LDL decomposition of the symmetric matrix.
 ---@param A Matrix Symmetric matrix.
 ---@return Matrix #Lower triangular matrix.
 ---@return Matrix #Diagonal matrix.
@@ -216,7 +216,7 @@ function M.cholesky_factorization(A)
             local a = a_values[k] or 0
             local b = a - sum
             if i == k then
-                D:set(k, k, math.max(b, a * machine_lower_epsilon))
+                D:set(k, k, b)
                 L:set(i, k, 1)
             else
                 local c = D:get(k, k)
@@ -235,7 +235,7 @@ local function substitution(s, e, m, A, b, flee_value_generator)
         for x, v in A:iterate_row(y) do
             if sol[x] then
                 total = total - sol[x] * v
-            else
+            elseif v ~= 0 then
                 table.insert(factors, v)
                 table.insert(indexes, x)
             end
