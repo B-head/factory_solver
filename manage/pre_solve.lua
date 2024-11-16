@@ -59,7 +59,7 @@ function M.to_normalized_production_lines(production_lines)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = save.get_total_effectivity(module_counts)
+        local effectivity = save.get_total_effectivity(module_counts, machine.effect_receiver)
         local crafting_energy = acc.get_crafting_energy(recipe)
         local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)

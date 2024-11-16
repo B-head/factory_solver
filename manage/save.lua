@@ -275,7 +275,7 @@ function M.get_total_amounts(solution)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = M.get_total_effectivity(module_counts)
+        local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
         local crafting_energy = acc.get_crafting_energy(recipe)
         local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
@@ -344,7 +344,7 @@ function M.get_total_power(solution)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = M.get_total_effectivity(module_counts)
+        local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
         local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
@@ -371,7 +371,7 @@ function M.get_total_pollution(solution)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local machine_quality = line.machine_typed_name.quality
         local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = M.get_total_effectivity(module_counts)
+        local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
         local pollution = acc.raw_emission_to_pollution(machine, "pollution", machine_quality,
@@ -454,8 +454,9 @@ end
 
 ---comment
 ---@param module_counts table<string, table<string, number>>
+---@param effect_receiver EffectReceiver?
 ---@return ModuleEffects
-function M.get_total_effectivity(module_counts)
+function M.get_total_effectivity(module_counts, effect_receiver)
     ---@type ModuleEffects
     local ret = {
         speed = 1,
@@ -502,6 +503,15 @@ function M.get_total_effectivity(module_counts)
             ret.quality = ret.quality + modify(effects.quality, count, quality_level, false)
             ::continue::
         end
+    end
+
+    if effect_receiver then
+        local base_effect = effect_receiver.base_effect
+        ret.speed = ret.speed + (base_effect.speed or 0)
+        ret.consumption = ret.consumption + (base_effect.consumption or 0)
+        ret.productivity = ret.productivity + (base_effect.productivity or 0)
+        ret.pollution = ret.pollution + (base_effect.pollution or 0)
+        ret.quality = ret.quality + (base_effect.quality or 0)
     end
 
     ret.speed = math.max(ret.speed, 0.2)
