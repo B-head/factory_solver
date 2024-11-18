@@ -1,14 +1,9 @@
-local fs_util = require "fs_util"
-local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
 
-local final_product_cost = 2 ^ -10
-local basic_ingredient_cost = 2 ^ -10
-local surplus_cost = 2 ^ 0
-local shortage_cost = 2 ^ 0
-
-local target_profit = -2 ^ 10
-local machine_count_cost = 0
+local final_product_cost = 0
+local basic_ingredient_cost = 0
+local surplus_cost = 2 ^ 10
+local shortage_cost = 2 ^ 10
 
 local M = {}
 
@@ -22,7 +17,7 @@ end
 ---comment
 ---@param production_lines NormalizedProductionLine[]
 ---@return table<string, { included_product: boolean, included_ingredient: boolean }>
-local function get_included_crafts(production_lines)
+function M.get_included_crafts(production_lines)
     ---@type table<string, { included_product: boolean, included_ingredient: boolean }>
     local set = {}
     local function add_set(key)
@@ -50,89 +45,13 @@ local function get_included_crafts(production_lines)
     return set
 end
 
-local function create_item_flow_graph(flat_recipe_lines)
-    local ret = {}
-    local function add(a, type, b, ratio)
-        if not ret[a] then
-            ret[a] = {
-                from = {},
-                to = {},
-                visited = false,
-                cycled = false,
-            }
-        end
-        table.insert(ret[a][type], { id = b, ratio = ratio })
-    end
-
-    for _, l in pairs(flat_recipe_lines) do
-        for _, a in pairs(l.products) do
-            for _, b in pairs(l.ingredients) do
-                local ratio = b.amount_per_machine_by_second / a.amount_per_machine_by_second
-                add(a.normalized_id, "to", b.normalized_id, ratio)
-            end
-        end
-        for _, a in pairs(l.ingredients) do
-            for _, b in pairs(l.products) do
-                local ratio = b.amount_per_machine_by_second / a.amount_per_machine_by_second
-                add(a.normalized_id, "from", b.normalized_id, ratio)
-            end
-        end
-    end
-    return ret
-end
-
-local function detect_cycle_dilemma_impl(item_flow_graph, id, path)
-    local current = item_flow_graph[id]
-    if current.visited then
-        local included = false
-        for _, path_id in ipairs(path) do
-            if path_id == id then
-                included = true
-            end
-            if included then
-                item_flow_graph[path_id].cycled = true
-            end
-        end
-        return
-    end
-
-    current.visited = true
-    table.insert(path, id)
-    for _, n in ipairs(current.to) do
-        detect_cycle_dilemma_impl(item_flow_graph, n.id, path)
-    end
-    table.remove(path)
-end
-
-local function detect_cycle_dilemma(flat_recipe_lines)
-    local item_flow_graph = create_item_flow_graph(flat_recipe_lines)
-    local path = {}
-    for id, _ in pairs(item_flow_graph) do
-        if not item_flow_graph[id].visited then
-            detect_cycle_dilemma_impl(item_flow_graph, id, path)
-        end
-    end
-
-    local ret = {}
-    for id, v in pairs(item_flow_graph) do
-        ret[id] = { product = v.cycled, ingredient = v.cycled }
-    end
-    return ret
-end
-
 ---comment
----@param constraints Constraint[]
----@param typed_name TypedName
-local function has_upper_limit(constraints, typed_name)
-    local pos = fs_util.find(constraints, function(value)
-        return tn.equals_typed_name(value, typed_name)
-    end)
-    if pos then
-        local c = constraints[pos]
-        return c.limit_type == "upper" or c.limit_type == "equal"
-    else
-        return false
-    end
+---@param product_count number
+---@param ingredient_count number
+---@return number
+function M.make_recipe_cost(product_count, ingredient_count)
+    local value = ingredient_count - product_count
+    return 1 / (1 + math.exp(-value)) - 1
 end
 
 ---Create linear programming problems.
@@ -142,7 +61,7 @@ end
 ---@return Problem
 function M.create_problem(solution_name, constraints, production_lines)
     local problem = problem_generator.new(solution_name)
-    local included_items = get_included_crafts(production_lines)
+    local included_items = M.get_included_crafts(production_lines)
 
     for variable_name, value in pairs(included_items) do
         problem:add_equivalence_constraint(variable_name, 0)
@@ -176,13 +95,7 @@ function M.create_problem(solution_name, constraints, production_lines)
 
     for _, line in ipairs(production_lines) do
         local recipe_variable_name = M.make_variable_name(line.recipe_typed_name)
-
-        problem:add_objective(recipe_variable_name, machine_count_cost, true)
-        problem:add_subject_term(recipe_variable_name, "|limit|" .. recipe_variable_name, 1)
-
-        if has_upper_limit(constraints, line.recipe_typed_name) then
-            problem:update_objective_cost(recipe_variable_name, target_profit)
-        end
+        local product_count, ingredient_count = 0, 0
 
         for _, value in ipairs(line.products) do
             local variable_name = M.make_variable_name(value)
@@ -190,8 +103,10 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_subject_term(recipe_variable_name, variable_name, amount)
             problem:add_subject_term(recipe_variable_name, "|limit|" .. variable_name, amount)
 
-            if has_upper_limit(constraints, value) then
-                problem:update_objective_cost(recipe_variable_name, target_profit)
+            if value.type == "item" then
+                product_count = product_count + amount
+            else
+                product_count = product_count + amount / 10
             end
         end
 
@@ -200,10 +115,16 @@ function M.create_problem(solution_name, constraints, production_lines)
             local amount = value.amount_per_second
             problem:add_subject_term(recipe_variable_name, variable_name, -amount)
 
-            if has_upper_limit(constraints, value) then
-                problem:update_objective_cost(recipe_variable_name, target_profit)
+            if value.type == "item" then
+                ingredient_count = ingredient_count + amount
+            else
+                ingredient_count = ingredient_count + amount / 10
             end
         end
+
+        local recipe_cost = M.make_recipe_cost(product_count, ingredient_count)
+        problem:add_objective(recipe_variable_name, recipe_cost, true)
+        problem:add_subject_term(recipe_variable_name, "|limit|" .. recipe_variable_name, 1)
     end
 
     for _, constraint in ipairs(constraints) do

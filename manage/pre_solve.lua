@@ -36,6 +36,7 @@ function M.forwerd_solve(solution)
             solution.constraints,
             M.to_normalized_production_lines(solution.production_lines)
         )
+        solution.raw_variables = nil
     end
 
     local problem = assert(solution.problem)

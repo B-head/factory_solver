@@ -158,7 +158,8 @@ function handlers.make_production_line_table(event)
             end
 
             local def = {
-                type = "flow",
+                type = "table",
+                column_count = 4,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
@@ -202,7 +203,8 @@ function handlers.make_production_line_table(event)
             end
 
             local def = {
-                type = "flow",
+                type = "table",
+                column_count = 4,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
@@ -245,7 +247,8 @@ function handlers.make_production_line_table(event)
             end
 
             local def = {
-                type = "flow",
+                type = "table",
+                column_count = 4,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
@@ -365,7 +368,7 @@ function handlers.update_machines_required(event)
 
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    elem.caption = flib_format.number(quantity_of_machines_required, false, 5)
+    elem.caption = flib_format.number(quantity_of_machines_required, true, 5)
 end
 
 ---@param event EventDataTrait
@@ -406,7 +409,7 @@ function handlers.update_pollution(event)
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
     local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
-    elem.caption = flib_format.number(amount, false, 5)
+    elem.caption = flib_format.number(amount, true, 5)
 end
 
 ---@param event EventData.on_gui_click

@@ -181,7 +181,7 @@ function M:generate_subject_sparse_matrix()
 end
 
 ---Make primal variables.
----@param raw_variables PackedVariables The value returned by @{pack_pdip_variables}.
+---@param raw_variables PackedVariables? The value returned by @{pack_pdip_variables}.
 ---@return Matrix #Variables in vector form.
 function M:make_primal_variables(raw_variables)
     local prev_x = raw_variables and raw_variables.x or {}
@@ -197,7 +197,7 @@ function M:make_primal_variables(raw_variables)
 end
 
 ---Make dual variables.
----@param raw_variables PackedVariables The value returned by @{pack_pdip_variables}.
+---@param raw_variables PackedVariables? The value returned by @{pack_pdip_variables}.
 ---@return Matrix #Variables in vector form.
 function M:make_dual_variables(raw_variables)
     local prev_y = raw_variables and raw_variables.y or {}
@@ -213,7 +213,7 @@ function M:make_dual_variables(raw_variables)
 end
 
 ---Make slack variables.
----@param raw_variables PackedVariables The value returned by @{pack_pdip_variables}.
+---@param raw_variables PackedVariables? The value returned by @{pack_pdip_variables}.
 ---@return Matrix #Variables in vector form.
 function M:make_slack_variables(raw_variables)
     local prev_s = raw_variables and raw_variables.s or {}

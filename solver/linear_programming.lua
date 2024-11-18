@@ -8,9 +8,9 @@ local SparseMatrix = require("solver/SparseMatrix")
 local debug_print = print
 local hmul, hpow, diag = Matrix.hadamard_product, Matrix.hadamard_power, SparseMatrix.diag
 
-local iterate_limit = 120
-local machine_upper_epsilon = (2 ^ 51)
-local machine_lower_epsilon = (2 ^ -51)
+local iterate_limit = 600
+local machine_upper_epsilon = (2 ^ 52)
+local machine_lower_epsilon = (2 ^ -52)
 local tolerance = (10 ^ -6) / 2
 
 local M = {}
@@ -50,9 +50,9 @@ end
 ---Use primal dual interior point methods.
 ---@param problem Problem Problems to solve.
 ---@param solver_state SolverState
----@param raw_variables PackedVariables The value returned by @{Problem:pack_pdip_variables}.
+---@param raw_variables PackedVariables? The value returned by @{Problem:pack_pdip_variables}.
 ---@return SolverState
----@return PackedVariables #Packed table of raw solution.
+---@return PackedVariables? #Packed table of raw solution.
 function M.solve(problem, solver_state, raw_variables)
     if solver_state == "ready" then
         debug_print(string.format("-- ready solve '%s' --", problem.name))
@@ -92,7 +92,7 @@ function M.solve(problem, solver_state, raw_variables)
         debug_print("cost <c>:\n" .. problem:dump_primal(c))
         debug_print("limit <b>:\n" .. problem:dump_dual(b))
         debug_print(string.format("-- finished solve '%s' --", problem.name))
-        debug_print(string.format("  i = %i, p = %i, d = %i", solver_state, p_degree, d_degree))
+        debug_print(string.format("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree))
 
         return "finished", problem:pack_variables(x, y, s)
     end
@@ -102,13 +102,12 @@ function M.solve(problem, solver_state, raw_variables)
         debug_print("cost <c>:\n" .. problem:dump_primal(c))
         debug_print("limit <b>:\n" .. problem:dump_dual(b))
         debug_print(string.format("-- unfinished solve '%s' --", problem.name))
-        debug_print(string.format("  i = %i, p = %i, d = %i", solver_state, p_degree, d_degree))
+        debug_print(string.format("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree))
 
         return "unfinished", problem:pack_variables(x, y, s)
     end
 
-    local si = hpow(s, -1)
-    local SX = diag(hmul(si, x))
+    local SX = diag(hpow(hmul(hpow(s, -0.5), hpow(x, 0.5)), 2))
     local P = A * SX * AT
 
     local L, FD, U = M.cholesky_factorization(P)
@@ -116,43 +115,24 @@ function M.solve(problem, solver_state, raw_variables)
 
     local fvg = M.create_flee_value_generator(y)
 
-    -- local sidg = hmul(si, duality_gap)
-    -- local aug_affine = A * (SX * -dual + sidg) - primal
-    -- local y_affine = M.lu_solve_linear_equation(L, U, aug_affine, fvg)
-    -- local s_affine = AT * -y_affine - dual
-    -- local x_affine = SX * -s_affine - sidg
+    local sic = hmul(hpow(s, -1), duality_gap)
+    local aug_affine = A * (SX * -dual + sic) - primal
+    local y_affine = M.lu_solve_linear_equation(L, U, aug_affine, fvg)
+    local s_affine = AT * -y_affine - dual
+    local x_affine = SX * -s_affine - sic
 
-    -- local p_step_temp = find_step(x, x_affine)
-    -- local d_step_temp = find_step(s, s_affine)
-
-    -- local x_dist = x + p_step_temp * x_affine
-    -- local s_dist = s + d_step_temp * s_affine
-    -- local sx_fold = (s:T() * x)[1][1]
-    -- local dist_fold = (s_dist:T() * x_dist)[1][1]
-
-    -- local barrier_fill = (dist_fold) ^ barrier_power
-    -- local barrier = Matrix.new_vector(p_degree):fill(barrier_fill)
-    -- local mehrotra = hmul(s_affine, x_affine)
-    -- local correction = (duality_gap + mehrotra)
-
-    local sic = hmul(si, duality_gap)
-    local aug_corr = A * (SX * -dual + sic) - primal
-    local y_corr = M.lu_solve_linear_equation(L, U, aug_corr, fvg)
-    local s_corr = AT * -y_corr - dual
-    local x_corr = SX * -s_corr - sic
-
-    local p_step = find_step(x, x_corr)
-    local d_step = find_step(s, s_corr)
-    local step_scale = sigmoid(p_criteria + d_criteria + dg_criteria, 1 / 3)
+    local p_step = find_step(x, x_affine)
+    local d_step = find_step(s, s_affine)
+    local step_scale = sigmoid(dg_criteria, 1 / 3)
 
     debug_print(string.format(
         "  p_step = %f, d_step = %f, step_scale = %f",
         p_step, d_step, step_scale
     ))
 
-    x = x + step_scale * p_step * x_corr
-    y = y + step_scale * d_step * y_corr
-    s = s + step_scale * d_step * s_corr
+    x = x + step_scale * p_step * x_affine
+    y = y + step_scale * d_step * y_affine
+    s = s + step_scale * d_step * s_affine
 
     return solver_state + 1, problem:pack_variables(x, y, s)
 end
