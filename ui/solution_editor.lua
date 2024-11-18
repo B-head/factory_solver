@@ -368,7 +368,7 @@ function handlers.update_machines_required(event)
 
     local result_key = tags.result_key --[[@as string]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key)
-    elem.caption = flib_format.number(quantity_of_machines_required, false, 5)
+    elem.caption = flib_format.number(quantity_of_machines_required, true, 5)
 end
 
 ---@param event EventDataTrait
@@ -410,7 +410,7 @@ function handlers.update_pollution(event)
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_key)
     local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
-    elem.caption = flib_format.number(amount, false, 5)
+    elem.caption = flib_format.number(amount, true, 5)
 end
 
 ---@param event EventData.on_gui_click
