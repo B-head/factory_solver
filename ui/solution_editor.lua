@@ -158,7 +158,8 @@ function handlers.make_production_line_table(event)
             end
 
             local def = {
-                type = "flow",
+                type = "table",
+                column_count = 4,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
@@ -202,7 +203,8 @@ function handlers.make_production_line_table(event)
             end
 
             local def = {
-                type = "flow",
+                type = "table",
+                column_count = 4,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
@@ -245,7 +247,8 @@ function handlers.make_production_line_table(event)
             end
 
             local def = {
-                type = "flow",
+                type = "table",
+                column_count = 4,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
