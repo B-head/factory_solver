@@ -2,6 +2,7 @@
 Version: 0.3.7
 Date: ????
   Changes:
+    - Stabilise the solution by spreading the profit/cost value across all recipes.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.6
 Date: 2024-11-17
