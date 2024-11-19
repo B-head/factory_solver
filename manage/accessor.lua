@@ -18,7 +18,7 @@ M.scale_per_second = {
 }
 
 M.second_per_tick = 60
-M.tolerance = (10 ^ -5)
+M.tolerance = (10 ^ -6) / 2
 
 ---comment
 ---@param product ProductEx

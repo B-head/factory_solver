@@ -2,9 +2,9 @@ local csr_matrix = require "solver/csr_matrix"
 
 ---@class Problem
 ---@field name string
----@field primals Primal[]
+---@field primals table<string, Primal>
 ---@field primal_length integer
----@field duals Dual
+---@field duals table<string, Dual>
 ---@field dual_length integer
 ---@field subject_terms number[][]
 local M = {}

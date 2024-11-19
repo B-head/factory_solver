@@ -5,6 +5,8 @@ local tn = require "manage/typed_name"
 local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 
+local iterate_limit = 600
+
 local M = {}
 
 ---comment
@@ -44,7 +46,9 @@ function M.forwerd_solve(solution)
     solution.solver_state, solution.raw_variables = linear_programming.solve(
         problem,
         solution.solver_state,
-        solution.raw_variables
+        solution.raw_variables,
+        acc.tolerance,
+        iterate_limit
     )
 
     solution.quantity_of_machines_required = problem:filter_result(solution.raw_variables)

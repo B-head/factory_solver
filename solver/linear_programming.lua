@@ -3,10 +3,8 @@ local csr_matrix = require("solver/csr_matrix")
 local debug_print = print
 local hmul, hdiv, hpow = csr_matrix.hadamard_product, csr_matrix.hadamard_division, csr_matrix.hadamard_power
 
-local iterate_limit = 600
-local machine_upper_epsilon = (2 ^ 52)
-local machine_lower_epsilon = (2 ^ -52)
-local tolerance = (10 ^ -6) / 2
+local machine_upper_epsilon = (2 ^ 52) -- (2 ^ 511)
+local machine_lower_epsilon = (2 ^ -52) -- (2 ^ -511)
 
 local M = {}
 
@@ -36,9 +34,11 @@ end
 ---@param problem Problem Problems to solve.
 ---@param solver_state SolverState
 ---@param raw_variables PackedVariables? The value returned by @{Problem:pack_variables}.
+---@param tolerance number
+---@param iterate_limit integer
 ---@return SolverState
 ---@return PackedVariables? #Packed table of raw solution.
-function M.solve(problem, solver_state, raw_variables)
+function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     if solver_state == "ready" then
         debug_print(string.format("-- ready solve '%s' --", problem.name))
         return 1, raw_variables

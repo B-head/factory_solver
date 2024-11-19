@@ -2,8 +2,8 @@ local problem_generator = require "solver/problem_generator"
 
 local final_product_cost = 0
 local basic_ingredient_cost = 0
-local surplus_cost = 2 ^ 10
-local shortage_cost = 2 ^ 10
+local surplus_product_cost = 0
+local shortage_ingredient_cost = 0
 
 local M = {}
 
@@ -70,12 +70,12 @@ function M.create_problem(solution_name, constraints, production_lines)
             --TODO Detection of linear dependencies.
             do
                 local primal_variable = "|surplus_product|" .. variable_name
-                problem:add_objective(primal_variable, surplus_cost)
+                problem:add_objective(primal_variable, surplus_product_cost)
                 problem:add_subject_term(primal_variable, variable_name, -1)
             end
             do
                 local primal_variable = "|shortage_ingredient|" .. variable_name
-                problem:add_objective(primal_variable, shortage_cost)
+                problem:add_objective(primal_variable, shortage_ingredient_cost)
                 problem:add_subject_term(primal_variable, variable_name, 1)
                 problem:add_subject_term(primal_variable, "|limit|" .. variable_name, 1)
             end
