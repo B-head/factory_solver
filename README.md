@@ -1,4 +1,4 @@
-Calculate quantities of machine and ingredient required in a factory to achieve materials production speed.
+The Factorio calculator. Calculate quantities of machine and ingredient required in a factory to achieve materials production speed.
 
 The powerful solver based on IPMs for LP allows factories with complex recipe chains and loops to be calculated without extra hassle.
 
