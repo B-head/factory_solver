@@ -56,6 +56,13 @@ function M.typed_name_to_elem_id(typed_name)
 end
 
 ---comment
+---@param typed_name TypedName
+---@return string
+function M.typed_name_to_variable_name(typed_name)
+    return string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
+end
+
+---comment
 ---@param filter_type FilterType | "research-progress"
 ---@param name string
 ---@param quality string?

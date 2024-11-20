@@ -1,3 +1,4 @@
+local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
 
 local final_product_cost = 0
@@ -6,13 +7,6 @@ local surplus_product_cost = 0
 local shortage_ingredient_cost = 0
 
 local M = {}
-
----comment
----@param typed_name TypedName
----@return string
-function M.make_variable_name(typed_name)
-    return string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
-end
 
 ---comment
 ---@param production_lines NormalizedProductionLine[]
@@ -31,12 +25,12 @@ function M.get_included_crafts(production_lines)
 
     for _, line in pairs(production_lines) do
         for _, value in pairs(line.products) do
-            local variable_name = M.make_variable_name(value)
+            local variable_name = tn.typed_name_to_variable_name(value)
             add_set(variable_name)
             set[variable_name].included_product = true
         end
         for _, value in pairs(line.ingredients) do
-            local variable_name = M.make_variable_name(value)
+            local variable_name = tn.typed_name_to_variable_name(value)
             add_set(variable_name)
             set[variable_name].included_ingredient = true
         end
@@ -94,11 +88,11 @@ function M.create_problem(solution_name, constraints, production_lines)
     end
 
     for _, line in ipairs(production_lines) do
-        local recipe_variable_name = M.make_variable_name(line.recipe_typed_name)
+        local recipe_variable_name = tn.typed_name_to_variable_name(line.recipe_typed_name)
         local product_count, ingredient_count = 0, 0
 
         for _, value in ipairs(line.products) do
-            local variable_name = M.make_variable_name(value)
+            local variable_name = tn.typed_name_to_variable_name(value)
             local amount = value.amount_per_second
             problem:add_subject_term(recipe_variable_name, variable_name, amount)
             problem:add_subject_term(recipe_variable_name, "|limit|" .. variable_name, amount)
@@ -111,7 +105,7 @@ function M.create_problem(solution_name, constraints, production_lines)
         end
 
         for _, value in ipairs(line.ingredients) do
-            local variable_name = M.make_variable_name(value)
+            local variable_name = tn.typed_name_to_variable_name(value)
             local amount = value.amount_per_second
             problem:add_subject_term(recipe_variable_name, variable_name, -amount)
 
@@ -128,7 +122,7 @@ function M.create_problem(solution_name, constraints, production_lines)
     end
 
     for _, constraint in ipairs(constraints) do
-        local variable_name = M.make_variable_name(constraint)
+        local variable_name = tn.typed_name_to_variable_name(constraint)
         local limit = constraint.limit_amount_per_second
 
         if constraint.limit_type == "upper" then
