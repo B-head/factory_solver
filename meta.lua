@@ -1,4 +1,5 @@
 ---@meta
+---@module "solver/problem_generator"
 
 ---@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"|"transfer"
 ---@alias LimitType "upper"|"lower"|"equal"
