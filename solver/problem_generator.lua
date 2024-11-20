@@ -14,13 +14,11 @@ local M = {}
 ---@field index integer
 ---@field cost number
 ---@field is_result boolean
-local Primal = {}
 
 ---@class Dual
 ---@field key string
 ---@field index integer
 ---@field limit number
-local Dual = {}
 
 local metatable = { __index = M }
 

@@ -1,12 +1,13 @@
----Implementation of compressed sparse row matrix.
----@license MIT
----@author B_head
-
 ---@class CsrMatrix
 ---@field width integer
 ---@field values number[]
 ---@field column_indexes integer[]
 ---@field row_ranges integer[]
+---@operator add(CsrMatrix): CsrMatrix
+---@operator sub(CsrMatrix): CsrMatrix
+---@operator mul(CsrMatrix|number): CsrMatrix
+---@operator div(number): CsrMatrix
+---@operator unm: CsrMatrix
 local M = {}
 
 local metatable = { __index = M }

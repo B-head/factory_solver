@@ -22,7 +22,6 @@ end
 ---@param laplacians CsrMatrix
 ---@return number
 local function find_step(variables, laplacians)
-    ---@diagnostic disable-next-line: param-type-mismatch
     local steps = hdiv(variables, -laplacians)
     return steps:fold(1, function(a, b)
         return (b <= 0) and a or math.min(a, b)
