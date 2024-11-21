@@ -210,7 +210,9 @@ function metatable.__tostring(matrix)
                 i = i + 1
                 u = (i < ie) and column_indexes[i] or int_max
             end
-            table.insert(ret, string.format("%13g", a))
+            local s = string.format("%7.3g", a)
+            s = string.gsub(s, "([%- ])[%d.]+(e[%-+][%d]+)", "  %1%2")
+            table.insert(ret, s)
         end
     end
 

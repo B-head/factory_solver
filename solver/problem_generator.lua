@@ -101,7 +101,7 @@ end
 ---@param dual_variable string
 ---@param limit number
 function M:add_upper_limit_constraint(dual_variable, limit)
-    local slack_key = "%slack%" .. dual_variable
+    local slack_key = "%positive_slack%" .. dual_variable
     M.add_equivalence_constraint(self, dual_variable, limit)
     M.add_objective(self, slack_key, 0, false)
     M.add_subject_term(self, slack_key, dual_variable, 1)
@@ -111,7 +111,7 @@ end
 ---@param dual_variable string
 ---@param limit number
 function M:add_lower_limit_constraint(dual_variable, limit)
-    local slack_key = "%slack%" .. dual_variable
+    local slack_key = "%negative_slack%" .. dual_variable
     M.add_equivalence_constraint(self, dual_variable, limit)
     M.add_objective(self, slack_key, 0, false)
     M.add_subject_term(self, slack_key, dual_variable, -1)
@@ -261,7 +261,7 @@ function M:dump_primal(vector)
     local list = vector:to_list()
     local ret = {}
     for k, v in pairs(self.primals) do
-        table.insert(ret, string.format("  %q = %f\n", k, list[v.index]))
+        table.insert(ret, string.format("  [%i]%q = %f\n", v.index, k, list[v.index]))
     end
     return table.concat(ret)
 end
@@ -273,7 +273,7 @@ function M:dump_dual(vector)
     local list = vector:to_list()
     local ret = {}
     for k, v in pairs(self.duals) do
-        table.insert(ret, string.format("  %q = %f\n", k, list[v.index]))
+        table.insert(ret, string.format("  [%i]%q = %f\n", v.index, k, list[v.index]))
     end
     return table.concat(ret)
 end

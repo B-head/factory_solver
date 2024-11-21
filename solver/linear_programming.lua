@@ -39,7 +39,13 @@ end
 ---@return PackedVariables? #Packed table of raw solution.
 function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     if solver_state == "ready" then
+        local b = problem:generate_limit_vector()
+        local c = problem:generate_cost_vector()
+
         debug_print(string.format("-- ready solve '%s' --", problem.name))
+        debug_print("cost <c>:\n" .. problem:dump_primal(c))
+        debug_print("limit <b>:\n" .. problem:dump_dual(b))
+
         return 1, raw_variables
     elseif type(solver_state) ~= "number" then
         return solver_state, raw_variables
@@ -70,8 +76,6 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
 
     if math.max(p_criteria, d_criteria, dg_criteria) <= tolerance then
         debug_print("primal <x>:\n" .. problem:dump_primal(x))
-        debug_print("cost <c>:\n" .. problem:dump_primal(c))
-        debug_print("limit <b>:\n" .. problem:dump_dual(b))
         debug_print(string.format("-- finished solve '%s' --", problem.name))
         debug_print(string.format("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree))
 
@@ -80,8 +84,6 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
 
     if iterate_limit <= solver_state then
         debug_print("primal <x>:\n" .. problem:dump_primal(x))
-        debug_print("cost <c>:\n" .. problem:dump_primal(c))
-        debug_print("limit <b>:\n" .. problem:dump_dual(b))
         debug_print(string.format("-- unfinished solve '%s' --", problem.name))
         debug_print(string.format("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree))
 
