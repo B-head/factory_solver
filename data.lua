@@ -21,6 +21,134 @@ else
     })
 end
 
+if mods["debugadapter"] then
+    -- Test data --
+    data:extend({
+        {
+            type = "recipe",
+            name = "fs-test-base",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "efficiency-module", amount = 1 },
+                { type = "item", name = "speed-module", amount = 1 },
+            },
+            results = {
+                { type = "item", name = "efficiency-module-2",   amount = 1 },
+                { type = "item", name = "speed-module-2", amount = 1 },
+            },
+            main_product = "efficiency-module-2",
+        },
+        {
+            type = "recipe",
+            name = "fs-test-short-positive",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "speed-module-2", amount = 1 },
+            },
+            results = {
+                { type = "item", name = "speed-module", amount = 2 },
+            }
+        },
+        {
+            type = "recipe",
+            name = "fs-test-short-negative",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "speed-module-2", amount = 2 },
+            },
+            results = {
+                { type = "item", name = "speed-module", amount = 1 },
+            }
+        },
+        {
+            type = "recipe",
+            name = "fs-test-long-positive-1",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "speed-module-2", amount = 1 },
+            },
+            results = {
+                { type = "item", name = "speed-module-3", amount = 2 },
+            }
+        },
+        {
+            type = "recipe",
+            name = "fs-test-long-positive-2",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "speed-module-3", amount = 1 },
+            },
+            results = {
+                { type = "item", name = "speed-module", amount = 2 },
+            }
+        },
+        {
+            type = "recipe",
+            name = "fs-test-long-negative-1",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "speed-module-2", amount = 2 },
+            },
+            results = {
+                { type = "item", name = "speed-module-3", amount = 1 },
+            }
+        },
+        {
+            type = "recipe",
+            name = "fs-test-long-negative-2",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "speed-module-3", amount = 2 },
+            },
+            results = {
+                { type = "item", name = "speed-module", amount = 1 },
+            }
+        },
+        {
+            type = "recipe",
+            name = "fs-test-parallel-1",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "efficiency-module-2",   amount = 1 },
+                { type = "item", name = "speed-module-2", amount = 2 },
+            },
+            results = {
+                { type = "item", name = "efficiency-module-3",   amount = 1 },
+            }
+        },
+        {
+            type = "recipe",
+            name = "fs-test-parallel-2",
+            enabled = true,
+            energy_required = 1,
+            ingredients =
+            {
+                { type = "item", name = "efficiency-module-2",   amount = 2 },
+                { type = "item", name = "speed-module-2", amount = 1 },
+            },
+            results = {
+                { type = "item", name = "efficiency-module-3",   amount = 1 },
+            }
+        },
+    })
+end
+
 data:extend({
     {
         type = "custom-input",
