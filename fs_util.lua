@@ -161,7 +161,7 @@ function M.dfs_lower(start_element)
     local element_stack = { start_element }
     local index_stack = { 0 }
 
-    function it()
+    local function it()
         local tail = #element_stack
         if tail == 0 then
             return nil
