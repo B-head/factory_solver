@@ -1,7 +1,8 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.10
 Date: ????
-  Changes:
+  Bugfixes:
+    - Fix calculation failures in recipes that use large amounts of products or ingredients.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.9
 Date: 2024-11-22
@@ -17,7 +18,7 @@ Date: 2024-11-22
 Version: 0.3.7
 Date: 2024-11-18
   Changes:
-    - Stabilise the solution by spreading the profit/cost value across all recipes.
+    - Stabilise the solution by spreading the gain/cost value across all recipes.
   Gui:
     - Change the icon button to wrap in the recipe line editor.
     - Change SI suffixes to be added to the Required and Pollution values.
