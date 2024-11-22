@@ -338,7 +338,7 @@ function M.create_resource_virtual(resource_prototype)
     local mineable = resource_prototype.mineable_properties
 
     local products = {}
-    for _, value in pairs(mineable.products) do
+    for _, value in pairs(mineable.products or {}) do
         local amount = M.modify_product_or_ingredient(value, mineable.mining_time)
         flib_table.insert(products, amount)
     end
