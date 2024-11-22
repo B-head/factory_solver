@@ -13,7 +13,7 @@ end
 local type_dictionary = {
     ["item"] = "item-with-quality",
     ["fluid"] = "fluid",
-    ["recipe"] = "recipe-with-quality",
+    ["recipe"] = "recipe",
     ["machine"] = "entity-with-quality",
 }
 

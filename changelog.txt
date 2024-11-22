@@ -1,7 +1,9 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.8
 Date: ????
-  Changes:
+  Gui:
+    - Revert the recipe tooltips back to non-quality-compliant ones,
+      as the recipe details are not displayed.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.7
 Date: 2024-11-18
