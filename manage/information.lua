@@ -248,17 +248,17 @@ function M.create_group_infos(force_index, relation_to_recipes)
 end
 
 ---comment
----@param fuel_categories { [string]: boolean }
+---@param categories { [string]: boolean }
 ---@return string
-function M.join_fuel_categories(fuel_categories)
-    local joined_fuel_category = ""
-    for name, _ in pairs(fuel_categories) do
-        if joined_fuel_category ~= "" then
-            joined_fuel_category = joined_fuel_category .. "|"
+function M.join_categories(categories)
+    local joined_category = ""
+    for name, _ in pairs(categories) do
+        if joined_category ~= "" then
+            joined_category = joined_category .. "|"
         end
-        joined_fuel_category = joined_fuel_category .. name
+        joined_category = joined_category .. name
     end
-    return joined_fuel_category
+    return joined_category
 end
 
 ---comment
