@@ -45,7 +45,7 @@ end
 ---@return number
 function M.make_recipe_cost(product_count, ingredient_count)
     local value = ingredient_count - product_count
-    return 1 / (1 + math.exp(-value)) - 1
+    return (value / (1 + math.abs(value)) - 1) / 2
 end
 
 ---Create linear programming problems.
