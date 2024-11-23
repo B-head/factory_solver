@@ -267,7 +267,7 @@ function M.is_unresearched(craft, relation_to_recipes)
         return not relation_to_recipes.enabled_recipe[craft.name]
     elseif craft.object_name == "LuaEntityPrototype" then
         local ret = true
-        for _, value in ipairs(craft.items_to_place_this) do
+        for _, value in ipairs(craft.items_to_place_this or {}) do
             local item = prototypes.item[value.name]
             local is_researched = 0 < relation_to_recipes.item[item.name].craftable_count
             ret = ret and not is_researched
@@ -305,7 +305,7 @@ function M.get_fuel_amount_per_second(machine, machine_quality, fuel, fuel_quali
         ---@diagnostic enable: param-type-mismatch
 
         local power = M.raw_energy_usage_to_power(machine, machine_quality, effectivity_consumption)
-        return (fuel_value == 0) and 0 or power / fuel_value
+        return (fuel_value == 0) and 0 or power / fuel_value -- TODO
     end
 end
 
