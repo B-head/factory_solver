@@ -136,7 +136,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             flib_table.insert(ingredients, amount)
         end
 
-        if script.active_mods["space-age"] ~= nil then -- TODO use launch_to_space_platforms
+        if script.feature_flags.space_travel then -- TODO use launch_to_space_platforms
             local rocket_entity_prototype = assert(rocket_silo_prototype.rocket_entity_prototype)
             local space_rocket_name = "<launch>" .. rocket_entity_prototype.name
             -- local sprite_path = "entity/" .. rocket_entity_prototype.name -- TODO

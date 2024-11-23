@@ -547,7 +547,7 @@ return {
             type = "flow",
             style = "factory_solver_centering_horizontal_flow",
             direction = "horizontal",
-            visible = common.is_active_quality(),
+            visible = script.feature_flags.quality,
             {
                 type = "label",
                 caption = "Quality",

@@ -74,12 +74,6 @@ function M.format_power(power)
 end
 
 ---comment
----@return boolean
-function M.is_active_quality()
-    return script.active_mods["quality"] ~= nil
-end
-
----comment
 ---@param data table
 ---@return flib.GuiElemDef
 function M.create_decorated_sprite_button(data)
