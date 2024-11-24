@@ -159,6 +159,20 @@ function M.from_scale(value, scale)
 end
 
 ---comment
+---@param categories { [string]: true }
+---@return string
+function M.join_categories(categories)
+    local joined_category = ""
+    for name, _ in pairs(categories) do
+        if joined_category ~= "" then
+            joined_category = joined_category .. "|"
+        end
+        joined_category = joined_category .. name
+    end
+    return joined_category
+end
+
+---comment
 ---@param category_name string
 ---@return LuaEntityPrototype[]
 function M.get_machines_in_category(category_name)
@@ -200,7 +214,7 @@ function M.get_machines_for_recipe(recipe)
 end
 
 ---comment
----@param fuel_categories { [string]: boolean } | string
+---@param fuel_categories { [string]: true } | string
 ---@return LuaItemPrototype[]
 function M.get_fuels_in_categories(fuel_categories)
     local fuels = {}
@@ -350,7 +364,7 @@ end
 
 ---comment
 ---@param machine LuaEntityPrototype
----@return { [string]: boolean }?
+---@return { [string]: true }?
 function M.try_get_fuel_categories(machine)
     if machine.burner_prototype then
         return machine.burner_prototype.fuel_categories

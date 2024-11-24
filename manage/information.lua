@@ -248,20 +248,6 @@ function M.create_group_infos(force_index, relation_to_recipes)
 end
 
 ---comment
----@param categories { [string]: boolean }
----@return string
-function M.join_categories(categories)
-    local joined_category = ""
-    for name, _ in pairs(categories) do
-        if joined_category ~= "" then
-            joined_category = joined_category .. "|"
-        end
-        joined_category = joined_category .. name
-    end
-    return joined_category
-end
-
----comment
 ---@param origin table<string, TypedName>?
 ---@return table<string, TypedName>
 function M.create_fuel_presets(origin)
