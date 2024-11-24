@@ -159,6 +159,19 @@ function M.from_scale(value, scale)
 end
 
 ---comment
+---@param categories { [string]: true }
+---@return string
+function M.join_categories(categories)
+    local name_list = {}
+    for name, _ in pairs(categories) do
+        flib_table.insert(name_list, name)
+    end
+    
+    flib_table.sort(name_list)
+    return flib_table.concat(name_list, "|")
+end
+
+---comment
 ---@param category_name string
 ---@return LuaEntityPrototype[]
 function M.get_machines_in_category(category_name)
@@ -200,7 +213,7 @@ function M.get_machines_for_recipe(recipe)
 end
 
 ---comment
----@param fuel_categories { [string]: boolean } | string
+---@param fuel_categories { [string]: true } | string
 ---@return LuaItemPrototype[]
 function M.get_fuels_in_categories(fuel_categories)
     local fuels = {}
@@ -267,7 +280,7 @@ function M.is_unresearched(craft, relation_to_recipes)
         return not relation_to_recipes.enabled_recipe[craft.name]
     elseif craft.object_name == "LuaEntityPrototype" then
         local ret = true
-        for _, value in ipairs(craft.items_to_place_this) do
+        for _, value in ipairs(craft.items_to_place_this or {}) do
             local item = prototypes.item[value.name]
             local is_researched = 0 < relation_to_recipes.item[item.name].craftable_count
             ret = ret and not is_researched
@@ -305,7 +318,7 @@ function M.get_fuel_amount_per_second(machine, machine_quality, fuel, fuel_quali
         ---@diagnostic enable: param-type-mismatch
 
         local power = M.raw_energy_usage_to_power(machine, machine_quality, effectivity_consumption)
-        return (fuel_value == 0) and 0 or power / fuel_value
+        return (fuel_value == 0) and 0 or power / fuel_value -- TODO
     end
 end
 
@@ -350,7 +363,7 @@ end
 
 ---comment
 ---@param machine LuaEntityPrototype
----@return { [string]: boolean }?
+---@return { [string]: true }?
 function M.try_get_fuel_categories(machine)
     if machine.burner_prototype then
         return machine.burner_prototype.fuel_categories

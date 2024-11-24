@@ -146,7 +146,7 @@ function handlers.on_make_constraint_picker(event)
             }
             local sorted = fs_util.sort_prototypes(fs_util.to_list(items))
 
-            for _, value in pairs(sorted) do
+            for _, value in ipairs(sorted) do
                 if not value.parameter then
                     local is_hidden = acc.is_hidden(value)
                     local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
@@ -160,7 +160,7 @@ function handlers.on_make_constraint_picker(event)
             }
             local sorted = fs_util.sort_prototypes(fs_util.to_list(fluids))
 
-            for _, value in pairs(sorted) do
+            for _, value in ipairs(sorted) do
                 if not value.parameter then
                     local is_hidden = acc.is_hidden(value)
                     local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
@@ -174,7 +174,7 @@ function handlers.on_make_constraint_picker(event)
             }
             local sorted = fs_util.sort_prototypes(fs_util.to_list(recipe_prototypes))
 
-            for _, value in pairs(sorted) do
+            for _, value in ipairs(sorted) do
                 if not prototypes.recipe[value.name].parameter then
                     local is_hidden = acc.is_hidden(value)
                     local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
@@ -197,7 +197,7 @@ function handlers.on_make_constraint_picker(event)
             end
             local sorted = fs_util.sort_prototypes(virtuals)
 
-            for _, value in pairs(sorted) do
+            for _, value in ipairs(sorted) do
                 local is_hidden = acc.is_hidden(value)
                 local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
                 local typed_name = tn.craft_to_typed_name(value)

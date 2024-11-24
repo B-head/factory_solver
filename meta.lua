@@ -121,6 +121,7 @@ __factory_solver__storage = {}
 ---@class Virtuals
 ---@field material table<string, VirtualMaterial>
 ---@field recipe table<string, VirtualRecipe>
+---@field fuel_categories_dictionary table<string, { [string]: true }>
 
 ---@class VirtualMaterial
 ---@field type "virtual_material"

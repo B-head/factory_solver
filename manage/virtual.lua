@@ -31,6 +31,9 @@ function M.create_virtuals()
     ---@type table<string, VirtualRecipe>
     local recipes = {}
 
+    ---@type table<string, { [string]: true }>
+    local fuel_categories_dictionary = {}
+
     for _, entity in pairs(prototypes.entity) do
         local result_crafts = {}
         if entity.type == "rocket-silo" then
@@ -56,6 +59,12 @@ function M.create_virtuals()
                 assert()
             end
         end
+
+        local fuel_categories = acc.try_get_fuel_categories(entity)
+        if fuel_categories then
+            local joined_category = acc.join_categories(fuel_categories)
+            fuel_categories_dictionary[joined_category] = fuel_categories
+        end
     end
 
     for _, tile in pairs(prototypes.tile) do
@@ -75,9 +84,11 @@ function M.create_virtuals()
         end
     end
 
+    ---@type Virtuals
     return {
         material = materials,
         recipe = recipes,
+        fuel_categories_dictionary = fuel_categories_dictionary,
     }
 end
 
@@ -131,12 +142,12 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         local crafting_speed_cap = energy * rocket_parts_required * acc.second_per_tick / time_to_quick_launch_per_tick
 
         local ingredients = {}
-        for _, value in pairs(rocket_part.ingredients) do
+        for _, value in ipairs(rocket_part.ingredients) do
             local amount = M.modify_product_or_ingredient(value, energy)
             flib_table.insert(ingredients, amount)
         end
 
-        if script.active_mods["space-age"] ~= nil then -- TODO use launch_to_space_platforms
+        if script.feature_flags.space_travel then -- TODO use launch_to_space_platforms
             local rocket_entity_prototype = assert(rocket_silo_prototype.rocket_entity_prototype)
             local space_rocket_name = "<launch>" .. rocket_entity_prototype.name
             -- local sprite_path = "entity/" .. rocket_entity_prototype.name -- TODO
@@ -180,7 +191,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         else
             for _, has_rocket_launch_product in pairs(has_rocket_launch_products) do
                 local products = {}
-                for _, value in pairs(has_rocket_launch_product.rocket_launch_products) do
+                for _, value in ipairs(has_rocket_launch_product.rocket_launch_products) do
                     local amount = M.modify_product_or_ingredient(value, energy * rocket_parts_required)
                     flib_table.insert(products, amount)
                 end
@@ -338,7 +349,7 @@ function M.create_resource_virtual(resource_prototype)
     local mineable = resource_prototype.mineable_properties
 
     local products = {}
-    for _, value in pairs(mineable.products or {}) do
+    for _, value in ipairs(mineable.products or {}) do
         local amount = M.modify_product_or_ingredient(value, mineable.mining_time)
         flib_table.insert(products, amount)
     end

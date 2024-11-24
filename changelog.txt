@@ -1,7 +1,16 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.3.11
+Version: 0.3.12
 Date: ????
   Changes:
+---------------------------------------------------------------------------------------------------
+Version: 0.3.11
+Date: 2024-11-24
+  Bugfixes:
+    - Fix not supporting joined fuel categories.
+    - Fix crash when all objects belonging to a category are hidden.
+    - Fix crash when some machines have items_to_place_this not defined.
+    - Fix the recipe not showing when the switch is hide in add production line.
+    - Fix the order not being retained.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.10
 Date: 2024-11-23
