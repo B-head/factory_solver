@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.11
-Date: ????
+Date: 2024-11-24
   Bugfixes:
     - Fix not supporting joined fuel categories.
     - Fix crash when all objects belonging to a category are hidden.
