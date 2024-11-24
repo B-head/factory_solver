@@ -128,9 +128,8 @@ function handlers.on_make_choose_table(event)
                     },
                 }
                 flib_table.insert(def_buttons, def)
+                ::inner_continue::
             end
-
-            ::inner_continue::
         end
 
         if #def_buttons == 0 then

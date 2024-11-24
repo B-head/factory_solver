@@ -5,6 +5,7 @@ Date: ????
     - Fix not supporting joined fuel categories.
     - Fix crash when all objects belonging to a category are hidden.
     - Fix crash when some machines have items_to_place_this not defined.
+    - Fix the recipe not showing when the switch is hide in add production line.
     - Fix the order not being retained.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.10
