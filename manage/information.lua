@@ -13,7 +13,7 @@ function M.cache_fuel_names()
         local machines = acc.get_machines_in_category(crafting_category_name)
 
         local fuel_categories = {}
-        for _, machine in pairs(machines) do
+        for _, machine in ipairs(machines) do
             local res = acc.try_get_fuel_categories(machine)
             if not res then
                 goto continue
@@ -35,7 +35,7 @@ function M.cache_fuel_names()
         local machines = acc.get_machines_in_resource_category(resource_category_name)
 
         local fuel_categories = {}
-        for _, machine in pairs(machines) do
+        for _, machine in ipairs(machines) do
             local res = acc.try_get_fuel_categories(machine)
             if not res then
                 goto continue

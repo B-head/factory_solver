@@ -98,7 +98,7 @@ function M.reinit_force_data(force_index)
         force_data.group_infos_needs_updating = true
 
         for _, solution in pairs(force_data.solutions) do
-            for _, line in pairs(solution.production_lines) do
+            for _, line in ipairs(solution.production_lines) do
                 tn.typed_name_migration(line.recipe_typed_name)
                 tn.typed_name_migration(line.machine_typed_name)
                 tn.typed_name_migration(line.fuel_typed_name)
@@ -117,7 +117,7 @@ function M.reinit_force_data(force_index)
                     end
                 end
 
-                for _, affected in pairs(line.affected_by_beacons) do
+                for _, affected in ipairs(line.affected_by_beacons) do
                     if affected.beacon_name then
                         affected.beacon_typed_name = tn.create_typed_name("machine", affected.beacon_name)
                         affected.beacon_name = nil
@@ -281,7 +281,7 @@ function M.get_total_amounts(solution)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name.name)
 
-        for _, product in pairs(recipe.products) do
+        for _, product in ipairs(recipe.products) do
             local amount = acc.raw_product_to_amount(
                 product,
                 "unknown-quality",
@@ -304,7 +304,7 @@ function M.get_total_amounts(solution)
             end
         end
 
-        for _, ingredient in pairs(recipe.ingredients) do
+        for _, ingredient in ipairs(recipe.ingredients) do
             local amount = acc.raw_ingredient_to_amount(
                 ingredient,
                 "unknown-quality",

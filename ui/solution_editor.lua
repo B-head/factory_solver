@@ -167,7 +167,7 @@ function handlers.make_production_line_table(event)
 
         do
             local buttons = {}
-            for _, product in pairs(recipe.products) do
+            for _, product in ipairs(recipe.products) do
                 local amount = acc.raw_product_to_amount(
                     product,
                     recipe_quality,
@@ -212,7 +212,7 @@ function handlers.make_production_line_table(event)
 
         do
             local buttons = {}
-            for _, ingredient in pairs(recipe.ingredients) do
+            for _, ingredient in ipairs(recipe.ingredients) do
                 local amount = acc.raw_ingredient_to_amount(
                     ingredient,
                     recipe_quality,

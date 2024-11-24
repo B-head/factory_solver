@@ -142,7 +142,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         local crafting_speed_cap = energy * rocket_parts_required * acc.second_per_tick / time_to_quick_launch_per_tick
 
         local ingredients = {}
-        for _, value in pairs(rocket_part.ingredients) do
+        for _, value in ipairs(rocket_part.ingredients) do
             local amount = M.modify_product_or_ingredient(value, energy)
             flib_table.insert(ingredients, amount)
         end
@@ -191,7 +191,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         else
             for _, has_rocket_launch_product in pairs(has_rocket_launch_products) do
                 local products = {}
-                for _, value in pairs(has_rocket_launch_product.rocket_launch_products) do
+                for _, value in ipairs(has_rocket_launch_product.rocket_launch_products) do
                     local amount = M.modify_product_or_ingredient(value, energy * rocket_parts_required)
                     flib_table.insert(products, amount)
                 end
@@ -349,7 +349,7 @@ function M.create_resource_virtual(resource_prototype)
     local mineable = resource_prototype.mineable_properties
 
     local products = {}
-    for _, value in pairs(mineable.products or {}) do
+    for _, value in ipairs(mineable.products or {}) do
         local amount = M.modify_product_or_ingredient(value, mineable.mining_time)
         flib_table.insert(products, amount)
     end

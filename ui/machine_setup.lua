@@ -18,7 +18,7 @@ function handlers.on_make_machine_table(event)
     local machines = acc.get_machines_for_recipe(recipe)
 
     elem.clear()
-    for _, machine in pairs(machines) do
+    for _, machine in ipairs(machines) do
         local typed_name = tn.craft_to_typed_name(machine)
         local is_hidden = acc.is_hidden(machine)
         local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
@@ -427,7 +427,7 @@ function handlers.on_make_fuel_table(event)
         end
 
         elem.clear()
-        for _, fuel in pairs(fuels) do
+        for _, fuel in ipairs(fuels) do
             local typed_name = tn.craft_to_typed_name(fuel)
             local is_hidden = acc.is_hidden(fuel)
             local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)

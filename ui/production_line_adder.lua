@@ -47,16 +47,16 @@ function handlers.on_make_choose_table(event)
 
     local player_data = save.get_player_data(event.player_index)
     local kind = elem.tags.kind --[[@as string]]
-    local typed_name = dialog_tags.typed_name --[[@as TypedName]]
+    local choose_typed_name = dialog_tags.typed_name --[[@as TypedName]]
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     local relation_to_recipe
-    if typed_name.type == "item" then
-        relation_to_recipe = relation_to_recipes.item[typed_name.name]
-    elseif typed_name.type == "fluid" then
-        relation_to_recipe = relation_to_recipes.fluid[typed_name.name]
-    elseif typed_name.type == "virtual_material" then
-        relation_to_recipe = relation_to_recipes.virtual_recipe[typed_name.name]
+    if choose_typed_name.type == "item" then
+        relation_to_recipe = relation_to_recipes.item[choose_typed_name.name]
+    elseif choose_typed_name.type == "fluid" then
+        relation_to_recipe = relation_to_recipes.fluid[choose_typed_name.name]
+    elseif choose_typed_name.type == "virtual_material" then
+        relation_to_recipe = relation_to_recipes.virtual_recipe[choose_typed_name.name]
     else
         assert()
     end
@@ -73,7 +73,7 @@ function handlers.on_make_choose_table(event)
     end
 
     local used_recipes = flib_table.map(recipe_names, function(name)
-        return storage.virtuals.recipe[name] or prototypes.recipe[name]
+        return assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
     end) --[=[@as (LuaRecipePrototype | VirtualRecipe)[]]=]
 
     local grouped = fs_util.group_by(used_recipes, function(value)
@@ -88,7 +88,7 @@ function handlers.on_make_choose_table(event)
     groups = fs_util.sort_prototypes(groups)
 
     elem.clear()
-    for _, group in pairs(groups) do
+    for _, group in ipairs(groups) do
         local group_name = group.name
 
         local group_recipes = grouped[group_name] or {}

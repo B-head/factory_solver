@@ -64,10 +64,10 @@ function handlers.on_make_preset_tables(event)
 
         do
             local def_buttons = {}
-            for _, value in pairs(crafts) do
-                local typed_name = tn.craft_to_typed_name(value)
-                local is_hidden = acc.is_hidden(value)
-                local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
+            for _, craft in ipairs(crafts) do
+                local typed_name = tn.craft_to_typed_name(craft)
+                local is_hidden = acc.is_hidden(craft)
+                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
 
                 local def = common.create_decorated_sprite_button {
                     typed_name = typed_name,
