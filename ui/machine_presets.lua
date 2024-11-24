@@ -25,7 +25,7 @@ function handlers.on_make_preset_tables(event)
 
     local categories
     if preset_type == "fuel" then
-        categories = prototypes.fuel_category
+        categories = storage.virtuals.fuel_categories_dictionary
     elseif preset_type == "fluid_fuel" then
         categories = { ["<any-fluid-fuel>"] = true }
     elseif preset_type == "resource" then
@@ -36,10 +36,10 @@ function handlers.on_make_preset_tables(event)
         assert()
     end
 
-    for category_name, _ in pairs(categories) do
+    for category_name, value in pairs(categories) do
         local crafts
         if preset_type == "fuel" then
-            crafts = acc.get_fuels_in_categories(category_name)
+            crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]])
         elseif preset_type == "fluid_fuel" then
             crafts = acc.get_any_fluid_fuels()
         elseif preset_type == "resource" then
@@ -148,9 +148,8 @@ function handlers.on_preset_change_toggle(event)
         preset = dialog_tags.presets.resource[category_name]
     elseif preset_type == "machine" then
         preset = dialog_tags.presets.machine[category_name]
-    else
-        assert()
     end
+    assert(preset)
 
     elem.toggled = tn.equals_typed_name(preset, typed_name)
 end

@@ -31,6 +31,9 @@ function M.create_virtuals()
     ---@type table<string, VirtualRecipe>
     local recipes = {}
 
+    ---@type table<string, { [string]: true }>
+    local fuel_categories_dictionary = {}
+
     for _, entity in pairs(prototypes.entity) do
         local result_crafts = {}
         if entity.type == "rocket-silo" then
@@ -56,6 +59,12 @@ function M.create_virtuals()
                 assert()
             end
         end
+
+        local fuel_categories = acc.try_get_fuel_categories(entity)
+        if fuel_categories then
+            local joined_category = acc.join_categories(fuel_categories)
+            fuel_categories_dictionary[joined_category] = fuel_categories
+        end
     end
 
     for _, tile in pairs(prototypes.tile) do
@@ -75,9 +84,11 @@ function M.create_virtuals()
         end
     end
 
+    ---@type Virtuals
     return {
         material = materials,
         recipe = recipes,
+        fuel_categories_dictionary = fuel_categories_dictionary,
     }
 end
 

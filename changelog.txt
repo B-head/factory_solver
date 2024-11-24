@@ -2,6 +2,8 @@
 Version: 0.3.11
 Date: ????
   Bugfixes:
+    - Fix not supporting joined fuel categories.
+    - Fix crash when all objects belonging to a category are hidden.
     - Fix crash when some machines have items_to_place_this not defined.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.10

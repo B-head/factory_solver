@@ -162,14 +162,13 @@ end
 ---@param categories { [string]: true }
 ---@return string
 function M.join_categories(categories)
-    local joined_category = ""
+    local name_list = {}
     for name, _ in pairs(categories) do
-        if joined_category ~= "" then
-            joined_category = joined_category .. "|"
-        end
-        joined_category = joined_category .. name
+        flib_table.insert(name_list, name)
     end
-    return joined_category
+    
+    flib_table.sort(name_list)
+    return flib_table.concat(name_list, "|")
 end
 
 ---comment

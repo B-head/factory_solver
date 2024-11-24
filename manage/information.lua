@@ -248,6 +248,31 @@ function M.create_group_infos(force_index, relation_to_recipes)
 end
 
 ---comment
+---@param crafts Craft[]
+---@param filter_type FilterType
+---@return TypedName
+function M.get_default_preset(crafts, filter_type)
+    local first = fs_util.find(crafts, function(value)
+        return not acc.is_hidden(value)
+    end)
+    if first then
+        return tn.craft_to_typed_name(crafts[first])
+    elseif crafts[1] then
+        return tn.craft_to_typed_name(crafts[1])
+    else
+        if filter_type == "item" then
+            return tn.create_typed_name("item", "unknown-item")
+        elseif filter_type == "fluid" then
+            return tn.create_typed_name("fluid", "unknown-fluid")
+        elseif filter_type == "machine" then
+            return tn.create_typed_name("machine", "unknown-entity")
+        else
+            return assert()
+        end
+    end
+end
+
+---comment
 ---@param origin table<string, TypedName>?
 ---@return table<string, TypedName>
 function M.create_fuel_presets(origin)
@@ -256,19 +281,14 @@ function M.create_fuel_presets(origin)
         ret = flib_table.deep_copy(origin)
     end
 
-    for category_name, _ in pairs(prototypes.fuel_category) do
-        tn.typed_name_migration(ret[category_name])
-        if tn.validate_typed_name(ret[category_name]) then
+    for joined_category, fuel_categories in pairs(storage.virtuals.fuel_categories_dictionary) do
+        tn.typed_name_migration(ret[joined_category])
+        if tn.validate_typed_name(ret[joined_category]) then
             goto continue
         end
 
-        local fuels = acc.get_fuels_in_categories(category_name)
-        local first = fs_util.find(fuels, function(value)
-            return not acc.is_hidden(value)
-        end)
-        if first then
-            ret[category_name] = tn.craft_to_typed_name(fuels[first])
-        end
+        local fuels = acc.get_fuels_in_categories(fuel_categories)
+        ret[joined_category] = M.get_default_preset(fuels, "item")
         ::continue::
     end
 
@@ -285,14 +305,7 @@ function M.create_fluid_fuel_preset(origin)
     end
 
     local fluid_fuels = acc.get_any_fluid_fuels()
-    local first = fs_util.find(fluid_fuels, function(value)
-        return not acc.is_hidden(value)
-    end)
-    if first then
-        return tn.craft_to_typed_name(fluid_fuels[first])
-    else
-        return tn.create_typed_name("fluid", "unknown-fluid")
-    end
+    return M.get_default_preset(fluid_fuels, "fluid")
 end
 
 ---comment
@@ -311,12 +324,7 @@ function M.create_resource_presets(origin)
         end
 
         local machines = acc.get_machines_in_resource_category(category_name)
-        local first = fs_util.find(machines, function(value)
-            return not acc.is_hidden(value)
-        end)
-        if first then
-            ret[category_name] = tn.craft_to_typed_name(machines[first])
-        end
+        ret[category_name] = M.get_default_preset(machines, "machine")
         ::continue::
     end
 
@@ -339,13 +347,7 @@ function M.create_machine_presets(origin)
         end
 
         local machines = acc.get_machines_in_category(category_name)
-        local pos = fs_util.find(machines, function(value)
-            return not acc.is_hidden(value)
-        end)
-        if pos then
-            local first = machines[pos]
-            ret[category_name] = tn.craft_to_typed_name(first)
-        end
+        ret[category_name] = M.get_default_preset(machines, "machine")
         ::continue::
     end
 

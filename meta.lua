@@ -134,6 +134,7 @@ local NormalizedAmount = {}
 ---@class Virtuals
 ---@field material table<string, VirtualMaterial>
 ---@field recipe table<string, VirtualRecipe>
+---@field fuel_categories_dictionary table<string, { [string]: true }>
 local Virtuals = {}
 
 ---@class VirtualMaterial
