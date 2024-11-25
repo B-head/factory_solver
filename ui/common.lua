@@ -67,9 +67,11 @@ end
 ---@return string
 function M.format_power(power)
     if power < 0 then
-        return "+" .. flib_format.number(-power, true, 5) .. "J"
+        local temp = flib_format.number(-power, true, 5)
+        return string.format("+%sJ", temp)
     else
-        return flib_format.number(power, true, 5) .. "J"
+        local temp = flib_format.number(power, true, 5)
+        return string.format("%sJ", temp)
     end
 end
 
@@ -147,7 +149,7 @@ function M.open_gui(player_index, is_dialog, gui_def, append_data)
     end
 
     if is_dialog then
-        local sentinel_name = "|sentinel|" .. name
+        local sentinel_name = "%sentinel%" .. name
         local sentinel_def = {
             type = "empty-widget",
             name = sentinel_name,

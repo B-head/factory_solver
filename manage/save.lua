@@ -548,7 +548,7 @@ function M.new_solution(solutions, solution_name)
     local new_solution_name
     local postfix_number = 1
     repeat
-        new_solution_name = solution_name .. " " .. postfix_number
+        new_solution_name = string.format("%s %i", solution_name, postfix_number)
         postfix_number = postfix_number + 1
     until not solutions[new_solution_name]
 
@@ -583,7 +583,7 @@ function M.rename_solution(solutions, solution_name, new_solution_name)
 
     local postfix_number = 1
     while solutions[new_solution_name] do
-        new_solution_name = new_solution_name .. " " .. postfix_number
+        new_solution_name = string.format("%s %i", new_solution_name, postfix_number)
         postfix_number = postfix_number + 1
     end
 

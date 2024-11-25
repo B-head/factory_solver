@@ -262,9 +262,9 @@ function M.get_sprite_path(typed_name)
         local recipe = storage.virtuals.recipe[typed_name.name]
         return recipe.sprite_path
     elseif typed_name.type == "machine" then
-        return "entity" .. "/" .. typed_name.name
+        return string.format("entity/%s", typed_name.name)
     else
-        return typed_name.type .. "/" .. typed_name.name
+        return string.format("%s/%s", typed_name.type, typed_name.name)
     end
 end
 
