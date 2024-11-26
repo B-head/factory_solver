@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-global
+
 if mods["base"] then
     -- Fixed base bug.
     -- data.raw["recipe"]["electric-energy-interface"].hidden = true
