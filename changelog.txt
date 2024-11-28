@@ -2,6 +2,9 @@
 Version: 0.3.12
 Date: ????
   Changes:
+    - Reimplement elastic variables to the solver.
+  Info:
+    - This change is to revert the increase in loops that fail to compute since version 0.3.7.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.11
 Date: 2024-11-24

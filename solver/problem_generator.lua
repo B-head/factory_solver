@@ -105,21 +105,25 @@ end
 ---Add inequality the constraint of equal or less.
 ---@param dual_variable string
 ---@param limit number
+---@return string
 function M:add_upper_limit_constraint(dual_variable, limit)
     local slack_key = "<slack>" .. dual_variable
     M.add_equivalence_constraint(self, dual_variable, limit)
     M.add_objective(self, slack_key, 0, false)
     M.add_subject_term(self, slack_key, dual_variable, 1)
+    return slack_key
 end
 
 ---Add inequality the constraint of equal or greater.
 ---@param dual_variable string
 ---@param limit number
+---@return string
 function M:add_lower_limit_constraint(dual_variable, limit)
     local slack_key = "<slack>" .. dual_variable
     M.add_equivalence_constraint(self, dual_variable, limit)
     M.add_objective(self, slack_key, 0, false)
     M.add_subject_term(self, slack_key, dual_variable, -1)
+    return slack_key
 end
 
 ---Is there an constraint that corresponds to the key?
