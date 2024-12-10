@@ -8,16 +8,6 @@ local machine_lower_epsilon = (2 ^ -52) -- (2 ^ -511)
 
 local M = {}
 
----@param value number
----@param min number?
----@param max number?
----@return number
-local function sigmoid(value, min, max)
-    min = min or 0
-    max = max or 1
-    return (max - min) / (1 + math.exp(-value)) + min
-end
-
 ---@param variables CsrMatrix
 ---@param laplacians CsrMatrix
 ---@return number
@@ -69,10 +59,10 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     local d_criteria = dual:euclidean_norm()
     local dg_criteria = duality_gap:euclidean_norm()
 
-    debug_print(string.format(
-        "i = %i, primal = %f, dual = %f, duality_gap = %f",
-        solver_state, p_criteria, d_criteria, dg_criteria
-    ))
+    -- debug_print(string.format(
+    --     "i = %i, primal = %f, dual = %f, duality_gap = %f",
+    --     solver_state, p_criteria, d_criteria, dg_criteria
+    -- ))
 
     if math.max(p_criteria, d_criteria, dg_criteria) <= tolerance then
         debug_print("primal <x>:\n" .. problem:dump_primal(x))
@@ -102,18 +92,18 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     local s_affine = AT * -y_affine - dual
     local x_affine = SX * -s_affine - sic
 
-    local p_step = find_step(x, x_affine)
-    local d_step = find_step(s, s_affine)
-    local step_scale = sigmoid(dg_criteria, 1 / 3)
+    local step_scale = 1 - tolerance
+    local p_step = find_step(x, x_affine) * step_scale
+    local d_step = find_step(s, s_affine) * step_scale
 
-    debug_print(string.format(
-        "  p_step = %f, d_step = %f, step_scale = %f",
-        p_step, d_step, step_scale
-    ))
+    -- debug_print(string.format(
+    --     "  p_step = %f, d_step = %f, step_scale = %f",
+    --     p_step, d_step, step_scale
+    -- ))
 
-    x = x + step_scale * p_step * x_affine
-    y = y + step_scale * d_step * y_affine
-    s = s + step_scale * d_step * s_affine
+    x = x + p_step * x_affine
+    y = y + d_step * y_affine
+    s = s + d_step * s_affine
 
     x = x:clamp(machine_lower_epsilon, machine_upper_epsilon)
     s = s:clamp(machine_lower_epsilon, machine_upper_epsilon)
