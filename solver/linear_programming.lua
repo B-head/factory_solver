@@ -22,12 +22,6 @@ local function enforce_epsilon_limit(variables)
     end
 end
 
-local function sigmoid(value, min, max)
-    min = min or 0
-    max = max or 1
-    return (max - min) / (1 + math.exp(-value)) + min
-end
-
 ---comment
 ---@param variables Matrix
 ---@param laplacians Matrix
@@ -82,10 +76,10 @@ function M.solve(problem, solver_state, raw_variables)
     local d_criteria = dual:euclidean_norm()
     local dg_criteria = duality_gap:euclidean_norm()
 
-    debug_print(string.format(
-        "i = %i, primal = %f, dual = %f, duality_gap = %f",
-        solver_state, p_criteria, d_criteria, dg_criteria
-    ))
+    -- debug_print(string.format(
+    --     "i = %i, primal = %f, dual = %f, duality_gap = %f",
+    --     solver_state, p_criteria, d_criteria, dg_criteria
+    -- ))
 
     if math.max(p_criteria, d_criteria, dg_criteria) <= tolerance then
         debug_print("primal <x>:\n" .. problem:dump_primal(x))
@@ -121,18 +115,18 @@ function M.solve(problem, solver_state, raw_variables)
     local s_affine = AT * -y_affine - dual
     local x_affine = SX * -s_affine - sic
 
-    local p_step = find_step(x, x_affine)
-    local d_step = find_step(s, s_affine)
-    local step_scale = sigmoid(dg_criteria, 1 / 3)
+    local step_scale = 1 - tolerance
+    local p_step = find_step(x, x_affine) * step_scale
+    local d_step = find_step(s, s_affine) * step_scale
 
-    debug_print(string.format(
-        "  p_step = %f, d_step = %f, step_scale = %f",
-        p_step, d_step, step_scale
-    ))
+    -- debug_print(string.format(
+    --     "  p_step = %f, d_step = %f, step_scale = %f",
+    --     p_step, d_step, step_scale
+    -- ))
 
-    x = x + step_scale * p_step * x_affine
-    y = y + step_scale * d_step * y_affine
-    s = s + step_scale * d_step * s_affine
+    x = x + p_step * x_affine
+    y = y + d_step * y_affine
+    s = s + d_step * s_affine
 
     return solver_state + 1, problem:pack_variables(x, y, s)
 end
