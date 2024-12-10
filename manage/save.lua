@@ -140,6 +140,10 @@ function M.reinit_force_data(force_index)
                     end
                 end
             end
+            
+            for _, constraint in ipairs(solution.constraints) do
+                tn.typed_name_migration(constraint)
+            end
         end
     else
         M.init_force_data(force_index)
