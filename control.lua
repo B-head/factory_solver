@@ -36,8 +36,6 @@ script.on_init(function()
         if remote.interfaces["freeplay"] then
             remote.call("freeplay", "set_skip_intro", true)
             remote.call("freeplay", "set_disable_crashsite", true)
-        elseif remote.interfaces["sandbox"] then
-            remote.call("sandbox", "set_skip_intro", true)
         end
     end
 end)
