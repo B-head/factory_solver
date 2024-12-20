@@ -3,7 +3,7 @@ local csr_matrix = require("solver/csr_matrix")
 local debug_print = print
 local hmul, hdiv, hpow = csr_matrix.hadamard_product, csr_matrix.hadamard_division, csr_matrix.hadamard_power
 
-local machine_upper_epsilon = (2 ^ 52) -- (2 ^ 511)
+local machine_upper_epsilon = (2 ^ 52)  -- (2 ^ 511)
 local machine_lower_epsilon = (2 ^ -52) -- (2 ^ -511)
 
 local M = {}
@@ -85,7 +85,11 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
 
     local L, D = csr_matrix.cholesky_decomposition(P)
 
-    local sic = hmul(hpow(s, -1), duality_gap)
+    local pd_criteria = (p_criteria + d_criteria)
+    local barrier_scale = pd_criteria / (1 + pd_criteria)
+    local barrier = csr_matrix.with_vector(duality_gap:fold(0, math.max) * barrier_scale, p_degree)
+
+    local sic = hmul(hpow(s, -1), duality_gap - barrier)
     local aug_affine = A * (SX * -dual + sic) - primal
     local temp_affine = csr_matrix.forward_substitution(L * D, aug_affine)
     local y_affine = csr_matrix.backward_substitution(L:T(), temp_affine)
