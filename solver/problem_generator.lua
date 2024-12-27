@@ -176,7 +176,7 @@ function M:generate_subject_matrix()
             end
         end
     end
-    return csr_matrix.from_coordinate_list(self.primal_length, ret)
+    return csr_matrix.from_coordinate_list(self.primal_length, self.dual_length, ret)
 end
 
 ---Make primal variables.

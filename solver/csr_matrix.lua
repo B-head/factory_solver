@@ -100,9 +100,10 @@ end
 
 ---comment
 ---@param width integer
+---@param height integer
 ---@param coordinate_list { x: integer, y: integer, value: number }[]
 ---@return CsrMatrix
-function M.from_coordinate_list(width, coordinate_list)
+function M.from_coordinate_list(width, height, coordinate_list)
     table.sort(coordinate_list, function(a, b)
         if a.y == b.y then
             return a.x < b.x
@@ -119,7 +120,7 @@ function M.from_coordinate_list(width, coordinate_list)
     local prev_y = 1
     for i = 1, length do
         local a = coordinate_list[i]
-        if prev_y < a.y then
+        while prev_y < a.y do
             prev_y = prev_y + 1
             row_ranges[prev_y] = i
         end
@@ -127,7 +128,10 @@ function M.from_coordinate_list(width, coordinate_list)
         column_indexes[i] = a.x
     end
 
-    row_ranges[prev_y + 1] = length + 1
+    while prev_y <= height do
+        prev_y = prev_y + 1
+        row_ranges[prev_y] = length + 1
+    end
 
     return M.new(width, values, column_indexes, row_ranges)
 end
