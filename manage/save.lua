@@ -15,11 +15,11 @@ function M.init_player_data(player_index)
         storage.players[player_index] = {
             selected_solution = "",
             selected_filter_type = "item",
-            selected_filter_group = { -- TODO Dynamic initialization
-                item = "logistics",
-                fluid = "fluids",
-                recipe = "logistics",
-                virtual_recipe = "production",
+            selected_filter_group = {
+                item = "",
+                fluid = "",
+                recipe = "",
+                virtual_recipe = "",
             },
             unresearched_craft_visible = __DebugAdapter ~= nil,
             hidden_craft_visible = __DebugAdapter ~= nil,

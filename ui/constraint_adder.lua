@@ -70,9 +70,14 @@ function handlers.on_make_filter_group(event)
     groups = fs_util.sort_prototypes(groups)
 
     if not common.group_visible(group_infos, selected_filter_group[filter_type], player_data) then
-        selected_filter_group[filter_type] = fs_util.find(group_infos, function(_, name)
-            return common.group_visible(group_infos, name, player_data)
-        end) or ""
+        local first_visible = ""
+        for _, group in ipairs(groups) do
+            if common.group_visible(group_infos, group.name, player_data) then
+                first_visible = group.name
+                break
+            end
+        end
+        selected_filter_group[filter_type] = first_visible
     end
 
     elem.clear()
