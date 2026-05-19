@@ -9,7 +9,7 @@
     "package": {
         "git_publish_branch": "stable",
         "sync_portal_details": true,
-        "ignore": ["gallery/*"],
+        "ignore": ["gallery/*", "tests/*"],
         "gallery": [
             "gallery/Nuclear.jpg"
         ]

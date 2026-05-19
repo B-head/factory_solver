@@ -20,7 +20,27 @@ When launched via the debugger, `__DebugAdapter` is truthy. The code paths gated
 
 Factorio's path is configured in [.vscode/settings.json](.vscode/settings.json) — update `factorio.versions[0].factorioPath` for a non-Steam install. `Lua.workspace.library` points sumneko-lua at `E:\source\factorio_mods` so flib types resolve; adjust to wherever flib lives locally.
 
-There is no separate build step. `info.json` has a `package` block consumed by factoriomod-debug's publish command (`stable` branch, gallery excluded from the upload).
+There is no separate build step. `info.json` has a `package` block consumed by factoriomod-debug's publish command (`stable` branch, gallery and `tests/` excluded from the upload).
+
+## Headless testing (`tests/`)
+
+The solver pipeline ([solver/csr_matrix.lua](solver/csr_matrix.lua), [solver/problem_generator.lua](solver/problem_generator.lua), [solver/linear_programming.lua](solver/linear_programming.lua), [solver/create_problem.lua](solver/create_problem.lua)) is **pure Lua** with no `game` / `script` / `storage` / `prototypes` dependencies. It can therefore be exercised from a standalone Lua interpreter, outside Factorio, with no debugger session and no save game. This is the recommended feedback loop for any change that touches the LP math, the CSR layer, or `create_problem`'s reachability / cost-tier logic — running the IPM in the game requires building a UI scenario and watching `on_tick`, which is slow and hard to assert on.
+
+Prerequisite: a standalone Lua 5.2+ or LuaJIT on `PATH`. Factorio 2.0 itself runs **Lua 5.2.1**, vendored in its binary and not exposed as a CLI. For the local test harness install a separate interpreter — `winget install DEVCOM.Lua` brings in 5.4 today, which is what this scaffold was verified against; `scoop install lua` and the binaries at [luabinaries.sourceforge.net](https://luabinaries.sourceforge.net/) are equally fine. The solver code deliberately stays inside the language subset common to 5.2–5.4 / LuaJIT (`goto` / `^` / `/` returning floats / no `//` / no bitops / no integer literal coercion), so the host version does not affect what runs in-game.
+
+Run from the repo root so the `require` paths resolve:
+
+- `lua tests/run.lua` — runs every case file under [tests/cases/](tests/cases/), prints one line per case, exits non-zero on any failure.
+- `lua tests/run.lua -v` — same, plus the solver's captured debug dumps (cost / limit / primal vectors).
+- `lua tests/run.lua short_loop` — only run cases whose file name contains the given substring.
+
+How the harness is wired (see [tests/harness.lua](tests/harness.lua) and [tests/run.lua](tests/run.lua)):
+
+- `linear_programming.lua` does `local debug_print = print` at module load time. The runner installs a `print` capture **before** requiring the solver, so per-case output can be displayed only on failure (or under `-v`) and never interleaves between tests.
+- Each file in `tests/cases/` returns a list of `{ name, run }` tables. Add a new file there and register its stem in the `case_files` table at the top of [tests/run.lua](tests/run.lua) (explicit registration beats directory scanning when there's no portable `ls`).
+- `harness.solve_to_completion` drives `linear_programming.M.solve` from `"ready"` through the IPM iteration loop to a terminal state (`"finished"` / `"unfinished"` / `"unbounded"` / `"unfeasible"`), matching the state machine that [control.lua](control.lua)'s `on_tick` pumps in production.
+
+What belongs in `tests/cases/`: regressions for the solver, the CSR primitives, and translation logic that operates on plain `NormalizedProductionLine[]` / `Constraint[]` fixtures. Anything that needs `prototypes`, `storage.virtuals`, machine-speed / module / quality folding, or UI behaviour stays out — those still require running Factorio. The cost-tier constants (`slack_cost`, `elastic_cost`, `target_cost`) and the IPM epsilons (`2^-52`, `2^52`, `step_scale = 1 - tolerance`) are exactly the kind of hand-tuned values whose changes should be guarded by a test here.
 
 ## Architecture
 
