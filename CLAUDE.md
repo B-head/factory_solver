@@ -36,7 +36,7 @@ Run from the repo root so the `require` paths resolve:
 
 How the harness is wired (see [tests/harness.lua](tests/harness.lua) and [tests/run.lua](tests/run.lua)):
 
-- `linear_programming.lua` does `local debug_print = print` at module load time. The runner installs a `print` capture **before** requiring the solver, so per-case output can be displayed only on failure (or under `-v`) and never interleaves between tests.
+- Solver-side diagnostics go through [fs_log.lua](fs_log.lua). The runner calls `fs_log.set_sink` to route every emission into a per-case buffer and `fs_log.set_level("debug")` so nothing is filtered out during testing; the buffer is replayed only on failure (or under `-v`). `fs_log` resolves its sink dynamically on each emit, so no load-order dance with the solver is required.
 - Each file in `tests/cases/` returns a list of `{ name, run }` tables. Add a new file there and register its stem in the `case_files` table at the top of [tests/run.lua](tests/run.lua) (explicit registration beats directory scanning when there's no portable `ls`).
 - `harness.solve_to_completion` drives `linear_programming.M.solve` from `"ready"` through the IPM iteration loop to a terminal state (`"finished"` / `"unfinished"` / `"unbounded"` / `"unfeasible"`), matching the state machine that [control.lua](control.lua)'s `on_tick` pumps in production.
 
@@ -64,7 +64,7 @@ log.info("step %d: p=%f d=%f", step, p_criteria, d_criteria)
 
 Default threshold is `info`, except under `__DebugAdapter` where it drops to `debug` — so verbose traces only flow when running through the debugger, never in a shipped save. `fs_log.set_level("debug")` changes it at runtime, `fs_log.set_sink(fn)` swaps the underlying writer (used by the test harness to capture lines into a buffer; production code should leave it alone).
 
-The level check happens **before** `string.format`, so a filtered call only pays an integer comparison. Even so, every emit runs on every client under lockstep — keep format arguments side-effect-free and don't compute expensive values just to log them (snapshot first, then pass the snapshot). The solver's hand-rolled `local debug_print = print` in [solver/linear_programming.lua](solver/linear_programming.lua) is the obvious migration candidate: those dumps currently fire unconditionally and pollute the log file regardless of release-vs-debug.
+The level check happens **before** `string.format`, so a filtered call only pays an integer comparison. Even so, every emit runs on every client under lockstep — keep format arguments side-effect-free and don't compute expensive values just to log them (snapshot first, then pass the snapshot). One caveat: Lua evaluates the call's argument list before the function runs, so a `log.debug("primal:\n%s", problem:dump_primal(x))`-style call still pays for the `dump_primal` call even when filtered. Guard expensive payload construction with an explicit `if` if it matters; the solver's per-solve dumps are currently rare enough that we don't bother.
 
 ### Solver pipeline (`solver/`)
 

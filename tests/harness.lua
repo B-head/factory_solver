@@ -10,27 +10,31 @@ local M = {}
 local default_tolerance = 1e-6
 local default_iterate_limit = 200
 
--- Swap solver `print` for a buffer the caller can inspect (and optionally
--- replay on failure). `linear_programming.lua` captures `print` once into a
--- local `debug_print` at module load time, so we have to override the global
--- BEFORE requiring the solver. `tests/run.lua` does that.
+-- Route every fs_log emission into a buffer the runner can dump on failure.
+-- fs_log resolves its sink upvalue on each emit (not at logger construction
+-- time), so callers can require solver modules in any order — set_sink takes
+-- effect immediately.
 
 M.captured_output = {}
 
-function M.install_print_capture()
-    M.captured_output = {}
-    _G.print = function(...)
-        local n = select("#", ...)
-        local parts = {}
-        for i = 1, n do
-            parts[i] = tostring(select(i, ...))
-        end
-        table.insert(M.captured_output, table.concat(parts, "\t"))
-    end
+local capture_sink = function(line)
+    table.insert(M.captured_output, line)
 end
 
-function M.reset_print_capture()
+function M.install_log_capture()
     M.captured_output = {}
+    local fs_log = require "fs_log"
+    fs_log.set_sink(capture_sink)
+    fs_log.set_level("debug")
+end
+
+-- Per-case cleanup: clear the buffer and re-install the sink in case a
+-- previous case (e.g. the fs_log suite itself) reset it.
+function M.reset_log_capture()
+    M.captured_output = {}
+    local fs_log = require "fs_log"
+    fs_log.set_sink(capture_sink)
+    fs_log.set_level("debug")
 end
 
 function M.dump_captured(prefix)

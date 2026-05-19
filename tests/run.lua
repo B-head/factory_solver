@@ -19,10 +19,8 @@
 -- fallback (so `require "tests/harness"` also works).
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
--- IMPORTANT: install the print capture BEFORE requiring linear_programming,
--- because that module captures `print` into a local at load time.
 local harness = require "tests/harness"
-harness.install_print_capture()
+harness.install_log_capture()
 
 local verbose = false
 local filter = nil
@@ -58,7 +56,7 @@ for _, file in ipairs(case_files) do
     local cases = require("tests/cases/" .. file)
     for _, case in ipairs(cases) do
         total = total + 1
-        harness.reset_print_capture()
+        harness.reset_log_capture()
 
         local ok, err = pcall(case.run)
         if ok then

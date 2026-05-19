@@ -1,6 +1,7 @@
 local csr_matrix = require("solver/csr_matrix")
+local fs_log = require("fs_log")
 
-local debug_print = print
+local log = fs_log.for_module("solver.lp")
 local hmul, hdiv, hpow = csr_matrix.hadamard_product, csr_matrix.hadamard_division, csr_matrix.hadamard_power
 
 local machine_upper_epsilon = (2 ^ 52)  -- (2 ^ 511)
@@ -32,9 +33,9 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         local b = problem:generate_limit_vector()
         local c = problem:generate_cost_vector()
 
-        debug_print(string.format("-- ready solve '%s' --", problem.name))
-        debug_print("cost <c>:\n" .. problem:dump_primal(c))
-        debug_print("limit <b>:\n" .. problem:dump_dual(b))
+        log.debug("-- ready solve '%s' --", problem.name)
+        log.debug("cost <c>:\n%s", problem:dump_primal(c))
+        log.debug("limit <b>:\n%s", problem:dump_dual(b))
 
         return 1, raw_variables
     elseif type(solver_state) ~= "number" then
@@ -59,23 +60,21 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     local d_criteria = dual:euclidean_norm()
     local dg_criteria = duality_gap:euclidean_norm()
 
-    -- debug_print(string.format(
-    --     "i = %i, primal = %f, dual = %f, duality_gap = %f",
-    --     solver_state, p_criteria, d_criteria, dg_criteria
-    -- ))
+    -- log.debug("i = %i, primal = %f, dual = %f, duality_gap = %f",
+    --     solver_state, p_criteria, d_criteria, dg_criteria)
 
     if math.max(p_criteria, d_criteria, dg_criteria) <= tolerance then
-        debug_print("primal <x>:\n" .. problem:dump_primal(x))
-        debug_print(string.format("-- finished solve '%s' --", problem.name))
-        debug_print(string.format("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree))
+        log.debug("primal <x>:\n%s", problem:dump_primal(x))
+        log.debug("-- finished solve '%s' --", problem.name)
+        log.debug("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
 
         return "finished", problem:pack_variables(x, y, s)
     end
 
     if iterate_limit <= solver_state then
-        debug_print("primal <x>:\n" .. problem:dump_primal(x))
-        debug_print(string.format("-- unfinished solve '%s' --", problem.name))
-        debug_print(string.format("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree))
+        log.debug("primal <x>:\n%s", problem:dump_primal(x))
+        log.debug("-- unfinished solve '%s' --", problem.name)
+        log.debug("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
 
         return "unfinished", problem:pack_variables(x, y, s)
     end
@@ -100,10 +99,7 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     local p_step = find_step(x, x_affine) * step_scale
     local d_step = find_step(s, s_affine) * step_scale
 
-    -- debug_print(string.format(
-    --     "  p_step = %f, d_step = %f, step_scale = %f",
-    --     p_step, d_step, step_scale
-    -- ))
+    -- log.debug("  p_step = %f, d_step = %f, step_scale = %f", p_step, d_step, step_scale)
 
     x = x + p_step * x_affine
     y = y + d_step * y_affine
