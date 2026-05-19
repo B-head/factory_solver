@@ -52,6 +52,20 @@ Factorio runs Lua in three stages; each stage corresponds to a different entry f
 - [control.lua](control.lua) — **control stage** entry. Wires `script.on_init` / `on_load` / `on_configuration_changed`, per-player and per-force lifecycle events, the per-tick solver pump, and the toggle-window shortcut.
 - [meta.lua](meta.lua) — **not loaded at runtime**. Pure LuaLS `---@meta` annotations defining the project's type vocabulary (`TypedName`, `Solution`, `ProductionLine`, `Constraint`, `NormalizedProductionLine`, `PlayerLocalData`, `ForceLocalData`, `SolverState`, `Virtuals`, ...). Read this first when touching unfamiliar code — almost every function elsewhere is annotated against these types.
 
+### Logging (`fs_log.lua`)
+
+[fs_log.lua](fs_log.lua) is a thin wrapper around Factorio's `log()` that adds severity levels (`debug` / `info` / `warn` / `error`) and a module-name prefix so the resulting `factorio-current.log` lines tell you who emitted them. Pattern:
+
+```lua
+local fs_log = require "fs_log"
+local log = fs_log.for_module("solver.lp")
+log.info("step %d: p=%f d=%f", step, p_criteria, d_criteria)
+```
+
+Default threshold is `info`, except under `__DebugAdapter` where it drops to `debug` — so verbose traces only flow when running through the debugger, never in a shipped save. `fs_log.set_level("debug")` changes it at runtime, `fs_log.set_sink(fn)` swaps the underlying writer (used by the test harness to capture lines into a buffer; production code should leave it alone).
+
+The level check happens **before** `string.format`, so a filtered call only pays an integer comparison. Even so, every emit runs on every client under lockstep — keep format arguments side-effect-free and don't compute expensive values just to log them (snapshot first, then pass the snapshot). The solver's hand-rolled `local debug_print = print` in [solver/linear_programming.lua](solver/linear_programming.lua) is the obvious migration candidate: those dumps currently fire unconditionally and pollute the log file regardless of release-vs-debug.
+
 ### Solver pipeline (`solver/`)
 
 The solver is the heart of the mod and the reason it exists. The pipeline is:
