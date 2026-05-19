@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Factorio 2.0 mod (`factory_solver`, see `info.json`) that acts as a recipe-chain calculator. It is **not** a stand-alone Lua program: all code runs inside Factorio's modded Lua VM, against the runtime API (`game`, `script`, `storage`, `prototypes`, `data:extend`, `defines`, ...) and the `flib` library (`__flib__/gui`, `__flib__/table`, `__flib__/dictionary`, ...). There is no npm/cargo/make and no test runner — code is exercised by running Factorio.
 
-The headline feature, and the reason this mod was forked off `FactoryPlanner`, is its solver: it formulates the production graph as a linear program and solves it with a primal-dual interior-point method, so factories with recipe **loops** (refining, kovarex, productivity feedback, ...) can be solved without manual unrolling.
+The headline feature is its solver: it formulates the production graph as a linear program and solves it with a primal-dual interior-point method, so factories with recipe **loops** (refining, kovarex, productivity feedback, ...) can be solved without manual unrolling. The UI superficially resembles `FactoryPlanner`, but the codebase is written from scratch — there is no shared code lineage.
 
 ## Running / debugging
 
@@ -47,11 +47,21 @@ Three "cost tiers" are used in [solver/create_problem.lua](solver/create_problem
 
 ### State (`manage/`)
 
-All persistent state lives under `storage` (Factorio's auto-serialised global table). Top-level shape is declared in [meta.lua](meta.lua) (`Storage`):
+All persistent state lives under `storage` (Factorio's auto-serialised global table). **Any mod state that must survive save/load — or that must be visible to a client joining a multiplayer game in progress — has to live here.** Factorio's multiplayer uses deterministic lockstep, so anything kept in plain Lua globals (or in `local` upvalues set during runtime) exists only on the host, never gets sent to late-joining clients, and will desync the moment two players' states diverge. The official [storage docs](https://lua-api.factorio.com/latest/auxiliary/storage.html) only guarantee that `storage` is serialised across save/load; the multiplayer rationale comes from the [Factorio wiki's Desynchronization page](https://wiki.factorio.com/Desynchronization). Treat both as load-bearing: if a value matters past the current tick, it goes in `storage`, even if multiplayer is "untested" today. Top-level shape is declared in [meta.lua](meta.lua) (`Storage`):
 
 - `storage.players[player_index]` → `PlayerLocalData` (UI prefs, presets, selected solution).
 - `storage.forces[force_index]` → `ForceLocalData` (solutions, cached `relation_to_recipes` and `group_infos` invalidated by `*_needs_updating` flags).
 - `storage.virtuals` → `Virtuals` (synthesised "recipes" for boilers, generators, mining drills, etc. — anything that isn't a real `LuaRecipePrototype` but needs to participate in the LP).
+
+Putting state in `storage` is **necessary but not sufficient** for multiplayer correctness. Deterministic lockstep requires a stronger invariant: every client's `storage` must be **bit-identical at every tick**. That means every code path that writes to `storage` must itself be deterministic. Anti-patterns to avoid:
+
+- Bare `math.random()` / `math.randomseed()` — Lua's global RNG state is per-process, so each client gets a different sequence. Use `game.create_random_generator()` (stored in `storage` so the seed survives save/load) when randomness must influence `storage`.
+- `os.time()`, `os.clock()`, `os.date()`, or any wall-clock source — machines differ. Use `game.tick` instead.
+- Reading `game.player` (the "local" player) and writing the result anywhere observable. `game.player` is only valid in command/console contexts and resolves differently per client. Always derive the player from event payloads (`event.player_index`) or iterate `game.players` for each-player work.
+- Anything keyed off the host filesystem, the network, or `__DebugAdapter` in a save that could be loaded on a non-debug client. Debug-only paths must be gated so they cannot mutate `storage` in shipped saves.
+- Iterating data structures whose order is non-deterministic. Factorio's Lua keeps `pairs()` stable for integer-indexed and string-indexed tables, but never rely on it for tables keyed by `LuaObject` references — sort by a stable key first.
+
+When in doubt: if a value written to `storage` could differ between two clients running the same tick on the same input, that's a latent desync. Audit the write site, not just the read site.
 
 [manage/save.lua](manage/save.lua) is the schema authority. Its `init_*` / `reinit_*` functions are the migration path: `on_configuration_changed` (mod update / config change / research finished / research reversed) routes through `reinit_force_data`, which walks every `Solution`'s `production_lines` and `constraints` running [manage/typed_name.lua](manage/typed_name.lua)'s `typed_name_migration` on every `TypedName` field. The historical `module_names` → `module_typed_names` and `beacon_name` → `beacon_typed_name` migrations live there as concrete examples — follow the same pattern for any new persistent field.
 
@@ -59,7 +69,7 @@ All persistent state lives under `storage` (Factorio's auto-serialised global ta
 
 `TypedName = { type, name, quality }` is the universal handle for "something that can appear in a recipe slot" — items, fluids, recipes, machines, virtual materials, virtual recipes. [manage/typed_name.lua](manage/typed_name.lua) is the only module that knows how to map a `TypedName` to a prototype, sprite, tooltip, or LP variable name (`typed_name_to_variable_name` produces the `"type/name/quality"` strings used as keys throughout the solver).
 
-[manage/accessor.lua](manage/accessor.lua) holds prototype-derived math: crafting speed, energy usage, productivity caps, fuel amount per second, quality level — anything that reads a `LuaEntityPrototype` / `LuaRecipePrototype` to produce a number. Keep that calculation logic out of [manage/pre_solve.lua](manage/pre_solve.lua) and the UI.
+[manage/accessor.lua](manage/accessor.lua) holds prototype-derived math primitives: crafting speed, energy usage, productivity caps, fuel amount per second, quality level — anything that reads a `LuaEntityPrototype` / `LuaRecipePrototype` to produce a single number. [manage/pre_solve.lua](manage/pre_solve.lua) is the designated place to **aggregate** those primitives: it folds raw Factorio data (machines, modules, beacons, quality, productivity, fuel, pollution) into `NormalizedProductionLine[]` with per-second amounts before the LP sees it. New pre-LP transformation logic belongs here, not in the UI — keep the UI free of prototype math so it only reads the already-normalized values.
 
 ### GUI (`ui/`)
 
@@ -73,13 +83,57 @@ Built on `flib_gui`. [fs_util.lua](fs_util.lua) wraps it with helpers that the r
 
 When any save mutation must trigger a recompute, set `solution.solver_state = "ready"` (see the `new_*` / `delete_*` / `update_*` functions in [manage/save.lua](manage/save.lua)). The on_tick pump will pick it up next tick.
 
+**The GUI's two-layer model under lockstep.** GUI state in this mod lives on two distinct planes, and confusing them is the fastest way to introduce a desync:
+
+- **Logical UI state** (which window is open, selected solution, panel widths, filter text, …) lives in `storage.players[player_index]`. Because `storage` is replicated, **every client holds every player's logical UI state**, even though only the owning player ever sees that UI. GUI event handlers (`on_gui_click`, `on_gui_text_changed`, …) fire on **every** client in lockstep and mutate `storage.players[event.player_index]` identically everywhere.
+- **The actual `LuaGuiElement` tree** lives under `game.players[i].gui.*`. The tree itself (its structure, its property values, including `tags`) **is part of the saved simulation state**, so **every client holds a full copy of every player's GUI tree** — not just its own local player's. Open windows survive save/load and a joining client receives them via the save. Only the rendering layer is local: each client visually draws only its own local player's tree, but the data structures for all players must exist and stay bit-identical on every client. What is **per-VM and must never go into `storage`** is the *Lua handle* to an element (the `LuaGuiElement` reference value), its runtime-only `element_index`, and any other identity that may differ between processes. Read/write the element's data freely in handlers, but never persist the reference itself or derive `storage` values from it.
+
+**`LuaGuiElement.tags` is a third persistence channel — use it as a hint, not as truth.** Tags survive save/load and are part of the GUI tree's persisted state (this is exactly what `flib_gui` relies on for handler dispatch, which is why `flib_gui.handle_events()` re-binds on every load at the bottom of [control.lua](control.lua)). Constraints to keep in mind ([Tags concept docs](https://lua-api.factorio.com/latest/concepts/Tags.html)):
+
+- Values must be `string` / `boolean` / `number` / `table`. No functions. No `LuaObject` references.
+- Tags are returned as a snapshot — in-place mutation does **not** propagate. To change a tag, reassign the whole table: `element.tags = { ... }`.
+- Nested tables with non-sequence numeric keys (gaps, or not starting at 1) get their keys coerced to strings on round-trip. Avoid sparse arrays inside tags.
+- Operational rule for this codebase: `storage` is the **source of truth** for solver and solution state; tags are a lightweight hint carrying just enough identity (IDs, indices, kind discriminators) for a handler to look the real data back up in `storage`. Don't duplicate large state into tags, and don't let `storage` and tags hold diverging copies of the same fact.
+
+Rules that fall out of the two-layer model:
+
+- In handlers, the acting player is **always** `event.player_index`. Never `game.player` (only valid in command contexts; resolves differently per client).
+- GUI mutations must run unconditionally on every client. Do **not** gate `game.players[event.player_index].gui.*` writes on "is this my local player" — that condition has no meaning here and skipping the mutation on remote clients desyncs the GUI tree. Each client applies the same mutation to its own copy of that player's tree; only the rendering layer naturally restricts what shows up on screen.
+- **Keep handlers light.** Because every handler runs on every client, the same work is paid N times in parallel across the session, and the slowest client gates the tick. Worse, GUI tree mutations themselves are part of the synchronized work — building a complex panel for player Alice costs every client (including Bob, Carol, …) the same construction cost, even though only Alice sees it. Don't run LP-scale or O(prototypes) computation inside a click handler — flip a flag in `storage` (e.g. `solution.solver_state = "ready"` or a `*_needs_updating` cache marker) and let the on_tick pump or the next render pass do the actual work in small slices. The incremental IPM solver and the `relation_to_recipes` / `group_infos` cache invalidation already follow this pattern; new heavy GUI features should fit the same shape.
+
 ## Known incomplete areas
 
 Recipe loops — long the headline limitation — are now handled correctly by the reachability gating in [solver/create_problem.lua](solver/create_problem.lua) (added in 0.3.14). Virtual recipes for some generators/boilers are still incomplete per [README.md](README.md). Multiplayer is untested. The version history around loops (0.3.7 spreading gain/cost across recipes, 0.3.10 fixing large product/ingredient counts, 0.3.12 reintroducing elastic variables to recover loop coverage lost in 0.3.7, 0.3.14 reachability gating) shows where the rough edges historically were.
+
+## Branching model
+
+A modified OneFlow with two long-lived branches:
+
+- **`main`** — ongoing development toward the next release. Feature branches are cut from `main` and merge back here.
+- **`stable`** — the persistent maintenance line for the most recent release. Standard OneFlow would delete hotfix branches and re-branch from a tag for the next hotfix; this repo keeps `stable` alive and reuses it instead. Bug fixes targeting the released version land on `stable` first, get tagged there, and are then merged into `main` (the historical `Merge branch 'stable' version X.Y.Z` commits trace this pattern).
+
+When in doubt about which branch to use:
+
+- New features, refactors, documentation updates → `main`.
+- Bug fixes that should ship to users without waiting for the next release → `stable`, then merge into `main`.
+- Topic / experimental work (e.g. `blog`, `inconsistency`) → its own branch cut from `main`.
+
+The corollary: if a task is described as "fix bug X in the released version", do not start by committing to `main`. Switch to `stable` (or branch from it) first.
+
+## Identifier namespacing (hard requirement, not style)
+
+Factorio has **no per-mod namespacing for prototype / engine IDs**. Prototype names, custom-input names, shortcut names, virtual signal names, GUI style entries under `data.raw["gui-style"].default`, item-group and item-subgroup names, technology names, achievement names, etc. all live in a single flat namespace shared with the base game and every other loaded mod. Two mods registering the same name conflict at the data stage — silently overwriting each other in the worst case, hard-erroring at load in the best. Mod-name-prefixed IDs are the only defence.
+
+This mod uses the prefix **`factory_solver_` for underscored identifiers and `factory-solver-` for hyphenated prototype names**. Concretely:
+
+- **`factory-solver-…`** (hyphen): `custom-input` and `shortcut` prototype names — e.g. `factory-solver-toggle-main-window`. Any new shortcut, input binding, custom event, virtual signal, item group, technology, recipe, item, fluid, entity, or other prototype registered in [data.lua](data.lua) must carry this prefix. The `fs-test-*` debug recipes follow a shortened form of the same convention because they're debug-only — keep new shipped prototypes on the full prefix.
+- **`factory_solver_…`** (underscore): GUI style names registered into `data.raw["gui-style"].default`, since style keys use underscores by convention.
+- **No prefix needed**: anything that is *not* a global engine ID — Lua module names under `require`, function names, fields on `storage`, fields on `meta.lua` types, internal table keys. Those are scoped by Lua / by `storage`'s per-mod table and cannot collide with other mods.
+
+When in doubt: if the identifier ends up as a string the Factorio engine looks up across all loaded mods (data stage prototype, event ID, style key), prefix it. If it's purely a Lua-internal name, don't bother.
 
 ## Style conventions to preserve
 
 - All Lua modules return a single `M` table (`local M = {} ... return M`).
 - Public functions carry LuaLS `---@param` / `---@return` annotations referencing types from [meta.lua](meta.lua). Keep them in sync — the project leans on sumneko-lua for safety since there is no test suite.
-- GUI style names, custom-input names, and shortcut names use the `factory_solver_` / `factory-solver-` prefix consistently (underscore for Lua identifiers and GUI styles, hyphen for prototype names).
 - Numeric epsilons and cost tiers in the solver are hand-tuned; if you change them, run the `fs-test-*` debug recipes (short/long/parallel loops) to confirm the LP still converges.
