@@ -9,6 +9,14 @@ local virtual = require "manage/virtual"
 local common = require "ui/common"
 local main_window = require "ui/main_window"
 
+-- Activate the in-game smoke driver only when this Factorio instance was
+-- launched with --load-scenario factory_solver/smoke. The mod's normal flow
+-- is untouched otherwise.
+local smoke = (script.level
+    and script.level.mod_name == "factory_solver"
+    and script.level.level_name == "smoke")
+    and require "manage/smoke" or nil
+
 script.on_init(function()
     flib_dictionary.on_init()
 
@@ -67,6 +75,7 @@ script.on_event(defines.events.on_player_created, function(event)
     if __DebugAdapter then
         game.players[event.player_index].cheat_mode = true
     end
+    if smoke then smoke.on_player_created(event) end
 end)
 
 script.on_event(defines.events.on_player_changed_force, function(event)
@@ -124,6 +133,8 @@ script.on_event(defines.events.on_tick, function(event)
             end
         end
     end
+
+    if smoke then smoke.on_tick(event) end
 end)
 
 ---@param player_index integer

@@ -42,6 +42,28 @@ How the harness is wired (see [tests/harness.lua](tests/harness.lua) and [tests/
 
 What belongs in `tests/cases/`: regressions for the solver, the CSR primitives, and translation logic that operates on plain `NormalizedProductionLine[]` / `Constraint[]` fixtures. Anything that needs `prototypes`, `storage.virtuals`, machine-speed / module / quality folding, or UI behaviour stays out — those still require running Factorio. The cost-tier constants (`slack_cost`, `elastic_cost`, `target_cost`) and the IPM epsilons (`2^-52`, `2^52`, `step_scale = 1 - tolerance`) are exactly the kind of hand-tuned values whose changes should be guarded by a test here.
 
+## In-game smoke test (`scenarios/smoke/` + `tests/smoke.ps1`)
+
+For the layers the headless suite cannot reach — [manage/pre_solve.lua](manage/pre_solve.lua)'s machine-speed / module / quality folding, [manage/virtual.lua](manage/virtual.lua)'s virtual-recipe generation, [manage/save.lua](manage/save.lua)'s migration paths, and the GUI lifecycle — there is a single end-to-end smoke test that boots a real Factorio with the mod loaded, constructs a minimal `Solution`, and waits for the solver pump to converge.
+
+How the pieces fit together:
+
+- [scenarios/smoke/control.lua](scenarios/smoke/control.lua) is a deliberately empty marker file. Scenarios run in their own Lua context with a separate `storage`, so doing the real work from there would mean either duplicating the mod code or going through `remote.call`.
+- [manage/smoke.lua](manage/smoke.lua) is the real driver, living inside the mod so it shares `storage` and module state with everything else. It builds an iron-plate production line + an upper-bound constraint on the product, then polls `solution.solver_state` until terminal.
+- [control.lua](control.lua) activates the driver only when `script.level.level_name == "smoke"`, so a normal load never pays for it. Chained at the end of the existing `on_player_created` and `on_tick` handlers; production flow is otherwise untouched.
+- Verdicts are emitted via [fs_log](fs_log.lua) at `info`, with the marker `SMOKE PASS:` or `SMOKE FAIL:` followed by detail. Both land in `factorio-current.log` regardless of `__DebugAdapter`.
+- [tests/smoke.ps1](tests/smoke.ps1) is the launcher. It reads `factorio.versions[0].factorioPath` from [.vscode/settings.json](.vscode/settings.json), launches Factorio with `--load-scenario factory_solver/smoke --mod-directory <parent>`, snapshots `factorio-current.log` size before the run, polls the appended bytes for a verdict marker, and kills the process the moment one appears (Factorio has no Lua API to terminate itself cleanly — `game.set_game_state{game_finished=true}` only triggers a victory/defeat GUI, which is more noise than help).
+
+Runtime details worth knowing:
+
+- **Steam relaunch suppression.** The Steam build of `factorio.exe` relaunches itself through Steam if not started by Steam, dropping every command-line argument in the process. The launcher works around this by setting the `SteamAppId=427520` environment variable on the child process, which makes the Steam SDK consider the run already-launched-by-Steam and skip the relaunch. The `factoriomod-debug` extension uses the same trick (changelog 1.1.38).
+- **Stale lock file.** Every run ends with the launcher killing the Factorio process, which leaves `%APPDATA%/Factorio/.lock` behind. The launcher clears it on startup, but only when `Get-Process factorio` returns nothing — never yank the lock from under a live instance.
+- **Wall-clock cost.** Factorio bootstrap (data stage + atlas mipmaps + game init) dominates: ~20 s on a warm cache for the iron-plate fixture. The solver itself converges in single-digit ticks (~150 ms). This is *not* an inner-loop check — run the headless suite for that. Treat the smoke as a pre-release / pre-merge sanity gate.
+
+Run it via `powershell -NoProfile -ExecutionPolicy Bypass -File tests/smoke.ps1` (PowerShell 5.1 is fine; we strip JSONC trailing commas before parsing `settings.json` for compatibility). Exit codes: 0 = PASS, 1 = FAIL or no marker, 2 = setup error (Factorio binary not found, log file missing).
+
+The scenario folder is excluded from the published mod via the `package.ignore` entry in [info.json](info.json), alongside `gallery/*` and `tests/*`.
+
 ## Architecture
 
 ### Stages
