@@ -108,7 +108,7 @@ function handlers.on_constraint_button_click(event)
     local tags = event.element.tags
     local solution = assert(save.get_selected_solution(event.player_index))
 
-    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
+    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]], tags.quality --[[@as string?]])
 
     if typed_name.type == "recipe" or typed_name.type == "virtual_recipe" then
         save.new_production_line(event.player_index, solution, typed_name)
@@ -137,7 +137,7 @@ end
 function handlers.on_limit_amount_confirmed(event)
     local elem = event.element
     local tags = elem.tags
-    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
+    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]], tags.quality --[[@as string?]])
     local player_data = save.get_player_data(event.player_index)
     local solution = assert(save.get_selected_solution(event.player_index))
 
@@ -156,7 +156,7 @@ end
 function handlers.on_limit_type_changed(event)
     local elem = event.element
     local tags = elem.tags
-    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]])
+    local typed_name = tn.create_typed_name(tags.type --[[@as FilterType]], tags.name --[[@as string]], tags.quality --[[@as string?]])
     local solution = assert(save.get_selected_solution(event.player_index))
 
     local pos = assert(fs_util.find(solution.constraints, function(value)
