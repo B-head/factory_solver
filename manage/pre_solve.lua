@@ -156,7 +156,7 @@ function M.quality_decomposition(normalized_amount, effectivity_quality)
         if quality_prototype.next then
             next_quality = quality_prototype.next.name
             if quality_prototype.name == normalized_amount.quality then
-                next_probability = math.min(effectivity_quality, 1)
+                next_probability = math.min(effectivity_quality * quality_prototype.next_probability, 1)
             else
                 next_probability = current_probability * quality_prototype.next_probability
             end

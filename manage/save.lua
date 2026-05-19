@@ -537,7 +537,7 @@ function M.get_total_effectivity(module_counts, effect_receiver)
     ret.consumption = math.max(ret.consumption, 0.2)
     ret.productivity = math.max(ret.productivity, 0)
     ret.pollution = math.max(ret.pollution, 0.2)
-    ret.quality = math.max(ret.quality / 10, 0) -- TODO bug report
+    ret.quality = math.max(ret.quality, 0)
 
     return ret
 end
