@@ -99,8 +99,7 @@ function M.raw_energy_usage_to_power(machine, quality, effectivity_consumption)
         -- Last to not be applied to generators.
         energy_per_tick = energy_per_tick + machine.electric_energy_source_prototype.drain
     else
-        -- entity-ghost fallback (typed_name_to_machine returned the
-        -- "entity-unknown" placeholder because the real prototype is gone).
+        -- entity-ghost fallback (see typed_name_to_machine): no energy source.
         return 0
     end
 
@@ -130,7 +129,7 @@ function M.raw_emission_to_pollution(machine, pollutant_type, quality, effectivi
         -- Last to not be applied to generators.
         emissions_per_joule = machine.electric_energy_source_prototype.emissions_per_joule
     else
-        -- entity-ghost fallback: nothing to emit.
+        -- entity-ghost fallback (see typed_name_to_machine): no energy source.
         return 0
     end
 
@@ -360,8 +359,8 @@ function M.get_energy_source_type(machine)
             return "electric"
         end
     else
-        -- entity-ghost fallback: treat as void so is_use_fuel / is_generator
-        -- both report false and the line contributes nothing to the LP.
+        -- entity-ghost fallback (see typed_name_to_machine): no energy source,
+        -- report as void so is_use_fuel / is_generator both return false.
         return "void"
     end
 end

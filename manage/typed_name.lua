@@ -145,6 +145,16 @@ function M.typed_name_migration(typed_name)
     typed_name.quality = quality
 end
 
+-- The fallback names below (item-unknown, fluid-unknown, recipe-unknown,
+-- entity-unknown) are provided by __core__, not by this mod, so a TypedName
+-- whose prototype is no longer present in any loaded mod still resolves to a
+-- placeholder rather than nil. Note that entity-unknown is type=entity-ghost:
+-- it has no module_inventory_size / effect_receiver / *_energy_source_prototype,
+-- and methods like get_crafting_speed return nil. Callers must tolerate the
+-- resulting nil/0 instead of asserting (see the unknown-energy fallbacks in
+-- accessor.lua). The "<material-unknown>" placeholder is different: that one
+-- lives in storage.virtuals and is registered by this mod (manage/virtual.lua).
+
 ---comment
 ---@param typed_name TypedName
 ---@return LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
