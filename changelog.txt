@@ -2,6 +2,10 @@
 Version: 0.3.14
 Date: ????
   Changes:
+    - Restrict elastic shortage_source to materials unreachable from raw inputs.
+  Info:
+    - This fixes the solver bypassing producer recipe chains (e.g. Fulgora recycling)
+      by paying elastic cost instead of running the intended production path.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.13
 Date: 2024-12-10

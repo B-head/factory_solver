@@ -14,6 +14,59 @@ function M.make_recipe_cost(value)
     return (value / (1 + math.abs(value)) - 1) / 2
 end
 
+---Compute the set of materials that can be produced from raw inputs
+---(materials with no producer recipe in the line set) or from recipes
+---with no ingredients. Materials not in this set are stuck in dead-end
+---cycles and need a |shortage_source| escape hatch in the LP.
+---@param production_lines NormalizedProductionLine[]
+---@return table<string, true> reachable
+function M.compute_reachable_materials(production_lines)
+    local has_producer = {} ---@type table<string, true>
+    for _, line in ipairs(production_lines) do
+        for _, product in ipairs(line.products) do
+            has_producer[tn.typed_name_to_variable_name(product)] = true
+        end
+    end
+
+    local reachable = {} ---@type table<string, true>
+    for _, line in ipairs(production_lines) do
+        for _, ingredient in ipairs(line.ingredients) do
+            local name = tn.typed_name_to_variable_name(ingredient)
+            if not has_producer[name] then
+                reachable[name] = true
+            end
+        end
+    end
+
+    local fired = {} ---@type table<integer, true>
+    repeat
+        local changed = false
+        for i, line in ipairs(production_lines) do
+            if not fired[i] then
+                local all_ingredients_reachable = true
+                for _, ingredient in ipairs(line.ingredients) do
+                    if not reachable[tn.typed_name_to_variable_name(ingredient)] then
+                        all_ingredients_reachable = false
+                        break
+                    end
+                end
+                if all_ingredients_reachable then
+                    fired[i] = true
+                    for _, product in ipairs(line.products) do
+                        local name = tn.typed_name_to_variable_name(product)
+                        if not reachable[name] then
+                            reachable[name] = true
+                            changed = true
+                        end
+                    end
+                end
+            end
+        end
+    until not changed
+
+    return reachable
+end
+
 ---Create linear programming problems.
 ---@param solution_name string
 ---@param constraints Constraint[]
@@ -21,6 +74,8 @@ end
 ---@return Problem
 function M.create_problem(solution_name, constraints, production_lines)
     local problem = problem_generator.new(solution_name)
+
+    local reachable = M.compute_reachable_materials(production_lines)
 
     local included_products, included_ingresients = {}, {} ---@type table<string, true>, table<string, true>
     for _, line in ipairs(production_lines) do
@@ -75,7 +130,14 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, -1)
         end
-        do
+        -- |shortage_source| is gated on reachability: materials reachable from
+        -- raw inputs must run their producer chain. Without this gating the LP
+        -- would pay elastic_cost to fabricate intermediates rather than run long
+        -- recycling chains (e.g. Fulgora scrap), which produces wrong solutions.
+        -- Materials stuck in dead-end cycles (mass-losing loops like fs-test-base
+        -- + fs-test-short-negative) keep the escape hatch — otherwise the LP can
+        -- only return all-zero.
+        if not reachable[constraint_name] then
             local elastic_name = "|shortage_source|" .. constraint_name
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
