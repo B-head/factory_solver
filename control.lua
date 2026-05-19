@@ -10,12 +10,17 @@ local common = require "ui/common"
 local main_window = require "ui/main_window"
 
 -- Activate the in-game smoke driver only when this Factorio instance was
--- launched with --load-scenario factory_solver/smoke. The mod's normal flow
--- is untouched otherwise.
-local smoke = (script.level
-    and script.level.mod_name == "factory_solver"
-    and script.level.level_name == "smoke")
-    and require "manage/smoke" or nil
+-- launched with --load-scenario factory_solver/<smoke-variant>. The mod's
+-- normal flow is untouched otherwise. Each variant ships its own driver under
+-- manage/ with the same on_player_created / on_tick shape.
+local smoke = nil
+if script.level and script.level.mod_name == "factory_solver" then
+    if script.level.level_name == "smoke" then
+        smoke = require "manage/smoke"
+    elseif script.level.level_name == "smoke_missing_prototype" then
+        smoke = require "manage/smoke_missing_prototype"
+    end
+end
 
 script.on_init(function()
     flib_dictionary.on_init()

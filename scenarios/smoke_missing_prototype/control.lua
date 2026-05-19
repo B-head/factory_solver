@@ -1,0 +1,9 @@
+-- Marker scenario for the "missing prototype fallback" smoke test. The actual
+-- driver lives in [manage/smoke_missing_prototype.lua](../../manage/smoke_missing_prototype.lua),
+-- which the mod activates when script.level.level_name == "smoke_missing_prototype"
+-- (see the gate at the bottom of [control.lua](../../control.lua)).
+--
+-- Scenarios run in their own Lua context with a separate `storage`, so we
+-- cannot poke at mod state from here. Keeping this file empty avoids the
+-- temptation. Launch via:
+--   factorio.exe --load-scenario factory_solver/smoke_missing_prototype

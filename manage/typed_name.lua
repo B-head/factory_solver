@@ -184,9 +184,9 @@ function M.typed_name_to_machine(typed_name)
     local type = typed_name.type
     local name = typed_name.name
     if type == "machine" then
-        return prototypes.entity[name] or prototypes.entity["<entity-unknown>"]
+        return prototypes.entity[name] or prototypes.entity["entity-unknown"]
     else
-        return prototypes.entity["<entity-unknown>"]
+        return prototypes.entity["entity-unknown"]
     end
 end
 
