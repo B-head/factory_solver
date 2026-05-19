@@ -66,7 +66,15 @@ script.on_configuration_changed(function(event)
 
     for _, player in pairs(game.players) do
         save.reinit_player_data(player.index)
-        -- TODO reset gui
+        local player_data = storage.players[player.index]
+        local screen = player.gui.screen
+        for _, name in ipairs(player_data.opened_gui) do
+            if screen[name] then
+                screen[name].destroy()
+            end
+        end
+        player_data.opened_gui = {}
+        player.set_shortcut_toggled("factory-solver-toggle-main-window", false)
     end
 
     for _, force in pairs(game.forces) do
