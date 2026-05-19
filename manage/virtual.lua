@@ -401,7 +401,6 @@ function M.create_offshore_tile_virtual(tile_prototype)
         local recipe = {
             type = "virtual_recipe",
             name = string.format("<pump>%s:%s", offshore_pump_prototype.name, tile_prototype.name),
-            localised_name = "<pump>" .. tile_prototype.name, --TODO
             sprite_path = "tile/" .. tile_prototype.name,
             elem_tooltip = { type = "tile", name = tile_prototype.name },
             order = tile_prototype.order,
