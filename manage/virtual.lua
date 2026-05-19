@@ -123,7 +123,9 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
     local rocket_parts_required = assert(rocket_silo_prototype.rocket_parts_required)
     local has_rocket_launch_products = prototypes.get_item_filtered { { filter = "has-rocket-launch-products" } }
 
-    local time_to_quick_launch_per_tick = 1632 -- TODO calculate
+    -- Measured against vanilla; not derivable at runtime because times_to_blink
+    -- is data-stage only and the flight phase ends on a physics condition.
+    local time_to_quick_launch_per_tick = 1632
 
     local rocket_parts
     if rocket_silo_prototype.fixed_recipe then
