@@ -168,6 +168,17 @@ data:extend({
     },
 })
 
+data:extend({
+    {
+        type = "font",
+        name = "factory_solver_slot_temperature_font",
+        from = "default-bold",
+        size = 10,
+        border = true,
+        border_color = { r = 0, g = 0, b = 0 },
+    },
+})
+
 local styles = data.raw["gui-style"].default
 
 -- common --
@@ -249,9 +260,9 @@ styles.factory_solver_slot_image_with_quality = {
 
 styles.factory_solver_slot_temperature_label = {
     type = "label_style",
-    height = 8,
-    font = "default-tiny-bold",
-    font_color = { r = 1, g = 0.9, b = 0.3 },
+    height = 10,
+    font = "factory_solver_slot_temperature_font",
+    font_color = { r = 0.75, g = 0.95, b = 1 },
 }
 
 styles.factory_solver_slot_temperature_flow = {

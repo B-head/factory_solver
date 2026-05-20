@@ -118,13 +118,13 @@ function M.create_decorated_sprite_button(data)
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = string.format("%g", typed_name.minimum_temperature),
+                    caption = string.format("%g°~", typed_name.minimum_temperature),
                     ignored_by_interaction = true,
                 },
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = string.format("%g", typed_name.maximum_temperature),
+                    caption = string.format("%g°", typed_name.maximum_temperature),
                     ignored_by_interaction = true,
                 },
             },
