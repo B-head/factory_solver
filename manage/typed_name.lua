@@ -55,24 +55,67 @@ function M.typed_name_to_elem_id(typed_name)
     end
 end
 
+---Returns true when a fluid TypedName carries no temperature information.
+---Non-fluid types always return false.
+---@param typed_name TypedName
+---@return boolean
+function M.is_bare_fluid(typed_name)
+    return typed_name.type == "fluid"
+        and typed_name.temperature == nil
+        and typed_name.minimum_temperature == nil
+        and typed_name.maximum_temperature == nil
+end
+
+---Formats the trailing temperature suffix for an LP variable name.
+---Returns "" for bare, "@<temperature>" for single, "@[<min>,<max>]" for range.
+---@param typed_name TypedName
+---@return string
+function M.format_temperature_suffix(typed_name)
+    if typed_name.temperature ~= nil then
+        return string.format("@%g", typed_name.temperature)
+    elseif typed_name.minimum_temperature ~= nil then
+        return string.format("@[%g,%g]", typed_name.minimum_temperature, typed_name.maximum_temperature)
+    else
+        return ""
+    end
+end
+
 ---comment
 ---@param typed_name TypedName
 ---@return string
 function M.typed_name_to_variable_name(typed_name)
-    return string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
+    if typed_name.type == "fluid" then
+        return string.format("fluid/%s%s", typed_name.name, M.format_temperature_suffix(typed_name))
+    else
+        return string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
+    end
 end
 
 ---comment
 ---@param filter_type FilterType | "research-progress"
 ---@param name string
 ---@param quality string?
+---@param temperature number?
+---@param minimum_temperature number?
+---@param maximum_temperature number?
 ---@return TypedName
-function M.create_typed_name(filter_type, name, quality)
-    quality = quality or "normal"
+function M.create_typed_name(filter_type, name, quality, temperature, minimum_temperature, maximum_temperature)
     if filter_type == "research-progress" then
         filter_type = "virtual_material"
     end
-    return { type = filter_type, name = name, quality = quality }
+    if filter_type == "fluid" then
+        quality = "normal"
+    else
+        quality = quality or "normal"
+    end
+    return {
+        type = filter_type,
+        name = name,
+        quality = quality,
+        temperature = temperature,
+        minimum_temperature = minimum_temperature,
+        maximum_temperature = maximum_temperature,
+    }
 end
 
 ---comment
@@ -81,11 +124,22 @@ end
 ---@param ignore_quality boolean?
 ---@return boolean
 function M.equals_typed_name(value1, value2, ignore_quality)
-    if ignore_quality then
-        return value1.type == value2.type and value1.name == value2.name
-    else
-        return value1.type == value2.type and value1.name == value2.name and value1.quality == value2.quality
+    if value1.type ~= value2.type or value1.name ~= value2.name then
+        return false
     end
+    if not ignore_quality and value1.quality ~= value2.quality then
+        return false
+    end
+    if value1.temperature ~= value2.temperature then
+        return false
+    end
+    if value1.minimum_temperature ~= value2.minimum_temperature then
+        return false
+    end
+    if value1.maximum_temperature ~= value2.maximum_temperature then
+        return false
+    end
+    return true
 end
 
 ---comment

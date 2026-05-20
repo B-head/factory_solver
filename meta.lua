@@ -8,7 +8,7 @@
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
 ---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
----@alias TypedName { type: FilterType, name: string, quality: string }
+---@alias TypedName { type: FilterType, name: string, quality: string, temperature: number?, minimum_temperature: number?, maximum_temperature: number? }
 ---@alias ProductEx Product|VirtualProduct
 ---@alias IngredientEx Ingredient|VirtualIngredient
 
@@ -117,6 +117,9 @@ __factory_solver__storage = {}
 ---@field name string
 ---@field quality string
 ---@field amount_per_second number
+---@field temperature number?
+---@field minimum_temperature number?
+---@field maximum_temperature number?
 
 ---@class Virtuals
 ---@field material table<string, VirtualMaterial>
