@@ -263,6 +263,9 @@ styles.factory_solver_slot_temperature_label = {
     height = 10,
     font = "factory_solver_slot_temperature_font",
     font_color = { r = 0.75, g = 0.95, b = 1 },
+    hovered_font_color = { r = 0.75, g = 0.95, b = 1 },
+    clicked_font_color = { r = 0.75, g = 0.95, b = 1 },
+    parent_hovered_font_color = { r = 0.75, g = 0.95, b = 1 },
 }
 
 styles.factory_solver_slot_temperature_flow = {

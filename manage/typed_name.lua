@@ -36,12 +36,12 @@ function M.typed_name_to_tooltip(typed_name)
         if not fluid then return nil end
         if typed_name.temperature then
             return { "factory-solver-fluid-temperature-single",
-                fluid.localised_name, tostring(typed_name.temperature) }
+                fluid.localised_name, string.format("%g", typed_name.temperature) }
         elseif typed_name.minimum_temperature then
             return { "factory-solver-fluid-temperature-range",
                 fluid.localised_name,
-                tostring(typed_name.minimum_temperature),
-                tostring(typed_name.maximum_temperature) }
+                string.format("%g", typed_name.minimum_temperature),
+                string.format("%g", typed_name.maximum_temperature) }
         else
             return nil
         end

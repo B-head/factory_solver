@@ -71,14 +71,33 @@ end
 function M.raw_ingredient_to_amount(ingredient, quality, craft_energy, crafting_speed)
     local amount = ingredient.amount * crafting_speed / craft_energy
 
+    local min_temp = ingredient.minimum_temperature
+    local max_temp = ingredient.maximum_temperature
+    if ingredient.type == "fluid" then
+        -- Factorio's runtime API returns the FLT-sentinel values
+        -- (e.g. -3.4e38) for ingredient temperature bounds that the
+        -- prototype left unset. Clamp to the fluid's physical range so
+        -- the value flows through the rest of the mod (LP variable
+        -- names, picker labels, tooltips) without leaking the sentinel.
+        local proto = prototypes.fluid[ingredient.name]
+        if proto then
+            if min_temp == nil or min_temp < proto.default_temperature then
+                min_temp = proto.default_temperature
+            end
+            if max_temp == nil or max_temp > proto.max_temperature then
+                max_temp = proto.max_temperature
+            end
+        end
+    end
+
     ---@type NormalizedAmount
     return {
         type = ingredient.type,
         name = ingredient.name,
         quality = quality,
         amount_per_second = amount,
-        minimum_temperature = ingredient.minimum_temperature,
-        maximum_temperature = ingredient.maximum_temperature,
+        minimum_temperature = min_temp,
+        maximum_temperature = max_temp,
     }
 end
 
