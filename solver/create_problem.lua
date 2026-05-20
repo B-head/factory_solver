@@ -185,6 +185,11 @@ function M.create_problem(solution_name, constraints, production_lines)
     local problem = problem_generator.new(solution_name)
 
     local bridges = M.create_temperature_bridges(production_lines)
+    -- Bridges are not part of solution.production_lines but their flows do
+    -- need to net out in the Final Products / Basic Ingredients panels.
+    -- Attach the structured bridge lines so save.get_total_amounts can fold
+    -- the LP-solved flows back in without parsing variable-name strings.
+    problem.bridges = bridges
     local all_lines = {}
     for _, line in ipairs(production_lines) do all_lines[#all_lines + 1] = line end
     for _, line in ipairs(bridges) do all_lines[#all_lines + 1] = line end

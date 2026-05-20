@@ -7,6 +7,7 @@ local csr_matrix = require "solver/csr_matrix"
 ---@field duals table<string, Dual>
 ---@field dual_length integer
 ---@field subject_terms number[][]
+---@field bridges NormalizedProductionLine[] Temperature bridges injected by create_problem; populated externally after construction.
 local M = {}
 
 ---@class Primal
@@ -40,6 +41,7 @@ function M.new(name)
         duals = {},
         dual_length = 0,
         subject_terms = {},
+        bridges = {},
     }
     return M.setup_metatable(self)
 end

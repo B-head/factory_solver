@@ -208,4 +208,28 @@ table.insert(cases, {
     end,
 })
 
+table.insert(cases, {
+    name = "create_problem attaches bridge lines to the resulting Problem",
+    run = function()
+        local lines = {
+            recipe("boiler",
+                { fluid_single("steam", 500, 1) },
+                { fluid_range("water", 0, 100, 1) }),
+            recipe("generator",
+                { item("p", 1) },
+                { fluid_range("steam", 15, 1000, 1) }),
+        }
+        local problem = cp.create_problem("attach-bridges", {}, lines)
+        harness.assert_eq(#problem.bridges, 1, "one bridge attached")
+        local bridge = problem.bridges[1]
+        harness.assert_eq(bridge.recipe_typed_name.name,
+            "|bridge|fluid/steam@500->[15,1000]", "bridge name")
+        harness.assert_eq(#bridge.ingredients, 1, "bridge has one ingredient")
+        harness.assert_eq(bridge.ingredients[1].temperature, 500, "ingredient single temp")
+        harness.assert_eq(#bridge.products, 1, "bridge has one product")
+        harness.assert_eq(bridge.products[1].minimum_temperature, 15, "product range min")
+        harness.assert_eq(bridge.products[1].maximum_temperature, 1000, "product range max")
+    end,
+})
+
 return cases

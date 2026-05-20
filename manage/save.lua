@@ -383,6 +383,36 @@ function M.get_total_amounts(solution)
         end
     end
 
+    -- Temperature bridges are injected by create_problem at solve time and do
+    -- not appear in solution.production_lines, but their flow contributes to
+    -- balancing the LP — without folding them in, a producer's steam@500 and
+    -- a consumer's steam@[15,1000] would each show as a non-zero net entry
+    -- even though the LP has them tied together. Walk the bridge lines stored
+    -- on the Problem and credit/debit each endpoint by its LP-solved flow.
+    if solution.problem and solution.raw_variables then
+        local x = solution.raw_variables.x
+        for _, bridge_line in ipairs(solution.problem.bridges) do
+            local key = tn.typed_name_to_variable_name(bridge_line.recipe_typed_name)
+            local flow = x[key]
+            if flow then
+                for _, ingredient in ipairs(bridge_line.ingredients) do
+                    add_fluid(tn.create_typed_name("fluid", ingredient.name, nil,
+                        ingredient.temperature,
+                        ingredient.minimum_temperature,
+                        ingredient.maximum_temperature),
+                        -flow * ingredient.amount_per_second)
+                end
+                for _, product in ipairs(bridge_line.products) do
+                    add_fluid(tn.create_typed_name("fluid", product.name, nil,
+                        product.temperature,
+                        product.minimum_temperature,
+                        product.maximum_temperature),
+                        flow * product.amount_per_second)
+                end
+            end
+        end
+    end
+
     return item_totals, fluid_totals, virtual_totals
 end
 
