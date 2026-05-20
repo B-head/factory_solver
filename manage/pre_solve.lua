@@ -118,7 +118,13 @@ function M.to_normalized_production_lines(production_lines)
                 maximum_temperature = ftn.maximum_temperature,
             }
             flib_table.insert(ingredients, amount)
+
+            if acc.is_generator(machine) then
+                power = acc.get_generator_power(machine, machine_quality, fuel, ftn)
+            end
         elseif acc.is_generator(machine) then
+            -- Defense-in-depth: a generator whose energy source isn't
+            -- detected as fuel-based (e.g. void) bypasses the branch above.
             power = acc.raw_energy_production_to_power(machine, machine_quality)
         else
             power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
