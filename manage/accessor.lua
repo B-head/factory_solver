@@ -79,12 +79,17 @@ function M.raw_ingredient_to_amount(ingredient, quality, craft_energy, crafting_
         -- prototype left unset. Clamp to the fluid's physical range so
         -- the value flows through the rest of the mod (LP variable
         -- names, picker labels, tooltips) without leaking the sentinel.
+        -- A nil bound is distinct from a sentinel: it marks a bare
+        -- ingredient that pre_solve.resolve_bare_fluids will widen to
+        -- [default, max] for LP purposes, while UI consumers want to
+        -- treat it as "no temperature constraint" and skip the range
+        -- label entirely. Only touch non-nil values here.
         local proto = prototypes.fluid[ingredient.name]
         if proto then
-            if min_temp == nil or min_temp < proto.default_temperature then
+            if min_temp ~= nil and min_temp < proto.default_temperature then
                 min_temp = proto.default_temperature
             end
-            if max_temp == nil or max_temp > proto.max_temperature then
+            if max_temp ~= nil and max_temp > proto.max_temperature then
                 max_temp = proto.max_temperature
             end
         end
