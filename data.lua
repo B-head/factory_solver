@@ -247,6 +247,17 @@ styles.factory_solver_slot_image_with_quality = {
     stretch_image_to_widget_size = true,
 }
 
+styles.factory_solver_slot_temperature_label = {
+    type = "label_style",
+    parent = "count_label",
+    width = 40,
+    height = 40,
+    vertical_align = "top",
+    horizontal_align = "left",
+    font = "default-tiny-bold",
+    font_color = { r = 1, g = 0.9, b = 0.3 },
+}
+
 -- main_window --
 
 styles.factory_solver_main_window = {

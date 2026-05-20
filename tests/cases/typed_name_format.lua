@@ -139,4 +139,39 @@ table.insert(cases, {
     end,
 })
 
+table.insert(cases, {
+    name = "craft_to_typed_name decodes fluid/X@T virtual material to fluid TypedName",
+    run = function()
+        local virtual_material = { type = "virtual_material", name = "fluid/steam@165" }
+        local typed_name = tn.craft_to_typed_name(virtual_material)
+        harness.assert_eq(typed_name.type, "fluid")
+        harness.assert_eq(typed_name.name, "steam")
+        harness.assert_eq(typed_name.temperature, 165)
+        harness.assert_eq(tn.typed_name_to_variable_name(typed_name), "fluid/steam@165")
+    end,
+})
+
+table.insert(cases, {
+    name = "craft_to_typed_name decodes fluid/X@[lo,hi] virtual material to fluid range",
+    run = function()
+        local virtual_material = { type = "virtual_material", name = "fluid/steam@[15,1000]" }
+        local typed_name = tn.craft_to_typed_name(virtual_material)
+        harness.assert_eq(typed_name.type, "fluid")
+        harness.assert_eq(typed_name.name, "steam")
+        harness.assert_eq(typed_name.minimum_temperature, 15)
+        harness.assert_eq(typed_name.maximum_temperature, 1000)
+        harness.assert_eq(tn.typed_name_to_variable_name(typed_name), "fluid/steam@[15,1000]")
+    end,
+})
+
+table.insert(cases, {
+    name = "craft_to_typed_name keeps non-temperature virtual_material as-is",
+    run = function()
+        local virtual_material = { type = "virtual_material", name = "<heat>" }
+        local typed_name = tn.craft_to_typed_name(virtual_material)
+        harness.assert_eq(typed_name.type, "virtual_material")
+        harness.assert_eq(typed_name.name, "<heat>")
+    end,
+})
+
 return cases

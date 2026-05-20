@@ -93,6 +93,22 @@ function M.create_decorated_sprite_button(data)
         flib_table.insert(children, def)
     end
 
+    local temperature_caption
+    if typed_name.temperature ~= nil then
+        temperature_caption = string.format("%g°", typed_name.temperature)
+    elseif typed_name.minimum_temperature ~= nil then
+        temperature_caption = string.format("%g-%g", typed_name.minimum_temperature, typed_name.maximum_temperature)
+    end
+    if temperature_caption then
+        local def = {
+            type = "label",
+            style = "factory_solver_slot_temperature_label",
+            caption = temperature_caption,
+            ignored_by_interaction = true,
+        }
+        flib_table.insert(children, def)
+    end
+
     return {
         type = "sprite-button",
         style = M.get_style(is_hidden, is_unresearched, typed_name.type),

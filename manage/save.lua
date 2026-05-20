@@ -144,6 +144,15 @@ function M.reinit_force_data(force_index)
             for _, constraint in ipairs(solution.constraints) do
                 tn.typed_name_migration(constraint)
             end
+
+            -- Phase 4 / 5 (fluid temperature dimension) changed the LP variable
+            -- name format for fluids. Any cached Problem holds variable keys in
+            -- the old format and would silently mismatch the next solve. Discard
+            -- the cache and let on_tick rebuild it; raw_variables (warm-start
+            -- vector) is keyed by the same names, so drop it too.
+            solution.problem = nil
+            solution.raw_variables = nil
+            solution.solver_state = "ready"
         end
     else
         M.init_force_data(force_index)
@@ -628,6 +637,9 @@ function M.new_constraint(solution, typed_name)
         type = typed_name.type,
         name = typed_name.name,
         quality = typed_name.quality,
+        temperature = typed_name.temperature,
+        minimum_temperature = typed_name.minimum_temperature,
+        maximum_temperature = typed_name.maximum_temperature,
         limit_type = "upper",
         limit_amount_per_second = amount,
     }

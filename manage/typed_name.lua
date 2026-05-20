@@ -31,6 +31,20 @@ function M.typed_name_to_tooltip(typed_name)
     elseif typed_name.type == "virtual_recipe" then
         local recipe = storage.virtuals.recipe[typed_name.name]
         return recipe and recipe.tooltip
+    elseif typed_name.type == "fluid" then
+        local fluid = prototypes.fluid[typed_name.name]
+        if not fluid then return nil end
+        if typed_name.temperature then
+            return { "factory-solver-fluid-temperature-single",
+                fluid.localised_name, tostring(typed_name.temperature) }
+        elseif typed_name.minimum_temperature then
+            return { "factory-solver-fluid-temperature-range",
+                fluid.localised_name,
+                tostring(typed_name.minimum_temperature),
+                tostring(typed_name.maximum_temperature) }
+        else
+            return nil
+        end
     else
         return nil
     end
@@ -290,6 +304,28 @@ function M.get_beacon(name)
     end
 end
 
+---Temperature-variant VirtualMaterial entries are registered under names
+---like "fluid/steam@165" or "fluid/steam@[15,1000]" so the constraint
+---picker can surface them in the virtual tab. When the user selects one
+---we want the resulting TypedName to point at the underlying fluid
+---variable, not at the virtual_material shell — otherwise the constraint
+---would not match the LP variable produced by typed_name_to_variable_name
+---for a real fluid output. Return nil if the name does not match the
+---temperature-variant shape.
+---@param name string
+---@return TypedName?
+local function decode_fluid_temperature_virtual(name)
+    local fluid_name, single = string.match(name, "^fluid/(.-)@(%-?%d+%.?%d*)$")
+    if fluid_name then
+        return M.create_typed_name("fluid", fluid_name, nil, tonumber(single))
+    end
+    local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
+    if fluid_name2 then
+        return M.create_typed_name("fluid", fluid_name2, nil, nil, tonumber(lo), tonumber(hi))
+    end
+    return nil
+end
+
 ---comment
 ---@param craft Craft
 ---@return TypedName
@@ -305,6 +341,10 @@ function M.craft_to_typed_name(craft)
         return M.create_typed_name("recipe", craft.name)
     elseif craft.object_name == "LuaEntityPrototype" then
         return M.create_typed_name("machine", craft.name)
+    elseif craft.type == "virtual_material" then
+        local decoded = decode_fluid_temperature_virtual(craft.name)
+        if decoded then return decoded end
+        return M.create_typed_name(craft.type, craft.name)
     else
         return M.create_typed_name(craft.type, craft.name)
     end

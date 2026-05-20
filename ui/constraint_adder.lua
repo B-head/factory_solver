@@ -257,7 +257,9 @@ function handlers.on_constraint_picker_button_click(event)
 
     local typed_name = tags.typed_name --[[@as TypedName]]
     local craft_quality = dialog.tags.craft_quality --[[@as string]]
-    typed_name.quality = craft_quality
+    if typed_name.type ~= "fluid" then
+        typed_name.quality = craft_quality
+    end
 
     save.new_constraint(solution, typed_name)
 

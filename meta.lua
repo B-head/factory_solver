@@ -85,6 +85,9 @@ __factory_solver__storage = {}
 ---@field type FilterType
 ---@field name string
 ---@field quality string
+---@field temperature number?
+---@field minimum_temperature number?
+---@field maximum_temperature number?
 ---@field limit_type LimitType
 ---@field limit_amount_per_second number
 

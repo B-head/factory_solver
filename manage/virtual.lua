@@ -84,11 +84,90 @@ function M.create_virtuals()
         end
     end
 
+    M.add_fluid_temperature_virtuals(materials, recipes)
+
     ---@type Virtuals
     return {
         material = materials,
         recipe = recipes,
         fuel_categories_dictionary = fuel_categories_dictionary,
+    }
+end
+
+---Materialize a VirtualMaterial entry for each unique (fluid, single|range,
+---temperature) tuple that appears as a temperature-tagged product or
+---ingredient anywhere in the recipe set, including the freshly built virtual
+---recipes. These entries surface in the constraint picker's virtual tab so a
+---user can target a specific temperature variant. The name string matches
+---the LP variable encoding so craft_to_typed_name can decode it back to a
+---fluid TypedName with temperature info.
+---@param materials table<string, VirtualMaterial>
+---@param recipes table<string, VirtualRecipe>
+function M.add_fluid_temperature_virtuals(materials, recipes)
+    local function visit_products(products)
+        for _, product in ipairs(products) do
+            if product.type == "fluid" and product.temperature then
+                M.register_fluid_temperature_single(materials, product.name, product.temperature)
+            end
+        end
+    end
+    local function visit_ingredients(ingredients)
+        for _, ingredient in ipairs(ingredients) do
+            if ingredient.type == "fluid" and ingredient.minimum_temperature then
+                M.register_fluid_temperature_range(materials, ingredient.name,
+                    ingredient.minimum_temperature, ingredient.maximum_temperature)
+            end
+        end
+    end
+
+    for _, recipe in pairs(prototypes.recipe) do
+        visit_products(recipe.products)
+        visit_ingredients(recipe.ingredients)
+    end
+    for _, recipe in pairs(recipes) do
+        visit_products(recipe.products)
+        visit_ingredients(recipe.ingredients)
+    end
+end
+
+---@param materials table<string, VirtualMaterial>
+---@param fluid_name string
+---@param temperature number
+function M.register_fluid_temperature_single(materials, fluid_name, temperature)
+    local key = string.format("fluid/%s@%g", fluid_name, temperature)
+    if materials[key] then return end
+    local fluid_proto = prototypes.fluid[fluid_name]
+    if not fluid_proto then return end
+    ---@type VirtualMaterial
+    materials[key] = {
+        type = "virtual_material",
+        name = key,
+        sprite_path = "fluid/" .. fluid_name,
+        elem_tooltip = { type = "fluid", name = fluid_name },
+        order = fluid_proto.order .. string.format("@%020.6f", temperature),
+        group_name = fluid_proto.group.name,
+        subgroup_name = fluid_proto.subgroup.name,
+    }
+end
+
+---@param materials table<string, VirtualMaterial>
+---@param fluid_name string
+---@param min_temperature number
+---@param max_temperature number
+function M.register_fluid_temperature_range(materials, fluid_name, min_temperature, max_temperature)
+    local key = string.format("fluid/%s@[%g,%g]", fluid_name, min_temperature, max_temperature)
+    if materials[key] then return end
+    local fluid_proto = prototypes.fluid[fluid_name]
+    if not fluid_proto then return end
+    ---@type VirtualMaterial
+    materials[key] = {
+        type = "virtual_material",
+        name = key,
+        sprite_path = "fluid/" .. fluid_name,
+        elem_tooltip = { type = "fluid", name = fluid_name },
+        order = fluid_proto.order .. string.format("@z[%020.6f,%020.6f]", min_temperature, max_temperature),
+        group_name = fluid_proto.group.name,
+        subgroup_name = fluid_proto.subgroup.name,
     }
 end
 
