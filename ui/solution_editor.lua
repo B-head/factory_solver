@@ -290,7 +290,7 @@ function handlers.make_production_line_table(event)
                 local is_hidden = acc.is_hidden(fuel)
                 local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)
                 local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
-                    fuel, ftn.quality, effectivity.consumption)
+                    fuel, ftn.quality, effectivity.consumption, ftn)
 
                 local def = common.create_decorated_sprite_button {
                     typed_name = ftn,

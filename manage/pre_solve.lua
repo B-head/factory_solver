@@ -105,7 +105,7 @@ function M.to_normalized_production_lines(production_lines)
             local ftn = assert(line.fuel_typed_name)
             local fuel = tn.typed_name_to_material(ftn)
             local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
-                fuel, ftn.quality, effectivity.consumption)
+                fuel, ftn.quality, effectivity.consumption, ftn)
 
             ---@type NormalizedAmount
             local amount = {

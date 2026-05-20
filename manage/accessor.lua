@@ -371,24 +371,61 @@ end
 ---@param fuel LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
 ---@param fuel_quality QualityID
 ---@param effectivity_consumption number
+---@param fuel_typed_name TypedName?
 ---@return number
-function M.get_fuel_amount_per_second(machine, machine_quality, fuel, fuel_quality, effectivity_consumption)
+function M.get_fuel_amount_per_second(machine, machine_quality, fuel, fuel_quality, effectivity_consumption, fuel_typed_name)
     if machine.type == "generator" then
         local multiplier = 1 + M.get_quality_level(machine_quality) * 0.3
         return machine.fluid_usage_per_tick * M.second_per_tick * multiplier
-    else
-        ---@diagnostic disable: param-type-mismatch
-        local fuel_value = 1
-        if fuel.object_name == "LuaItemPrototype" then
-            fuel_value = fuel.fuel_value
-        elseif fuel.object_name == "LuaFluidPrototype" then
-            fuel_value = fuel.fuel_value
+    end
+
+    local energy = machine.fluid_energy_source_prototype
+    if energy then
+        if not energy.scale_fluid_usage then
+            -- scale=false: consumption is pinned to fluid_usage_per_tick regardless
+            -- of energy demand; the engine discards any excess.
+            return energy.fluid_usage_per_tick * M.second_per_tick
         end
-        ---@diagnostic enable: param-type-mismatch
 
         local power = M.raw_energy_usage_to_power(machine, machine_quality, effectivity_consumption)
-        return (fuel_value == 0) and 0 or power / fuel_value -- TODO
+        local energy_per_unit = 0
+        ---@diagnostic disable: param-type-mismatch
+        if energy.burns_fluid then
+            if fuel.object_name == "LuaFluidPrototype" then
+                energy_per_unit = fuel.fuel_value
+            end
+        elseif fuel.object_name == "LuaFluidPrototype" then
+            -- burns_fluid=false: extracts (T_in - default_temperature) * heat_capacity per unit.
+            -- The engine caps T_in at FluidEnergySource.maximum_temperature (0 means no cap).
+            local input_t = fuel.max_temperature
+            if fuel_typed_name then
+                input_t = fuel_typed_name.temperature
+                    or fuel_typed_name.maximum_temperature
+                    or input_t
+            end
+            local cap = energy.maximum_temperature
+            if cap and cap > 0 and input_t > cap then
+                input_t = cap
+            end
+            local delta = input_t - fuel.default_temperature
+            if delta > 0 then
+                energy_per_unit = delta * fuel.heat_capacity
+            end
+        end
+        ---@diagnostic enable: param-type-mismatch
+        return (energy_per_unit == 0) and 0 or power / energy_per_unit
     end
+
+    ---@diagnostic disable: param-type-mismatch
+    local fuel_value = 1
+    if fuel.object_name == "LuaItemPrototype" then
+        fuel_value = fuel.fuel_value
+    elseif fuel.object_name == "LuaFluidPrototype" then
+        fuel_value = fuel.fuel_value
+    end
+    ---@diagnostic enable: param-type-mismatch
+    local power = M.raw_energy_usage_to_power(machine, machine_quality, effectivity_consumption)
+    return (fuel_value == 0) and 0 or power / fuel_value
 end
 
 ---comment

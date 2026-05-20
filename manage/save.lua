@@ -374,7 +374,7 @@ function M.get_total_amounts(solution)
             local ftn = assert(line.fuel_typed_name)
             local fuel = tn.typed_name_to_material(ftn)
             local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
-                fuel, ftn.quality, effectivity.consumption) * quantity_of_machines_required
+                fuel, ftn.quality, effectivity.consumption, ftn) * quantity_of_machines_required
 
             if fuel.type == "item" then
                 item_totals[ftn.name] = (item_totals[ftn.name] or 0) - amount_per_second
