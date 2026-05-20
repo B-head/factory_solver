@@ -77,7 +77,7 @@ function M.create_relation_to_recipes(force_index)
         return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_fuel = {} }
     end
 
-    ---@param filter_type FilterType|"research-progress"
+    ---@param filter_type FilterType
     ---@param name string
     ---@return RelationToRecipe
     local function get_info(filter_type, name)

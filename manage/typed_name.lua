@@ -106,7 +106,7 @@ function M.typed_name_to_variable_name(typed_name)
 end
 
 ---comment
----@param filter_type FilterType | "research-progress"
+---@param filter_type FilterType
 ---@param name string
 ---@param quality string?
 ---@param temperature number?
@@ -114,9 +114,6 @@ end
 ---@param maximum_temperature number?
 ---@return TypedName
 function M.create_typed_name(filter_type, name, quality, temperature, minimum_temperature, maximum_temperature)
-    if filter_type == "research-progress" then
-        filter_type = "virtual_material"
-    end
     if filter_type == "fluid" then
         quality = "normal"
     else

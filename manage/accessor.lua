@@ -28,38 +28,26 @@ M.tolerance = (10 ^ -6) / 2
 ---@param effectivity_productivity number
 ---@return NormalizedAmount
 function M.raw_product_to_amount(product, quality, craft_energy, crafting_speed, effectivity_productivity)
-    if product.type == "research-progress" then
-        local amount = product.amount * effectivity_productivity * crafting_speed / craft_energy
+    local amount_min = assert(product.amount_min or product.amount)
+    local amount_max = assert(product.amount_max or product.amount)
 
-        ---@type NormalizedAmount
-        return {
-            type = "virtual_material", -- TODO research-progress virtuals
-            name = product.research_item,
-            quality = quality,
-            amount_per_second = amount,
-        }
-    else
-        local amount_min = assert(product.amount_min or product.amount)
-        local amount_max = assert(product.amount_max or product.amount)
+    local ignored_by_productivity = (product.ignored_by_productivity or 0)
+    local target_by_productivity =
+        math.max(amount_min - ignored_by_productivity, 0) +
+        math.max(amount_max - ignored_by_productivity, 0)
 
-        local ignored_by_productivity = (product.ignored_by_productivity or 0)
-        local target_by_productivity =
-            math.max(amount_min - ignored_by_productivity, 0) +
-            math.max(amount_max - ignored_by_productivity, 0)
+    local normal_amount = (amount_min + amount_max + target_by_productivity * effectivity_productivity) / 2
+    local extra_amount = (product.extra_count_fraction or 0) * (1 + effectivity_productivity)
+    local amount = (normal_amount * product.probability + extra_amount) * crafting_speed / craft_energy
 
-        local normal_amount = (amount_min + amount_max + target_by_productivity * effectivity_productivity) / 2
-        local extra_amount = (product.extra_count_fraction or 0) * (1 + effectivity_productivity)
-        local amount = (normal_amount * product.probability + extra_amount) * crafting_speed / craft_energy
-
-        ---@type NormalizedAmount
-        return {
-            type = product.type,
-            name = product.name,
-            quality = quality,
-            amount_per_second = amount,
-            temperature = product.temperature,
-        }
-    end
+    ---@type NormalizedAmount
+    return {
+        type = product.type,
+        name = product.name,
+        quality = quality,
+        amount_per_second = amount,
+        temperature = product.temperature,
+    }
 end
 
 ---comment
