@@ -152,18 +152,24 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         if rocket_silo_prototype.launch_to_space_platforms then
             local rocket_entity_prototype = assert(rocket_silo_prototype.rocket_entity_prototype)
             local space_rocket_name = "<launch>" .. rocket_entity_prototype.name
-            -- local sprite_path = "entity/" .. rocket_entity_prototype.name -- TODO
-            local sprite_path = "entity/" .. rocket_silo_prototype.name
+            -- RocketSiloRocketPrototype.cargo_pod_entity is not surfaced at runtime,
+            -- so we cannot follow the actual cargo pod per-silo. Use the vanilla
+            -- Space Age "cargo-pod" entity for icon/tooltip/locale when present.
+            -- The rocket entity prototype itself is not set up for GUI display
+            -- (no entity/<name> sprite, no localized name), so fall back to the
+            -- silo when cargo-pod is missing.
+            local display_prototype = prototypes.entity["cargo-pod"] or rocket_silo_prototype
+            local sprite_path = "entity/" .. display_prototype.name
 
             ---@type VirtualMaterial
             local space_rocket = {
                 type = "virtual_material",
                 name = space_rocket_name,
                 sprite_path = sprite_path,
-                elem_tooltip = { type = "entity", name = rocket_entity_prototype.name },
-                order = rocket_entity_prototype.order,
-                group_name = rocket_entity_prototype.group.name,
-                subgroup_name = rocket_entity_prototype.subgroup.name,
+                elem_tooltip = { type = "entity", name = display_prototype.name },
+                order = display_prototype.order,
+                group_name = display_prototype.group.name,
+                subgroup_name = display_prototype.subgroup.name,
             }
             flib_table.insert(crafts, space_rocket)
 
