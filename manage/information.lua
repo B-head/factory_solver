@@ -6,9 +6,43 @@ local tn = require "manage/typed_name"
 local M = {}
 
 ---comment
----@return table<string, string[]>, table<string, string[]>, string[]
+---@return table<string, string[]>, table<string, string[]>, table<string, string[]>, table<string, string[]>, string[]
 function M.cache_fuel_names()
+    local any_fluid_fuels = flib_table.map(acc.get_any_fluid_fuels(), function(value)
+        return value.name
+    end)
+
+    ---@param machines LuaEntityPrototype[]
+    ---@return string[]
+    local function collect_fluid_fuels(machines)
+        local names = {}
+        local seen = {}
+        local include_any = false
+        for _, machine in ipairs(machines) do
+            if acc.is_use_any_fluid_fuel(machine) then
+                include_any = true
+            else
+                local energy = machine.fluid_energy_source_prototype
+                local filter = energy and energy.fluid_box.filter
+                if filter and not seen[filter.name] then
+                    seen[filter.name] = true
+                    names[#names + 1] = filter.name
+                end
+            end
+        end
+        if include_any then
+            for _, name in ipairs(any_fluid_fuels) do
+                if not seen[name] then
+                    seen[name] = true
+                    names[#names + 1] = name
+                end
+            end
+        end
+        return names
+    end
+
     local cache_crafting_fuels = {}
+    local cache_crafting_fluid_fuels = {}
     for crafting_category_name, _ in pairs(prototypes.recipe_category) do
         local machines = acc.get_machines_in_category(crafting_category_name)
 
@@ -28,9 +62,11 @@ function M.cache_fuel_names()
         cache_crafting_fuels[crafting_category_name] = flib_table.map(fuels, function(value)
             return value.name
         end)
+        cache_crafting_fluid_fuels[crafting_category_name] = collect_fluid_fuels(machines)
     end
 
     local cache_resource_fuels = {}
+    local cache_resource_fluid_fuels = {}
     for resource_category_name, _ in pairs(prototypes.resource_category) do
         local machines = acc.get_machines_in_resource_category(resource_category_name)
 
@@ -50,13 +86,12 @@ function M.cache_fuel_names()
         cache_resource_fuels[resource_category_name] = flib_table.map(fuels, function(value)
             return value.name
         end)
+        cache_resource_fluid_fuels[resource_category_name] = collect_fluid_fuels(machines)
     end
 
-    local any_fluid_fuels = flib_table.map(acc.get_any_fluid_fuels(), function(value)
-        return value.name
-    end)
-
-    return cache_crafting_fuels, cache_resource_fuels, any_fluid_fuels
+    return cache_crafting_fuels, cache_resource_fuels,
+        cache_crafting_fluid_fuels, cache_resource_fluid_fuels,
+        any_fluid_fuels
 end
 
 ---Create caches of relation to recipe for items, fluids and virtuals.
@@ -69,7 +104,9 @@ function M.create_relation_to_recipes(force_index)
     local fluids = {} ---@type table<string, RelationToRecipe>
     local virtuals = {} ---@type table<string, RelationToRecipe>
 
-    local cache_crafting_fuels, cache_resource_fuels, any_fluid_fuels = M.cache_fuel_names()
+    local cache_crafting_fuels, cache_resource_fuels,
+        cache_crafting_fluid_fuels, cache_resource_fluid_fuels,
+        any_fluid_fuels = M.cache_fuel_names()
 
     ---@return RelationToRecipe
     local function create_relation_table()
@@ -119,7 +156,12 @@ function M.create_relation_to_recipes(force_index)
         end
 
         for _, value in ipairs(cache_crafting_fuels[recipe.category]) do
-            local info = get_info("item", value) -- TODO fluid fuels
+            local info = get_info("item", value)
+            flib_table.insert(info.recipe_for_fuel, recipe.name)
+        end
+
+        for _, value in ipairs(cache_crafting_fluid_fuels[recipe.category]) do
+            local info = get_info("fluid", value)
             flib_table.insert(info.recipe_for_fuel, recipe.name)
         end
     end
@@ -166,7 +208,12 @@ function M.create_relation_to_recipes(force_index)
 
         if recipe.resource_category then
             for _, value in ipairs(cache_resource_fuels[recipe.resource_category]) do
-                local info = get_info("item", value) -- TODO fluid fuels
+                local info = get_info("item", value)
+                flib_table.insert(info.recipe_for_fuel, recipe.name)
+            end
+
+            for _, value in ipairs(cache_resource_fluid_fuels[recipe.resource_category]) do
+                local info = get_info("fluid", value)
                 flib_table.insert(info.recipe_for_fuel, recipe.name)
             end
         end
