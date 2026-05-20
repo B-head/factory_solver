@@ -532,10 +532,16 @@ end
 ---@param machine LuaEntityPrototype
 ---@return boolean
 function M.is_use_any_fluid_fuel(machine)
-    if not machine.fluid_energy_source_prototype then
-        return false
+    if machine.fluid_energy_source_prototype then
+        return machine.fluid_energy_source_prototype.fluid_box.filter == nil
     end
-    return machine.fluid_energy_source_prototype.fluid_box.filter == nil
+    -- Generators carry their fluid input on the entity itself, not through a
+    -- FluidEnergySource. A filterless input means any fluid fuel goes.
+    -- burner-generator is solid-fueled and falls through to false here.
+    if machine.type == "generator" then
+        return M.get_fluidbox_filter_prototype(machine, 1) == nil
+    end
+    return false
 end
 
 ---comment
