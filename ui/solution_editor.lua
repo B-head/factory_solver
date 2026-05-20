@@ -264,7 +264,9 @@ function handlers.make_production_line_table(event)
             if not acc.is_use_fuel(machine) or acc.is_generator(machine) then
                 local power
                 if acc.is_generator(machine) then
-                    power = acc.raw_energy_production_to_power(machine, machine_quality)
+                    local ftn = line.fuel_typed_name
+                    local fuel = ftn and tn.typed_name_to_material(ftn)
+                    power = acc.get_generator_power(machine, machine_quality, fuel, ftn)
                 else
                     power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
                 end

@@ -211,6 +211,65 @@ function M.raw_energy_production_to_power(machine, quality)
     return -machine.get_max_energy_production(quality) * M.second_per_tick
 end
 
+---Returns the actual electrical power produced by a generator at its rated
+---throughput, bounded by both max_power_output and the supplied fuel's
+---energy density (fluid_usage_per_tick * fuel_energy * effectivity). Sign
+---convention matches raw_energy_production_to_power: negative = output. For
+---non-generator entities or when fuel info is missing, returns the uncapped
+---max so the caller doesn't have to branch.
+---@param machine LuaEntityPrototype
+---@param machine_quality QualityID
+---@param fuel LuaItemPrototype | LuaFluidPrototype | VirtualMaterial?
+---@param fuel_typed_name TypedName?
+---@return number
+function M.get_generator_power(machine, machine_quality, fuel, fuel_typed_name)
+    local max_power = -machine.get_max_energy_production(machine_quality) * M.second_per_tick
+
+    if machine.type ~= "generator" then
+        return max_power
+    end
+
+    local energy_per_unit = 0
+    ---@diagnostic disable: param-type-mismatch
+    if fuel and fuel.object_name == "LuaFluidPrototype" then
+        if machine.burns_fluid then
+            energy_per_unit = fuel.fuel_value
+        else
+            local input_t = fuel.max_temperature
+            if fuel_typed_name then
+                input_t = fuel_typed_name.temperature
+                    or fuel_typed_name.maximum_temperature
+                    or input_t
+            end
+            local cap = machine.maximum_temperature
+            if cap and cap > 0 and input_t > cap then
+                input_t = cap
+            end
+            local delta = input_t - fuel.default_temperature
+            if delta > 0 then
+                energy_per_unit = delta * fuel.heat_capacity
+            end
+        end
+    end
+    ---@diagnostic enable: param-type-mismatch
+
+    if energy_per_unit == 0 then
+        return max_power
+    end
+
+    local quality_multiplier = 1 + M.get_quality_level(machine_quality) * 0.3
+    local consumption = machine.fluid_usage_per_tick * M.second_per_tick * quality_multiplier
+    local effectivity_value = machine.effectivity or 1
+    local fuel_power = -consumption * energy_per_unit * effectivity_value
+
+    -- Both values are negative (output). The bottleneck has the smaller
+    -- magnitude, i.e. the value closer to zero.
+    if fuel_power > max_power then
+        return fuel_power
+    end
+    return max_power
+end
+
 ---comment
 ---@param value number
 ---@param scale TimeScale
