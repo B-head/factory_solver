@@ -5,6 +5,8 @@ local slack_cost = 0
 local elastic_cost = 2 ^ 10
 local target_cost = 2 ^ 20
 
+local bridge_prefix = "|bridge|"
+
 local M = {}
 
 ---comment
@@ -12,6 +14,113 @@ local M = {}
 ---@return number
 function M.make_recipe_cost(value)
     return (value / (1 + math.abs(value)) - 1) / 2
+end
+
+---@param line NormalizedProductionLine
+---@return boolean
+local function is_bridge_line(line)
+    return string.sub(line.recipe_typed_name.name, 1, #bridge_prefix) == bridge_prefix
+end
+
+---For every (single_temperature, temperature_range) pair found in the production
+---line set where the single value falls inside the range, emit a zero-cost
+---virtual recipe that converts the single-temperature fluid variable into the
+---range-temperature one. The LP solves the otherwise-disconnected variables
+---through these bridges (e.g. steam@165 from a boiler feeding a generator that
+---accepts steam@[15,1000]).
+---@param production_lines NormalizedProductionLine[]
+---@return NormalizedProductionLine[]
+function M.create_temperature_bridges(production_lines)
+    local singles = {}  -- fluid_name -> { temperature = true, ... }
+    local ranges = {}   -- fluid_name -> { "min,max" -> { min, max } }
+
+    for _, line in ipairs(production_lines) do
+        for _, product in ipairs(line.products) do
+            if product.type == "fluid" and product.temperature then
+                local s = singles[product.name]
+                if not s then
+                    s = {}
+                    singles[product.name] = s
+                end
+                s[product.temperature] = true
+            end
+        end
+        for _, ingredient in ipairs(line.ingredients) do
+            if ingredient.type == "fluid" and ingredient.minimum_temperature then
+                local r = ranges[ingredient.name]
+                if not r then
+                    r = {}
+                    ranges[ingredient.name] = r
+                end
+                local key = string.format("%g,%g", ingredient.minimum_temperature, ingredient.maximum_temperature)
+                r[key] = { ingredient.minimum_temperature, ingredient.maximum_temperature }
+            end
+        end
+    end
+
+    local fluid_names = {}
+    local seen = {}
+    for name, _ in pairs(singles) do
+        if not seen[name] then seen[name] = true; fluid_names[#fluid_names + 1] = name end
+    end
+    for name, _ in pairs(ranges) do
+        if not seen[name] then seen[name] = true; fluid_names[#fluid_names + 1] = name end
+    end
+    table.sort(fluid_names)
+
+    local bridges = {}
+    for _, fluid_name in ipairs(fluid_names) do
+        local s = singles[fluid_name]
+        local r = ranges[fluid_name]
+        if s and r then
+            local single_temps = {}
+            for t in pairs(s) do single_temps[#single_temps + 1] = t end
+            table.sort(single_temps)
+
+            local range_keys = {}
+            for k in pairs(r) do range_keys[#range_keys + 1] = k end
+            table.sort(range_keys)
+
+            for _, temperature in ipairs(single_temps) do
+                for _, range_key in ipairs(range_keys) do
+                    local range = r[range_key]
+                    local min, max = range[1], range[2]
+                    if min <= temperature and temperature <= max then
+                        local bridge_name = string.format("%sfluid/%s@%g->[%g,%g]",
+                            bridge_prefix, fluid_name, temperature, min, max)
+                        ---@type NormalizedProductionLine
+                        local bridge_line = {
+                            recipe_typed_name = {
+                                type = "virtual_recipe",
+                                name = bridge_name,
+                                quality = "normal",
+                            },
+                            products = { {
+                                type = "fluid",
+                                name = fluid_name,
+                                quality = "normal",
+                                minimum_temperature = min,
+                                maximum_temperature = max,
+                                amount_per_second = 1,
+                            } },
+                            ingredients = { {
+                                type = "fluid",
+                                name = fluid_name,
+                                quality = "normal",
+                                temperature = temperature,
+                                amount_per_second = 1,
+                            } },
+                            power_per_second = 0,
+                            pollution_per_second = 0,
+                        }
+                        bridges[#bridges + 1] = bridge_line
+                    end
+                end
+            end
+        end
+    end
+
+    return bridges
 end
 
 ---Compute the set of materials that can be produced from raw inputs
@@ -75,11 +184,17 @@ end
 function M.create_problem(solution_name, constraints, production_lines)
     local problem = problem_generator.new(solution_name)
 
-    local reachable = M.compute_reachable_materials(production_lines)
+    local bridges = M.create_temperature_bridges(production_lines)
+    local all_lines = {}
+    for _, line in ipairs(production_lines) do all_lines[#all_lines + 1] = line end
+    for _, line in ipairs(bridges) do all_lines[#all_lines + 1] = line end
+
+    local reachable = M.compute_reachable_materials(all_lines)
 
     local included_products, included_ingresients = {}, {} ---@type table<string, true>, table<string, true>
-    for _, line in ipairs(production_lines) do
+    for _, line in ipairs(all_lines) do
         local objective_name = tn.typed_name_to_variable_name(line.recipe_typed_name)
+        local bridge = is_bridge_line(line)
         local product_count, ingredient_count = 0, 0
 
         for _, value in ipairs(line.products) do
@@ -111,9 +226,13 @@ function M.create_problem(solution_name, constraints, production_lines)
             end
         end
 
-        local recipe_cost = M.make_recipe_cost(ingredient_count - product_count)
-        problem:add_objective(objective_name, recipe_cost, true)
-        problem:add_subject_term(objective_name, "|limit|" .. objective_name, 1)
+        if bridge then
+            problem:add_objective(objective_name, slack_cost, false)
+        else
+            local recipe_cost = M.make_recipe_cost(ingredient_count - product_count)
+            problem:add_objective(objective_name, recipe_cost, true)
+            problem:add_subject_term(objective_name, "|limit|" .. objective_name, 1)
+        end
     end
 
     for constraint_name, _ in pairs(included_products) do

@@ -57,6 +57,7 @@ function M.raw_product_to_amount(product, quality, craft_energy, crafting_speed,
             name = product.name,
             quality = quality,
             amount_per_second = amount,
+            temperature = product.temperature,
         }
     end
 end
@@ -76,6 +77,8 @@ function M.raw_ingredient_to_amount(ingredient, quality, craft_energy, crafting_
         name = ingredient.name,
         quality = quality,
         amount_per_second = amount,
+        minimum_temperature = ingredient.minimum_temperature,
+        maximum_temperature = ingredient.maximum_temperature,
     }
 end
 

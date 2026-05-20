@@ -113,6 +113,9 @@ function M.to_normalized_production_lines(production_lines)
                 name = ftn.name,
                 quality = ftn.quality,
                 amount_per_second = amount_per_second,
+                temperature = ftn.temperature,
+                minimum_temperature = ftn.minimum_temperature,
+                maximum_temperature = ftn.maximum_temperature,
             }
             flib_table.insert(ingredients, amount)
         elseif acc.is_generator(machine) then
@@ -133,7 +136,43 @@ function M.to_normalized_production_lines(production_lines)
 
         flib_table.insert(normalized_production_lines, normalized_line)
     end
+    M.resolve_bare_fluids(normalized_production_lines)
     return normalized_production_lines
+end
+
+---Fill in implicit temperature info for bare fluid NormalizedAmounts.
+---Bare fluid products resolve to the fluid's default_temperature (single).
+---Bare fluid ingredients resolve to [default_temperature, max_temperature].
+---Non-fluid amounts and already-tagged fluids pass through unchanged.
+---@param normalized_production_lines NormalizedProductionLine[]
+function M.resolve_bare_fluids(normalized_production_lines)
+    for _, line in ipairs(normalized_production_lines) do
+        for _, product in ipairs(line.products) do
+            if product.type == "fluid"
+                and product.temperature == nil
+                and product.minimum_temperature == nil
+                and product.maximum_temperature == nil
+            then
+                local proto = prototypes.fluid[product.name]
+                if proto then
+                    product.temperature = proto.default_temperature
+                end
+            end
+        end
+        for _, ingredient in ipairs(line.ingredients) do
+            if ingredient.type == "fluid"
+                and ingredient.temperature == nil
+                and ingredient.minimum_temperature == nil
+                and ingredient.maximum_temperature == nil
+            then
+                local proto = prototypes.fluid[ingredient.name]
+                if proto then
+                    ingredient.minimum_temperature = proto.default_temperature
+                    ingredient.maximum_temperature = proto.max_temperature
+                end
+            end
+        end
+    end
 end
 
 ---comment
@@ -171,6 +210,9 @@ function M.quality_decomposition(normalized_amount, effectivity_quality)
             name = normalized_amount.name,
             quality = current_quality,
             amount_per_second = current_probability - next_probability,
+            temperature = normalized_amount.temperature,
+            minimum_temperature = normalized_amount.minimum_temperature,
+            maximum_temperature = normalized_amount.maximum_temperature,
         }
         flib_table.insert(ret, add_value)
 
