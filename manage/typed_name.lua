@@ -204,6 +204,24 @@ function M.typed_name_migration(typed_name)
     
     name = string.gsub(name, "<minable>", "<mine>")
 
+    if type == "virtual_recipe" then
+        local boiler_name = string.match(name, "^<run>([^:]+)$")
+        if boiler_name then
+            local entity = prototypes.entity[boiler_name]
+            if entity and entity.type == "boiler" then
+                -- Inlined from accessor.get_fluidbox_filter_prototype because
+                -- Factorio forbids runtime require and accessor.lua already
+                -- requires this module (top-level require would cycle).
+                local index = entity.fluid_energy_source_prototype and 2 or 1
+                local fluidbox = entity.fluidbox_prototypes[index]
+                local filter = fluidbox and fluidbox.filter
+                if filter then
+                    name = "<run>" .. boiler_name .. ":" .. filter.name
+                end
+            end
+        end
+    end
+
     if not quality then
         quality = "normal"
     end

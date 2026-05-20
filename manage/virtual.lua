@@ -328,46 +328,73 @@ end
 ---@param boiler_prototype LuaEntityPrototype
 ---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_boiler_virtual(boiler_prototype)
-    local input_fluid = acc.get_fluidbox_filter_prototype(boiler_prototype, 1) -- TODO any fluid
-    local output_fluid = acc.get_fluidbox_filter_prototype(boiler_prototype, 2) or input_fluid
+    local input_filter = acc.get_fluidbox_filter_prototype(boiler_prototype, 1)
+    local output_filter = acc.get_fluidbox_filter_prototype(boiler_prototype, 2)
+    local target_temperature = boiler_prototype.target_temperature
+    local max_energy_usage = boiler_prototype.get_max_energy_usage()
 
-    if not input_fluid then
-        return {}
+    ---@type LuaFluidPrototype[]
+    local candidates = {}
+    if input_filter then
+        flib_table.insert(candidates, input_filter)
+    else
+        for _, fluid_prototype in pairs(prototypes.fluid) do
+            flib_table.insert(candidates, fluid_prototype)
+        end
     end
-    assert(output_fluid)
 
-    local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
-        boiler_prototype.get_max_energy_usage()
+    local crafts = {}
+    for _, input_fluid in ipairs(candidates) do
+        local output_fluid = output_filter or input_fluid
+        local delta_t = target_temperature - input_fluid.default_temperature
 
-    ---@type VirtualRecipe
-    local recipe = {
-        type = "virtual_recipe",
-        name = "<run>" .. boiler_prototype.name,
-        sprite_path = "entity/" .. boiler_prototype.name,
-        elem_tooltip = { type = "entity", name = boiler_prototype.name },
-        order = boiler_prototype.order,
-        group_name = boiler_prototype.group.name,
-        subgroup_name = boiler_prototype.subgroup.name,
-        products = {
-            {
-                type = "fluid",
-                name = output_fluid.name,
-                amount = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
-                probability = 1,
-                temperature = boiler_prototype.target_temperature,
-            }
-        },
-        ingredients = {
-            {
-                type = "fluid",
-                name = input_fluid.name,
-                amount = acc.second_per_tick / (need_tick * input_fluid.heat_capacity),
-            }
-        },
-        fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
-    }
+        local in_amount, out_amount
+        if delta_t > 0 and max_energy_usage > 0
+            and input_fluid.heat_capacity > 0 and output_fluid.heat_capacity > 0
+        then
+            local need_tick = delta_t / max_energy_usage
+            in_amount = acc.second_per_tick / (need_tick * input_fluid.heat_capacity)
+            out_amount = acc.second_per_tick / (need_tick * output_fluid.heat_capacity)
+        else
+            -- Physically impossible to heat this fluid (input default >= target,
+            -- non-positive heat capacity, or zero-power boiler). Emit a placeholder
+            -- recipe so the picker still shows the entry, but with amount=0 so the
+            -- LP sees an all-zero column and cannot pick it up.
+            in_amount = 0
+            out_amount = 0
+        end
 
-    return { recipe }
+        ---@type VirtualRecipe
+        local recipe = {
+            type = "virtual_recipe",
+            name = string.format("<run>%s:%s", boiler_prototype.name, input_fluid.name),
+            sprite_path = "entity/" .. boiler_prototype.name,
+            elem_tooltip = { type = "entity", name = boiler_prototype.name },
+            order = boiler_prototype.order .. ":" .. input_fluid.order,
+            group_name = boiler_prototype.group.name,
+            subgroup_name = boiler_prototype.subgroup.name,
+            products = {
+                {
+                    type = "fluid",
+                    name = output_fluid.name,
+                    amount = out_amount,
+                    probability = 1,
+                    temperature = target_temperature,
+                }
+            },
+            ingredients = {
+                {
+                    type = "fluid",
+                    name = input_fluid.name,
+                    amount = in_amount,
+                }
+            },
+            fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
+        }
+        flib_table.insert(crafts, recipe)
+    end
+
+    return crafts
 end
 
 ---@param generator_prototype LuaEntityPrototype
