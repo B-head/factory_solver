@@ -278,10 +278,32 @@ end
 ---comment
 ---@param solution Solution
 ---@return table<string, number>
----@return table<string, number>
+---@return table<string, { typed_name: TypedName, amount_per_second: number }>
 ---@return table<string, number>
 function M.get_total_amounts(solution)
-    local item_totals, fluid_totals, virtual_totals = {}, {}, {}
+    ---@type table<string, number>
+    local item_totals = {}
+    ---@type table<string, { typed_name: TypedName, amount_per_second: number }>
+    local fluid_totals = {}
+    ---@type table<string, number>
+    local virtual_totals = {}
+
+    -- Fluids are aggregated per (name, temperature variant) — different
+    -- temperatures correspond to distinct LP variables and must not be
+    -- collapsed under the bare name, otherwise the picker drops the
+    -- temperature label and steam@500 / steam@165 look identical.
+    local function add_fluid(typed_name, amount_per_second)
+        local key = tn.typed_name_to_variable_name(typed_name)
+        local entry = fluid_totals[key]
+        if entry then
+            entry.amount_per_second = entry.amount_per_second + amount_per_second
+        else
+            fluid_totals[key] = {
+                typed_name = typed_name,
+                amount_per_second = amount_per_second,
+            }
+        end
+    end
 
     for _, line in ipairs(solution.production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
@@ -309,7 +331,9 @@ function M.get_total_amounts(solution)
             if filter_type == "item" then
                 item_totals[name] = (item_totals[name] or 0) + amount_per_second
             elseif filter_type == "fluid" then
-                fluid_totals[name] = (fluid_totals[name] or 0) + amount_per_second
+                add_fluid(tn.create_typed_name("fluid", name, nil,
+                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
+                    amount_per_second)
             elseif filter_type == "virtual_material" then
                 virtual_totals[name] = (virtual_totals[name] or 0) + amount_per_second
             else
@@ -331,7 +355,9 @@ function M.get_total_amounts(solution)
             if filter_type == "item" then
                 item_totals[name] = (item_totals[name] or 0) - amount_per_second
             elseif filter_type == "fluid" then
-                fluid_totals[name] = (fluid_totals[name] or 0) - amount_per_second
+                add_fluid(tn.create_typed_name("fluid", name, nil,
+                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
+                    -amount_per_second)
             elseif filter_type == "virtual_material" then
                 virtual_totals[name] = (virtual_totals[name] or 0) - amount_per_second
             else
@@ -348,7 +374,7 @@ function M.get_total_amounts(solution)
             if fuel.type == "item" then
                 item_totals[ftn.name] = (item_totals[ftn.name] or 0) - amount_per_second
             elseif fuel.type == "fluid" then
-                fluid_totals[ftn.name] = (fluid_totals[ftn.name] or 0) - amount_per_second
+                add_fluid(ftn, -amount_per_second)
             elseif fuel.type == "virtual_material" then
                 virtual_totals[ftn.name] = (virtual_totals[ftn.name] or 0) - amount_per_second
             else

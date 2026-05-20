@@ -52,8 +52,8 @@ function handlers.make_final_products_table(event)
         add(tn.create_typed_name("item", name), number)
     end
 
-    for name, number in pairs(fluid_totals) do
-        add(tn.create_typed_name("fluid", name), number)
+    for _, entry in pairs(fluid_totals) do
+        add(entry.typed_name, entry.amount_per_second)
     end
 
     for name, number in pairs(virtual_totals) do
@@ -105,8 +105,8 @@ function handlers.make_basic_ingredients_table(event)
         add(tn.create_typed_name("item", name), number)
     end
 
-    for name, number in pairs(fluid_totals) do
-        add(tn.create_typed_name("fluid", name), number)
+    for _, entry in pairs(fluid_totals) do
+        add(entry.typed_name, entry.amount_per_second)
     end
 
     for name, number in pairs(virtual_totals) do
