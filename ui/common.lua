@@ -93,20 +93,42 @@ function M.create_decorated_sprite_button(data)
         flib_table.insert(children, def)
     end
 
-    local temperature_caption
     if typed_name.temperature ~= nil then
-        temperature_caption = string.format("%g°", typed_name.temperature)
-    elseif typed_name.minimum_temperature ~= nil then
-        temperature_caption = string.format("%g-%g", typed_name.minimum_temperature, typed_name.maximum_temperature)
-    end
-    if temperature_caption then
-        local def = {
-            type = "label",
-            style = "factory_solver_slot_temperature_label",
-            caption = temperature_caption,
+        flib_table.insert(children, {
+            type = "flow",
+            direction = "vertical",
+            style = "factory_solver_slot_temperature_flow",
             ignored_by_interaction = true,
-        }
-        flib_table.insert(children, def)
+            children = {
+                {
+                    type = "label",
+                    style = "factory_solver_slot_temperature_label",
+                    caption = string.format("%g°", typed_name.temperature),
+                    ignored_by_interaction = true,
+                },
+            },
+        })
+    elseif typed_name.minimum_temperature ~= nil then
+        flib_table.insert(children, {
+            type = "flow",
+            direction = "vertical",
+            style = "factory_solver_slot_temperature_flow",
+            ignored_by_interaction = true,
+            children = {
+                {
+                    type = "label",
+                    style = "factory_solver_slot_temperature_label",
+                    caption = string.format("%g", typed_name.minimum_temperature),
+                    ignored_by_interaction = true,
+                },
+                {
+                    type = "label",
+                    style = "factory_solver_slot_temperature_label",
+                    caption = string.format("%g", typed_name.maximum_temperature),
+                    ignored_by_interaction = true,
+                },
+            },
+        })
     end
 
     return {

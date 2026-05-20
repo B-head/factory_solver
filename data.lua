@@ -249,13 +249,22 @@ styles.factory_solver_slot_image_with_quality = {
 
 styles.factory_solver_slot_temperature_label = {
     type = "label_style",
-    parent = "count_label",
-    width = 40,
-    height = 40,
-    vertical_align = "top",
-    horizontal_align = "left",
+    height = 8,
     font = "default-tiny-bold",
     font_color = { r = 1, g = 0.9, b = 0.3 },
+}
+
+styles.factory_solver_slot_temperature_flow = {
+    type = "vertical_flow_style",
+    width = 40,
+    height = 32,
+    vertical_align = "top",
+    horizontal_align = "left",
+    vertical_spacing = 0,
+    top_padding = -4,
+    bottom_padding = 20,
+    left_padding = 0,
+    right_padding = 0,
 }
 
 -- main_window --
