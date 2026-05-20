@@ -21,6 +21,21 @@ else
     })
 end
 
+if mods["debugadapter"] and mods["base"] then
+    -- A heat-fluid-inside boiler with no input filter; exercises the branch
+    -- in create_boiler_virtual that enumerates one virtual recipe per fluid
+    -- and heats each to its own FluidPrototype.max_temperature. No published
+    -- mod is known to ship such a boiler, so this is the only way to cover
+    -- that code path in-game.
+    local universal_heater = table.deepcopy(data.raw["boiler"]["boiler"])
+    universal_heater.name = "fs-test-universal-heater"
+    universal_heater.minable = nil
+    universal_heater.mode = "heat-fluid-inside"
+    universal_heater.fluid_box.filter = nil
+    universal_heater.output_fluid_box.filter = nil
+    data:extend({ universal_heater })
+end
+
 if mods["debugadapter"] then
     -- Test data --
     data:extend({

@@ -330,7 +330,7 @@ end
 function M.create_boiler_virtual(boiler_prototype)
     local input_filter = acc.get_fluidbox_filter_prototype(boiler_prototype, 1)
     local output_filter = acc.get_fluidbox_filter_prototype(boiler_prototype, 2)
-    local target_temperature = boiler_prototype.target_temperature
+    local boiler_mode = boiler_prototype.boiler_mode
     local max_energy_usage = boiler_prototype.get_max_energy_usage()
 
     ---@type LuaFluidPrototype[]
@@ -345,8 +345,19 @@ function M.create_boiler_virtual(boiler_prototype)
 
     local crafts = {}
     for _, input_fluid in ipairs(candidates) do
-        local output_fluid = output_filter or input_fluid
-        local delta_t = target_temperature - input_fluid.default_temperature
+        -- "heat-fluid-inside" keeps the fluid in the input pipe and heats it
+        -- up to its own max_temperature; output_fluid_box is unused so the
+        -- filter on it does not apply. "output-to-separate-pipe" converts
+        -- the input into the output filter (if any) at target_temperature.
+        local output_fluid, effective_target
+        if boiler_mode == "heat-fluid-inside" then
+            output_fluid = input_fluid
+            effective_target = input_fluid.max_temperature
+        else
+            output_fluid = output_filter or input_fluid
+            effective_target = boiler_prototype.target_temperature
+        end
+        local delta_t = effective_target - input_fluid.default_temperature
 
         local in_amount, out_amount
         if delta_t > 0 and max_energy_usage > 0
@@ -379,7 +390,7 @@ function M.create_boiler_virtual(boiler_prototype)
                     name = output_fluid.name,
                     amount = out_amount,
                     probability = 1,
-                    temperature = target_temperature,
+                    temperature = effective_target,
                 }
             },
             ingredients = {
