@@ -249,7 +249,6 @@ function M.create_boiler_virtual(boiler_prototype)
     end
     assert(output_fluid)
 
-    -- TODO virtual temperatue
     local need_tick = (boiler_prototype.target_temperature - input_fluid.default_temperature) /
         boiler_prototype.get_max_energy_usage()
 
@@ -268,6 +267,7 @@ function M.create_boiler_virtual(boiler_prototype)
                 name = output_fluid.name,
                 amount = acc.second_per_tick / (need_tick * output_fluid.heat_capacity),
                 probability = 1,
+                temperature = boiler_prototype.target_temperature,
             }
         },
         ingredients = {
@@ -286,7 +286,10 @@ end
 ---@param generator_prototype LuaEntityPrototype
 ---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_generator_virtual(generator_prototype)
-    -- TODO virtual temperatue
+    -- Fluid input is wired via line.fuel_typed_name (see pre_solve.lua's
+    -- is_use_fuel branch); acc.try_get_fixed_fuel populates the temperature
+    -- range from the generator's filter and maximum_temperature, so no
+    -- explicit ingredient list is needed here.
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -420,6 +423,7 @@ function M.create_offshore_tile_virtual(tile_prototype)
                     name = fluid_prototype.name,
                     amount = offshore_pump_prototype.pumping_speed,
                     probability = 1,
+                    temperature = fluid_prototype.default_temperature,
                 }
             },
             ingredients = {},
