@@ -331,8 +331,12 @@ function M.get_total_amounts(solution)
             if filter_type == "item" then
                 item_totals[name] = (item_totals[name] or 0) + amount_per_second
             elseif filter_type == "fluid" then
-                add_fluid(tn.create_typed_name("fluid", name, nil,
-                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
+                -- Match the LP-side widening (pre_solve.resolve_bare_fluids):
+                -- without this, a bare fluid here would land at a different
+                -- key than the bridge endpoint that consumes it.
+                local temperature, min_t, max_t = acc.resolve_bare_fluid_product(
+                    name, amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
+                add_fluid(tn.create_typed_name("fluid", name, nil, temperature, min_t, max_t),
                     amount_per_second)
             elseif filter_type == "virtual_material" then
                 virtual_totals[name] = (virtual_totals[name] or 0) + amount_per_second
@@ -355,8 +359,9 @@ function M.get_total_amounts(solution)
             if filter_type == "item" then
                 item_totals[name] = (item_totals[name] or 0) - amount_per_second
             elseif filter_type == "fluid" then
-                add_fluid(tn.create_typed_name("fluid", name, nil,
-                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
+                local temperature, min_t, max_t = acc.resolve_bare_fluid_ingredient(
+                    name, amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
+                add_fluid(tn.create_typed_name("fluid", name, nil, temperature, min_t, max_t),
                     -amount_per_second)
             elseif filter_type == "virtual_material" then
                 virtual_totals[name] = (virtual_totals[name] or 0) - amount_per_second
@@ -374,7 +379,13 @@ function M.get_total_amounts(solution)
             if fuel.type == "item" then
                 item_totals[ftn.name] = (item_totals[ftn.name] or 0) - amount_per_second
             elseif fuel.type == "fluid" then
-                add_fluid(ftn, -amount_per_second)
+                -- line.fuel_typed_name may be bare on solutions migrated from
+                -- pre-0.4.0 saves. Widen here so the totals key matches the
+                -- ranged LP variable name the bridge target lands on.
+                local temperature, min_t, max_t = acc.resolve_bare_fluid_ingredient(
+                    ftn.name, ftn.temperature, ftn.minimum_temperature, ftn.maximum_temperature)
+                add_fluid(tn.create_typed_name("fluid", ftn.name, ftn.quality,
+                    temperature, min_t, max_t), -amount_per_second)
             elseif fuel.type == "virtual_material" then
                 virtual_totals[ftn.name] = (virtual_totals[ftn.name] or 0) - amount_per_second
             else

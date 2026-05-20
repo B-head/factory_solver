@@ -106,6 +106,58 @@ function M.raw_ingredient_to_amount(ingredient, quality, craft_energy, crafting_
     }
 end
 
+---Widen a fluid amount in product position: a fully bare fluid resolves to
+---its default_temperature (single). Anything already tagged passes through.
+---Returns the (temperature, minimum_temperature, maximum_temperature) tuple
+---so callers can mutate a NormalizedAmount in place or build a fresh
+---TypedName from it.
+---@param fluid_name string
+---@param temperature number?
+---@param minimum_temperature number?
+---@param maximum_temperature number?
+---@return number? temperature
+---@return number? minimum_temperature
+---@return number? maximum_temperature
+function M.resolve_bare_fluid_product(fluid_name, temperature, minimum_temperature, maximum_temperature)
+    if temperature == nil
+        and minimum_temperature == nil
+        and maximum_temperature == nil
+    then
+        local proto = prototypes.fluid[fluid_name]
+        if proto then
+            return proto.default_temperature, nil, nil
+        end
+    end
+    return temperature, minimum_temperature, maximum_temperature
+end
+
+---Widen a fluid amount in ingredient position: any single-temperature tag
+---passes through; otherwise the bounds are filled to [default_temperature,
+---max_temperature] and clamped to the fluid's physical range. The clamp
+---also tames the FLT-sentinel values Factorio returns for unset bounds
+---(e.g. -3.4e38 for an unset minimum_temperature).
+---@param fluid_name string
+---@param temperature number?
+---@param minimum_temperature number?
+---@param maximum_temperature number?
+---@return number? temperature
+---@return number? minimum_temperature
+---@return number? maximum_temperature
+function M.resolve_bare_fluid_ingredient(fluid_name, temperature, minimum_temperature, maximum_temperature)
+    if temperature ~= nil then
+        return temperature, minimum_temperature, maximum_temperature
+    end
+    local proto = prototypes.fluid[fluid_name]
+    if not proto then
+        return temperature, minimum_temperature, maximum_temperature
+    end
+    local min = minimum_temperature or proto.default_temperature
+    local max = maximum_temperature or proto.max_temperature
+    if min < proto.default_temperature then min = proto.default_temperature end
+    if max > proto.max_temperature then max = proto.max_temperature end
+    return temperature, min, max
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@param quality QualityID

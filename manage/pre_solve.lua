@@ -140,38 +140,29 @@ function M.to_normalized_production_lines(production_lines)
     return normalized_production_lines
 end
 
----Fill in implicit temperature info for fluid NormalizedAmounts and clamp
----explicit bounds to the fluid's physical range. Bare fluid products resolve
----to the fluid's default_temperature (single). Bare or partially-tagged fluid
----ingredients resolve to [default_temperature, max_temperature]; the clamp
----also tames the FLT-sentinel values Factorio returns for unset bounds
----(e.g. -3.4e38 for an unset minimum_temperature).
----Non-fluid amounts and tagged single-temperature outputs pass through.
+---Fill in implicit temperature info on every fluid NormalizedAmount in the
+---given lines (see acc.resolve_bare_fluid_product / _ingredient for the exact
+---semantics). Mutates in place because the LP variable names downstream are
+---computed from these same NormalizedAmounts.
 ---@param normalized_production_lines NormalizedProductionLine[]
 function M.resolve_bare_fluids(normalized_production_lines)
     for _, line in ipairs(normalized_production_lines) do
         for _, product in ipairs(line.products) do
-            if product.type == "fluid" and product.temperature == nil
-                and product.minimum_temperature == nil
-                and product.maximum_temperature == nil
-            then
-                local proto = prototypes.fluid[product.name]
-                if proto then
-                    product.temperature = proto.default_temperature
-                end
+            if product.type == "fluid" then
+                product.temperature, product.minimum_temperature, product.maximum_temperature =
+                    acc.resolve_bare_fluid_product(product.name,
+                        product.temperature,
+                        product.minimum_temperature,
+                        product.maximum_temperature)
             end
         end
         for _, ingredient in ipairs(line.ingredients) do
-            if ingredient.type == "fluid" and ingredient.temperature == nil then
-                local proto = prototypes.fluid[ingredient.name]
-                if proto then
-                    local min = ingredient.minimum_temperature or proto.default_temperature
-                    local max = ingredient.maximum_temperature or proto.max_temperature
-                    if min < proto.default_temperature then min = proto.default_temperature end
-                    if max > proto.max_temperature then max = proto.max_temperature end
-                    ingredient.minimum_temperature = min
-                    ingredient.maximum_temperature = max
-                end
+            if ingredient.type == "fluid" then
+                ingredient.temperature, ingredient.minimum_temperature, ingredient.maximum_temperature =
+                    acc.resolve_bare_fluid_ingredient(ingredient.name,
+                        ingredient.temperature,
+                        ingredient.minimum_temperature,
+                        ingredient.maximum_temperature)
             end
         end
     end
