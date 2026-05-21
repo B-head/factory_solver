@@ -103,6 +103,21 @@ function M.reinit_force_data(force_index)
                 tn.typed_name_migration(line.machine_typed_name)
                 tn.typed_name_migration(line.fuel_typed_name)
 
+                -- Legacy lines for burns_fluid=false machines held a bare or
+                -- range-only fluid TypedName; the picker now offers concrete
+                -- temperature variants. Pin them to a sensible default so the
+                -- selection lights up a picker button after upgrade.
+                if line.fuel_typed_name
+                    and line.fuel_typed_name.type == "fluid"
+                    and line.fuel_typed_name.temperature == nil
+                then
+                    local machine = tn.typed_name_to_machine(line.machine_typed_name)
+                    local variant = acc.get_default_fluid_fuel_variant(machine)
+                    if variant then
+                        line.fuel_typed_name = tn.craft_to_typed_name(variant)
+                    end
+                end
+
                 if line.module_names then
                     local module_typed_names = {}
                     for _, name in pairs(line.module_names) do

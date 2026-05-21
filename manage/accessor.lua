@@ -654,6 +654,53 @@ function M.get_fluid_fuel_temperature_variants(machine)
     return fs_util.sort_prototypes(results)
 end
 
+---Picks the best single-temperature variant for a burns_fluid=false
+---machine's fuel slot. Returns nil if the machine has no variants or isn't
+---a heat-extraction fluid consumer. The choice mirrors the old implicit
+---default: highest temperature ≤ machine cap (maximum useful energy, no
+---wasted heat); if every variant is above the cap, fall back to the lowest
+---(least waste). Used by migration to pin legacy range-only or bare-fluid
+---fuel selections onto a concrete picker button.
+---@param machine LuaEntityPrototype
+---@return VirtualMaterial?
+function M.get_default_fluid_fuel_variant(machine)
+    local variants = M.get_fluid_fuel_temperature_variants(machine)
+    if not variants or #variants == 0 then return nil end
+
+    local cap
+    if machine.fluid_energy_source_prototype then
+        cap = machine.fluid_energy_source_prototype.maximum_temperature
+    elseif machine.type == "generator" then
+        cap = machine.maximum_temperature
+    end
+    if cap and cap <= 0 then cap = nil end
+
+    ---@param v VirtualMaterial
+    ---@return number?
+    local function temp_of(v)
+        return tonumber(string.match(v.name, "@(%-?[%d.]+)$"))
+    end
+
+    local best, best_t
+    for _, v in ipairs(variants) do
+        local t = temp_of(v)
+        if t and (not cap or t <= cap) then
+            if best_t == nil or t > best_t then
+                best, best_t = v, t
+            end
+        end
+    end
+    if best then return best end
+
+    for _, v in ipairs(variants) do
+        local t = temp_of(v)
+        if t and (best_t == nil or t < best_t) then
+            best, best_t = v, t
+        end
+    end
+    return best
+end
+
 ---@param recipe LuaRecipePrototype | VirtualRecipe
 ---@return number
 function M.get_crafting_energy(recipe)
