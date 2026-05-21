@@ -1,6 +1,5 @@
 local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
-local acc = require "manage/accessor"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
@@ -50,7 +49,7 @@ function handlers.on_make_constraints_table(event)
         do
             local amount = data.limit_amount_per_second
             if not (data.type == "recipe" or data.type == "virtual_recipe") then
-                amount = acc.to_scale(amount, player_data.time_scale)
+                amount = fs_util.to_scale(amount, player_data.time_scale)
             end
             local def = {
                 type = "textfield",
@@ -160,7 +159,7 @@ function handlers.on_limit_amount_confirmed(event)
     end))
     local amount = tonumber(elem.text) or 0
     if not (typed_name.type == "recipe" or typed_name.type == "virtual_recipe") then
-        amount = acc.from_scale(amount, player_data.time_scale)
+        amount = fs_util.from_scale(amount, player_data.time_scale)
     end
 
     save.update_constraint(solution, pos, { limit_amount_per_second = amount })

@@ -349,7 +349,7 @@ function handlers.update_amount(event)
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    elem.number = acc.to_scale(raw_amount, player_data.time_scale) * (quantity_of_machines_required + acc.tolerance)
+    elem.number = fs_util.to_scale(raw_amount, player_data.time_scale) * (quantity_of_machines_required + acc.tolerance)
 end
 
 ---@param event EventDataTrait
@@ -362,7 +362,7 @@ function handlers.update_power(event)
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
+    local amount = fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = common.format_power(amount)
 end
 
@@ -376,7 +376,7 @@ function handlers.update_pollution(event)
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    local amount = acc.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
+    local amount = fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = flib_format.number(amount, true, 5)
 end
 

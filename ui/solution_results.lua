@@ -25,7 +25,7 @@ function handlers.make_final_products_table(event)
         if number <= acc.tolerance then
             return
         end
-        number = acc.to_scale(number, player_data.time_scale)
+        number = fs_util.to_scale(number, player_data.time_scale)
         
         local craft = tn.typed_name_to_material(typed_name)
         local is_hidden = acc.is_hidden(craft)
@@ -78,7 +78,7 @@ function handlers.make_basic_ingredients_table(event)
         if -acc.tolerance <= number then
             return
         end
-        number = acc.to_scale(-number, player_data.time_scale)
+        number = fs_util.to_scale(-number, player_data.time_scale)
 
         local craft = tn.typed_name_to_material(typed_name)
         local is_hidden = acc.is_hidden(craft)
@@ -146,7 +146,7 @@ function handlers.update_total_power_label(event)
         return
     end
 
-    local total_power = acc.to_scale(save.get_total_power(solution), player_data.time_scale)
+    local total_power = fs_util.to_scale(save.get_total_power(solution), player_data.time_scale)
     elem.caption = common.format_power(total_power)
 end
 
@@ -161,7 +161,7 @@ function handlers.update_total_pollution_label(event)
         return
     end
 
-    local total_pollution = acc.to_scale(save.get_total_pollution(solution), player_data.time_scale)
+    local total_pollution = fs_util.to_scale(save.get_total_pollution(solution), player_data.time_scale)
     elem.caption = flib_format.number(total_pollution, true, 5)
 end
 

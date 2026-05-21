@@ -46,7 +46,7 @@ function M.reinit_player_data(player_index)
     ---@diagnostic disable: inject-field
     local player_data = storage.players[player_index]
     if player_data then
-        if not acc.scale_per_second[player_data.time_scale] then
+        if not fs_util.scale_per_second[player_data.time_scale] then
             player_data.time_scale = "minute"
         end
         if false then

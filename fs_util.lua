@@ -3,6 +3,35 @@ local flib_table = require "__flib__/table"
 
 local M = {}
 
+---@type table<TimeScale, number>
+M.scale_per_second = {
+    second = 1,
+    five_seconds = 5,
+    minute = 60,
+    ten_minutes = 10 * 60,
+    hour = 60 * 60,
+    ten_hours = 10 * 60 * 60,
+    fifty_hours = 50 * 60 * 60,
+    two_hundred_fifty_hours = 250 * 60 * 60,
+    thousand_hours = 1000 * 60 * 60,
+}
+
+---comment
+---@param value number
+---@param scale TimeScale
+---@return number
+function M.to_scale(value, scale)
+    return value * M.scale_per_second[scale]
+end
+
+---comment
+---@param value number
+---@param scale TimeScale
+---@return number
+function M.from_scale(value, scale)
+    return value / M.scale_per_second[scale]
+end
+
 ---Returns an index of first element that matches the condition.
 ---@generic K, V
 ---@param tbl table<K, V>
