@@ -64,6 +64,8 @@ function M.create_virtuals()
             result_crafts = M.create_fusion_reactor_virtual(entity)
         elseif entity.type == "fusion-generator" then
             result_crafts = M.create_fusion_generator_virtual(entity)
+        elseif entity.type == "thruster" then
+            result_crafts = M.create_thruster_virtual(entity)
         elseif entity.type == "resource" then
             result_crafts = M.create_resource_virtual(entity, planet_index)
         end
@@ -662,6 +664,63 @@ function M.create_fusion_generator_virtual(fusion_generator_prototype)
         fixed_crafting_machine = tn.craft_to_typed_name(fusion_generator_prototype),
         hidden = fusion_generator_prototype.hidden,
         source_entity_name = fusion_generator_prototype.name,
+    }
+
+    return { recipe }
+end
+
+---Space Age thruster: consumes two input fluids (fuel + oxidizer) and produces
+---no LP-modeled output. Thrust / effectivity is deliberately not modeled — the
+---recipe only exists so the LP can size the fuel/oxidizer supply chain to
+---sustain N thrusters at max_performance. Per-second consumption per fluidbox
+---at the base (quality level 0) is max_performance.fluid_usage * second_per_tick
+---(vanilla: 2 * 60 = 120/s each). LuaEntityPrototype.get_fluid_usage_per_tick is
+---restricted to Generator / FusionGenerator / FusionReactor and is not available
+---on thruster, so the rate is read from the max_performance struct directly.
+---Quality scaling (vanilla: legendary consumes 300/s = 2.5×, matching the
+---in-game tooltip) is layered on by acc.get_crafting_speed's default
+---`1 + 0.3·quality_level` fallback — thruster exposes no get_crafting_speed /
+---mining_speed, so it naturally takes that path with no special case. No
+---crafting_speed_cap is set: thruster accepts no modules or beacons, so the
+---only multiplier above 1 is the quality fallback itself, and capping at 1
+---would silently undo it.
+---@param thruster_prototype LuaEntityPrototype
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_thruster_virtual(thruster_prototype)
+    local fuel_filter = acc.get_fluidbox_filter_prototype(thruster_prototype, 1)
+    local oxidizer_filter = acc.get_fluidbox_filter_prototype(thruster_prototype, 2)
+    local perf = thruster_prototype.max_performance
+    if not fuel_filter or not oxidizer_filter or not perf then
+        return {}
+    end
+
+    local rate = perf.fluid_usage * acc.second_per_tick
+
+    ---@type VirtualRecipe
+    local recipe = {
+        type = "virtual_recipe",
+        name = "<run>" .. thruster_prototype.name,
+        sprite_path = "entity/" .. thruster_prototype.name,
+        elem_tooltip = { type = "entity", name = thruster_prototype.name },
+        order = thruster_prototype.order,
+        group_name = thruster_prototype.group.name,
+        subgroup_name = thruster_prototype.subgroup.name,
+        products = {},
+        ingredients = {
+            {
+                type = "fluid",
+                name = fuel_filter.name,
+                amount = rate,
+            },
+            {
+                type = "fluid",
+                name = oxidizer_filter.name,
+                amount = rate,
+            },
+        },
+        fixed_crafting_machine = tn.craft_to_typed_name(thruster_prototype),
+        hidden = thruster_prototype.hidden,
+        source_entity_name = thruster_prototype.name,
     }
 
     return { recipe }
