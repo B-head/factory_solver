@@ -99,27 +99,40 @@ function M.create_virtuals()
 end
 
 ---Materialize a VirtualMaterial entry for each unique (fluid, single|range,
----temperature) tuple that appears as a temperature-tagged product or
----ingredient anywhere in the recipe set, including the freshly built virtual
----recipes. These entries surface in the constraint picker's virtual tab so a
----user can target a specific temperature variant. The name string matches
----the LP variable encoding so craft_to_typed_name can decode it back to a
----fluid TypedName with temperature info.
+---temperature) tuple that appears as a fluid product or ingredient anywhere
+---in the recipe set, including the freshly built virtual recipes. Bare fluid
+---slots (no temperature filter) are resolved through acc.resolve_bare_fluid_*
+---using the exact same rules pre_solve applies before LP construction, so the
+---picker exposes the LP variable that the constraint will actually bind to:
+---bare products materialize as single-T at default_temperature, bare ingredients
+---materialize as range-T spanning [default_temperature, max_temperature]. These
+---entries surface in the constraint picker's virtual tab; the name string
+---matches the LP variable encoding so craft_to_typed_name can decode it back
+---to a fluid TypedName with temperature info.
 ---@param materials table<string, VirtualMaterial>
 ---@param recipes table<string, VirtualRecipe>
 function M.add_fluid_temperature_virtuals(materials, recipes)
     local function visit_products(products)
         for _, product in ipairs(products) do
-            if product.type == "fluid" and product.temperature then
-                M.register_fluid_temperature_single(materials, product.name, product.temperature)
+            if product.type == "fluid" then
+                local t = acc.resolve_bare_fluid_product(product.name,
+                    product.temperature, product.minimum_temperature, product.maximum_temperature)
+                if t then
+                    M.register_fluid_temperature_single(materials, product.name, t)
+                end
             end
         end
     end
     local function visit_ingredients(ingredients)
         for _, ingredient in ipairs(ingredients) do
-            if ingredient.type == "fluid" and ingredient.minimum_temperature then
-                M.register_fluid_temperature_range(materials, ingredient.name,
-                    ingredient.minimum_temperature, ingredient.maximum_temperature)
+            if ingredient.type == "fluid" then
+                local t, lo, hi = acc.resolve_bare_fluid_ingredient(ingredient.name,
+                    ingredient.temperature, ingredient.minimum_temperature, ingredient.maximum_temperature)
+                if t then
+                    M.register_fluid_temperature_single(materials, ingredient.name, t)
+                elseif lo and hi then
+                    M.register_fluid_temperature_range(materials, ingredient.name, lo, hi)
+                end
             end
         end
     end
