@@ -1,6 +1,7 @@
 local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
+local preset = require "manage/preset"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
@@ -428,7 +429,7 @@ function handlers.on_make_fuel_table(event)
                 return value.name == fuel_name
             end)
             if not pos then
-                fuel_typed_name = assert(save.get_fuel_preset(event.player_index, machine_typed_name))
+                fuel_typed_name = assert(preset.get_fuel_preset(event.player_index, machine_typed_name))
                 dialog_tags.fuel_typed_name = fuel_typed_name
             end
         end

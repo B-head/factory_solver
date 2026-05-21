@@ -178,4 +178,58 @@ function M.create_machine_presets(origin)
     return ret
 end
 
+---comment
+---@param player_index integer
+---@param machine_typed_name TypedName
+---@return TypedName?
+function M.get_fuel_preset(player_index, machine_typed_name)
+    local player_data = storage.players[player_index]
+
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+
+    local fixed_fuel = acc.try_get_fixed_fuel(machine)
+    if fixed_fuel then
+        return fixed_fuel
+    end
+
+    if acc.is_use_any_fluid_fuel(machine) then
+        return assert(player_data.presets.fluid_fuel)
+    end
+
+    local fuel_categories = acc.try_get_fuel_categories(machine)
+    if fuel_categories then
+        local joined_category = acc.join_categories(fuel_categories)
+        return assert(player_data.presets.fuel[joined_category])
+    end
+
+    return nil
+end
+
+---comment
+---@param player_index integer
+---@param recipe_typed_name TypedName
+---@return TypedName
+function M.get_machine_preset(player_index, recipe_typed_name)
+    local player_data = storage.players[player_index]
+    if recipe_typed_name.type == "virtual_recipe" then
+        local recipe = storage.virtuals.recipe[recipe_typed_name.name]
+        if recipe.fixed_crafting_machine then
+            return recipe.fixed_crafting_machine
+        elseif recipe.resource_category then
+            return assert(player_data.presets.resource[recipe.resource_category])
+        elseif recipe.pumped_fluid_name then
+            return assert(player_data.presets.pump[recipe.pumped_fluid_name])
+        elseif recipe.consumed_pack_name then
+            return assert(player_data.presets.lab[recipe.consumed_pack_name])
+        else
+            return assert()
+        end
+    elseif recipe_typed_name.type == "recipe" then
+        local recipe = prototypes.recipe[recipe_typed_name.name]
+        return assert(player_data.presets.machine[recipe.category])
+    else
+        return assert()
+    end
+end
+
 return M
