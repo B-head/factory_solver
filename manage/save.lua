@@ -2,7 +2,8 @@ local flib_table = require "__flib__/table"
 local flib_math = require "__flib__/math"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
-local info = require "manage/information"
+local preset = require "manage/preset"
+local relation = require "manage/relation"
 local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
 
@@ -26,12 +27,12 @@ function M.init_player_data(player_index)
             time_scale = "minute",
             amount_unit = "time",
             presets = {
-                fuel = info.create_fuel_presets(),
-                fluid_fuel = info.create_fluid_fuel_preset(),
-                resource = info.create_resource_presets(),
-                machine = info.create_machine_presets(),
-                pump = info.create_pump_presets(),
-                lab = info.create_lab_presets(),
+                fuel = preset.create_fuel_presets(),
+                fluid_fuel = preset.create_fluid_fuel_preset(),
+                resource = preset.create_resource_presets(),
+                machine = preset.create_machine_presets(),
+                pump = preset.create_pump_presets(),
+                lab = preset.create_lab_presets(),
             },
             opened_gui = {},
         }
@@ -53,20 +54,20 @@ function M.reinit_player_data(player_index)
         end
         local presets = player_data.presets
         if presets then
-            presets.fuel = info.create_fuel_presets(presets.fuel)
-            presets.fluid_fuel = info.create_fluid_fuel_preset(presets.fluid_fuel)
-            presets.resource = info.create_resource_presets(presets.resource)
-            presets.machine = info.create_machine_presets(presets.machine)
-            presets.pump = info.create_pump_presets(presets.pump)
-            presets.lab = info.create_lab_presets(presets.lab)
+            presets.fuel = preset.create_fuel_presets(presets.fuel)
+            presets.fluid_fuel = preset.create_fluid_fuel_preset(presets.fluid_fuel)
+            presets.resource = preset.create_resource_presets(presets.resource)
+            presets.machine = preset.create_machine_presets(presets.machine)
+            presets.pump = preset.create_pump_presets(presets.pump)
+            presets.lab = preset.create_lab_presets(presets.lab)
         else
             player_data.presets = {
-                fuel = info.create_fuel_presets(player_data.fuel_presets),
-                fluid_fuel = info.create_fluid_fuel_preset(),
-                resource = info.create_resource_presets(player_data.resource_presets),
-                machine = info.create_machine_presets(player_data.machine_presets),
-                pump = info.create_pump_presets(),
-                lab = info.create_lab_presets(),
+                fuel = preset.create_fuel_presets(player_data.fuel_presets),
+                fluid_fuel = preset.create_fluid_fuel_preset(),
+                resource = preset.create_resource_presets(player_data.resource_presets),
+                machine = preset.create_machine_presets(player_data.machine_presets),
+                pump = preset.create_pump_presets(),
+                lab = preset.create_lab_presets(),
             }
             player_data.fuel_presets = nil
             player_data.resource_presets = nil
@@ -242,7 +243,7 @@ function M.get_relation_to_recipes(player_index)
     local force_data = storage.forces[force_index]
     if force_data.relation_to_recipes_needs_updating then
         force_data.relation_to_recipes_needs_updating = false
-        force_data.relation_to_recipes = info.create_relation_to_recipes(force_index)
+        force_data.relation_to_recipes = relation.create_relation_to_recipes(force_index)
     end
     return force_data.relation_to_recipes
 end
@@ -257,7 +258,7 @@ function M.get_group_infos(player_index, filter_type)
     if force_data.group_infos_needs_updating then
         local relation_to_recipes = M.get_relation_to_recipes(player_index)
         force_data.group_infos_needs_updating = false
-        force_data.group_infos = info.create_group_infos(force_index, relation_to_recipes)
+        force_data.group_infos = relation.create_group_infos(force_index, relation_to_recipes)
     end
     return assert(force_data.group_infos[filter_type])
 end
