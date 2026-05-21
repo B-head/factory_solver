@@ -80,6 +80,23 @@ function M.reinit_player_data(player_index)
     ---@diagnostic enable: inject-field
 end
 
+---Build a zeroed ResearchBonuses. Opt-in by design: the solver only sees
+---research bonuses after the user explicitly clicks Apply in the dialog, so
+---both fresh saves and migrated saves start with everything at 0 (and only
+---"normal" quality unlocked). Quality expansion is similarly gated until the
+---user opts in via the dialog.
+---@return ResearchBonuses
+function M.default_research_bonuses()
+    return {
+        recipe_productivity = {},
+        mining_drill_productivity = 0,
+        laboratory_productivity = 0,
+        laboratory_speed = 0,
+        beacon_distribution = 0,
+        unlocked_qualities = { normal = true },
+    }
+end
+
 ---comment
 ---@param force_index integer
 function M.init_force_data(force_index)
@@ -90,6 +107,7 @@ function M.init_force_data(force_index)
             group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {} },
             group_infos_needs_updating = true,
             solutions = {},
+            research_bonuses = M.default_research_bonuses(),
         }
     end
 end
@@ -103,6 +121,13 @@ function M.reinit_force_data(force_index)
     if force_data then
         force_data.relation_to_recipes_needs_updating = true
         force_data.group_infos_needs_updating = true
+
+        -- Older saves predate research_bonuses. Initialize to zeros so the
+        -- ongoing behavior is unchanged unless the user opens the dialog and
+        -- opts in. LuaForce values are deliberately not snapshotted here.
+        if not force_data.research_bonuses then
+            force_data.research_bonuses = M.default_research_bonuses()
+        end
 
         for _, solution in pairs(force_data.solutions) do
             for _, line in ipairs(solution.production_lines) do
@@ -233,6 +258,94 @@ function M.get_selected_solution(player_index)
     local force_index = game.players[player_index].force_index
     local player_data = storage.players[player_index]
     return storage.forces[force_index].solutions[player_data.selected_solution]
+end
+
+---Enumerate every recipe that has at least one technology effect of type
+---`change-recipe-productivity`. Stable across forces (data-stage prototype
+---scan), so the dialog can render a fixed row list and Sync can iterate over
+---the same recipe set.
+---@return string[]
+function M.list_productivity_research_recipes()
+    local seen = {}
+    local result = {}
+    for _, tech in pairs(prototypes.technology) do
+        for _, effect in ipairs(tech.effects or {}) do
+            if effect.type == "change-recipe-productivity" and effect.recipe then
+                if not seen[effect.recipe] then
+                    seen[effect.recipe] = true
+                    flib_table.insert(result, effect.recipe)
+                end
+            end
+        end
+    end
+    flib_table.sort(result)
+    return result
+end
+
+---Round-trip through %g so float noise from research-unit additions
+---(e.g. 0.10000000149012) lands on the same value as the user would have
+---typed (0.1). The discarded tail is ~1e-9, well below the LP tolerance,
+---so this is cosmetic from the solver's standpoint but keeps the dialog's
+---displayed text and the committed snapshot identical.
+---@param value number
+---@return number
+local function cleanup_float(value)
+    return tonumber(string.format("%g", value)) or 0
+end
+
+---Snapshot the current LuaForce research-bonus values into a fresh
+---ResearchBonuses table. Reading individual force properties by name is
+---deterministic across clients (per-name lookups, no iteration over engine
+---tables), so this is safe to call from a lockstep GUI handler.
+---@param force LuaForce
+---@return ResearchBonuses
+function M.snapshot_force_research_bonuses(force)
+    local bonuses = M.default_research_bonuses()
+    bonuses.mining_drill_productivity = cleanup_float(force.mining_drill_productivity_bonus)
+    bonuses.laboratory_productivity = cleanup_float(force.laboratory_productivity_bonus)
+    bonuses.laboratory_speed = cleanup_float(force.laboratory_speed_modifier)
+    bonuses.beacon_distribution = cleanup_float(force.beacon_distribution_modifier)
+
+    for _, recipe_name in ipairs(M.list_productivity_research_recipes()) do
+        local raw = force.recipes[recipe_name] and force.recipes[recipe_name].productivity_bonus or 0
+        local value = cleanup_float(raw)
+        if value ~= 0 then
+            bonuses.recipe_productivity[recipe_name] = value
+        end
+    end
+
+    bonuses.unlocked_qualities = { normal = true }
+    for _, quality in pairs(prototypes.quality) do
+        if not quality.hidden and force.is_quality_unlocked(quality) then
+            bonuses.unlocked_qualities[quality.name] = true
+        end
+    end
+
+    return bonuses
+end
+
+---Commit a new ResearchBonuses snapshot into the force and mark every
+---solution as needing a fresh solve. Heavy IPM work is deferred to
+---`on_tick` so the click handler itself stays cheap (multiplayer lockstep
+---would otherwise pay the convergence cost on every client at the same
+---tick).
+---@param force_data ForceLocalData
+---@param new_bonuses ResearchBonuses
+function M.apply_research_bonuses(force_data, new_bonuses)
+    force_data.research_bonuses = new_bonuses
+    for _, solution in pairs(force_data.solutions) do
+        solution.problem = nil
+        solution.raw_variables = nil
+        solution.solver_state = "ready"
+    end
+end
+
+---comment
+---@param player_index integer
+---@return ResearchBonuses
+function M.get_research_bonuses(player_index)
+    local force_index = game.players[player_index].force_index
+    return storage.forces[force_index].research_bonuses
 end
 
 ---comment

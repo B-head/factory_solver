@@ -64,10 +64,10 @@ local function plant_missing_prototype_solution(player_index)
     player_data.selected_solution = solution_name
 end
 
-local function exercise_read_side(solution)
-    report.get_total_amounts(solution)
-    report.get_total_power(solution)
-    report.get_total_pollution(solution)
+local function exercise_read_side(player_index, solution)
+    report.get_total_amounts(player_index, solution)
+    report.get_total_power(player_index, solution)
+    report.get_total_pollution(player_index, solution)
 end
 
 function M.on_player_created(event)
@@ -105,7 +105,7 @@ function M.on_tick(event)
     -- Solver reached a terminal state without raising. Also confirm the
     -- read-side total functions don't choke on the same Solution -- that is
     -- the path that actually crashed in the original report.
-    local ok, err = pcall(exercise_read_side, solution)
+    local ok, err = pcall(exercise_read_side, state.player_index, solution)
     if not ok then
         emit_verdict("FAIL", "read-side total raised: " .. tostring(err))
         return

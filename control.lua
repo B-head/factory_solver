@@ -135,9 +135,9 @@ end)
 script.on_event(defines.events.on_tick, function(event)
     flib_dictionary.on_tick()
 
-    local solution = pre_solve.find_the_need_for_solve()
-    if solution then
-        pre_solve.forwerd_solve(solution)
+    local force_data, solution = pre_solve.find_the_need_for_solve()
+    if force_data and solution then
+        pre_solve.forwerd_solve(force_data, solution)
 
         for _, player in pairs(game.players) do
             local window = player.gui.screen["factory_solver_main_window"]

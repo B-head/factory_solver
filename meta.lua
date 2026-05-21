@@ -50,6 +50,19 @@ __factory_solver__storage = {}
 ---@field group_infos GroupInfos
 ---@field group_infos_needs_updating boolean
 ---@field solutions table<string, Solution>
+---@field research_bonuses ResearchBonuses
+
+---Per-force snapshot of research-derived bonuses. Always opt-in: defaults to
+---all zero / "normal" only, populated only when the user clicks Apply in the
+---Research bonuses dialog. The solver reads this snapshot; LuaForce runtime
+---values are never read inside the solve path.
+---@class ResearchBonuses
+---@field recipe_productivity table<string, number>
+---@field mining_drill_productivity number
+---@field laboratory_productivity number
+---@field laboratory_speed number
+---@field beacon_distribution number
+---@field unlocked_qualities table<string, boolean>
 
 ---@class RelationToRecipes
 ---@field enabled_recipe table<string, boolean>

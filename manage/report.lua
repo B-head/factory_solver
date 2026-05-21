@@ -5,11 +5,13 @@ local tn = require "manage/typed_name"
 local M = {}
 
 ---comment
+---@param player_index integer
 ---@param solution Solution
 ---@return table<string, number>
 ---@return table<string, { typed_name: TypedName, amount_per_second: number }>
 ---@return table<string, number>
-function M.get_total_amounts(solution)
+function M.get_total_amounts(player_index, solution)
+    local bonuses = save.get_research_bonuses(player_index)
     ---@type table<string, number>
     local item_totals = {}
     ---@type table<string, { typed_name: TypedName, amount_per_second: number }>
@@ -35,7 +37,7 @@ function M.get_total_amounts(solution)
     end
 
     for _, line in ipairs(solution.production_lines) do
-        local n = acc.normalize_production_line(line)
+        local n = acc.normalize_production_line(line, bonuses)
         local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
         for _, amount in ipairs(n.products) do
@@ -137,13 +139,15 @@ function M.get_total_amounts(solution)
 end
 
 ---comment
+---@param player_index integer
 ---@param solution Solution
 ---@return number
-function M.get_total_power(solution)
+function M.get_total_power(player_index, solution)
+    local bonuses = save.get_research_bonuses(player_index)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local n = acc.normalize_production_line(line)
+        local n = acc.normalize_production_line(line, bonuses)
         local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, line.recipe_typed_name)
         total = total + n.power_per_second * quantity_of_machines_required
     end
@@ -152,13 +156,15 @@ function M.get_total_power(solution)
 end
 
 ---comment
+---@param player_index integer
 ---@param solution Solution
 ---@return number
-function M.get_total_pollution(solution)
+function M.get_total_pollution(player_index, solution)
+    local bonuses = save.get_research_bonuses(player_index)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local n = acc.normalize_production_line(line)
+        local n = acc.normalize_production_line(line, bonuses)
         local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, line.recipe_typed_name)
         total = total + n.pollution_per_second * quantity_of_machines_required
     end

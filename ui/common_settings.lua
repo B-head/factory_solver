@@ -3,6 +3,7 @@ local fs_util = require "fs_util"
 local save = require "manage/save"
 local common = require "ui/common"
 local machine_presets = require "ui/machine_presets"
+local research_bonuses = require "ui/research_bonuses"
 
 ---@type table<TimeScale, integer>
 local time_scale_to_index = {
@@ -41,6 +42,11 @@ end
 ---@param event EventData.on_gui_click
 function handlers.on_open_machine_preset_dialog_button_click(event)
     common.open_gui(event.player_index, true, machine_presets)
+end
+
+---@param event EventData.on_gui_click
+function handlers.on_open_research_bonuses_dialog_button_click(event)
+    common.open_gui(event.player_index, true, research_bonuses)
 end
 
 fs_util.add_handlers(handlers)
@@ -84,6 +90,13 @@ return {
         caption = "Machine presets",
         handler = {
             [defines.events.on_gui_click] = handlers.on_open_machine_preset_dialog_button_click,
+        },
+    },
+    {
+        type = "button",
+        caption = "Research bonuses",
+        handler = {
+            [defines.events.on_gui_click] = handlers.on_open_research_bonuses_dialog_button_click,
         },
     },
 }

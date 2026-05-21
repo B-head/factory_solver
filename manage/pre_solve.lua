@@ -8,6 +8,7 @@ local iterate_limit = 600
 local M = {}
 
 ---comment
+---@return ForceLocalData?
 ---@return Solution?
 function M.find_the_need_for_solve()
     for _, force in pairs(game.forces) do
@@ -18,23 +19,26 @@ function M.find_the_need_for_solve()
 
         for _, solution in pairs(force_data.solutions) do
             if type(solution.solver_state) == "number" or solution.solver_state == "ready" then
-                return solution
+                return force_data, solution
             end
         end
 
         ::continue::
     end
-    return nil
+    return nil, nil
 end
 
 ---comment
+---@param force_data ForceLocalData
 ---@param solution Solution
-function M.forwerd_solve(solution)
+function M.forwerd_solve(force_data, solution)
+    local bonuses = force_data.research_bonuses
+
     if solution.solver_state == "ready" then
         solution.problem = create_problem.create_problem(
             solution.name,
             solution.constraints,
-            M.to_normalized_production_lines(solution.production_lines)
+            M.to_normalized_production_lines(solution.production_lines, bonuses)
         )
         solution.raw_variables = nil
     end
@@ -54,18 +58,20 @@ end
 
 ---comment
 ---@param production_lines ProductionLine[]
+---@param bonuses ResearchBonuses?
 ---@return NormalizedProductionLine[]
-function M.to_normalized_production_lines(production_lines)
+function M.to_normalized_production_lines(production_lines, bonuses)
     local normalized_production_lines = {}
     for _, line in ipairs(production_lines) do
-        local normalized_line, effectivity = acc.normalize_production_line(line)
+        local normalized_line, effectivity = acc.normalize_production_line(line, bonuses)
 
         -- Quality decomposition is LP-only: it splits one per-quality product
         -- amount into the distribution that module quality bonus would
         -- actually emit. UI and totals consume the pre-decomposition amount.
         local decomposed = {}
         for _, product in ipairs(normalized_line.products) do
-            for _, value in ipairs(M.quality_decomposition(product, effectivity.quality)) do
+            local unlocked = bonuses and bonuses.unlocked_qualities or nil
+            for _, value in ipairs(M.quality_decomposition(product, effectivity.quality, unlocked)) do
                 flib_table.insert(decomposed, value)
             end
         end
@@ -114,8 +120,9 @@ end
 ---comment
 ---@param normalized_amount NormalizedAmount
 ---@param effectivity_quality number
+---@param unlocked_qualities table<string, boolean>?
 ---@return NormalizedAmount[]
-function M.quality_decomposition(normalized_amount, effectivity_quality)
+function M.quality_decomposition(normalized_amount, effectivity_quality, unlocked_qualities)
     if effectivity_quality <= 0 then
         return { normalized_amount }
     end
@@ -128,7 +135,13 @@ function M.quality_decomposition(normalized_amount, effectivity_quality)
         local next_quality
         local next_probability
         local quality_prototype = prototypes.quality[current_quality]
-        if quality_prototype.next then
+        -- Research-derived quality gate: when the user has not unlocked a
+        -- higher quality, stop the chain even if the prototype tree still
+        -- offers a next step. unlocked_qualities=nil means "no force snapshot"
+        -- and falls back to the prototype-level chain (legacy behavior).
+        local next_unlocked = quality_prototype.next
+            and (not unlocked_qualities or unlocked_qualities[quality_prototype.next.name])
+        if next_unlocked then
             next_quality = quality_prototype.next.name
             if quality_prototype.name == normalized_amount.quality then
                 next_probability = math.min(effectivity_quality * quality_prototype.next_probability, 1)

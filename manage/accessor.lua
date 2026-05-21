@@ -966,8 +966,9 @@ end
 ---@param machine LuaEntityPrototype
 ---@param module_typed_names table<string, TypedName>
 ---@param affected_by_beacons AffectedByBeacon[]
+---@param bonuses ResearchBonuses?
 ---@return table<string, table<string, number>>
-function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
+function M.get_total_modules(machine, module_typed_names, affected_by_beacons, bonuses)
     local module_counts = {}
 
     ---@param typed_name TypedName
@@ -988,11 +989,19 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
         count(typed_name, 1)
     end
 
+    -- Research-derived beacon distribution scales beacon contribution
+    -- multiplicatively on top of the beacon prototype's own
+    -- distribution_effectivity. Module contribution from machine inventory is
+    -- unaffected.
+    local beacon_multiplier = 1 + ((bonuses and bonuses.beacon_distribution) or 0)
+
     for _, affected_by_beacon in ipairs(affected_by_beacons) do
         local beacon_typed_name = affected_by_beacon.beacon_typed_name
         local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
         if beacon then
-            local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
+            local effectivity = assert(beacon.distribution_effectivity)
+                * affected_by_beacon.beacon_quantity
+                * beacon_multiplier
             local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
                 beacon.module_inventory_size)
 
@@ -1008,8 +1017,11 @@ end
 ---comment
 ---@param module_counts table<string, table<string, number>>
 ---@param effect_receiver EffectReceiver?
+---@param recipe_typed_name TypedName?
+---@param machine LuaEntityPrototype?
+---@param bonuses ResearchBonuses?
 ---@return ModuleEffects
-function M.get_total_effectivity(module_counts, effect_receiver)
+function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_name, machine, bonuses)
     ---@type ModuleEffects
     local ret = {
         speed = 1,
@@ -1067,6 +1079,24 @@ function M.get_total_effectivity(module_counts, effect_receiver)
         ret.quality = ret.quality + (base_effect.quality or 0)
     end
 
+    -- Research-derived additive bonuses. Folded in before the min-clamps so
+    -- that, like module/beacon effects, a non-zero research bonus can lift
+    -- effectivity above its floor.
+    if bonuses then
+        if recipe_typed_name and recipe_typed_name.type == "recipe" then
+            ret.productivity = ret.productivity
+                + (bonuses.recipe_productivity[recipe_typed_name.name] or 0)
+        end
+        if machine then
+            if machine.type == "mining-drill" then
+                ret.productivity = ret.productivity + bonuses.mining_drill_productivity
+            elseif machine.type == "lab" then
+                ret.productivity = ret.productivity + bonuses.laboratory_productivity
+                ret.speed = ret.speed + bonuses.laboratory_speed
+            end
+        end
+    end
+
     ret.speed = math.max(ret.speed, 0.2)
     ret.consumption = math.max(ret.consumption, 0.2)
     ret.productivity = math.max(ret.productivity, 0)
@@ -1086,15 +1116,18 @@ end
 ---quality_decomposition with effectivity.quality without recomputing.
 ---UI / totals callers that don't need it can drop the second return.
 ---@param line ProductionLine
+---@param bonuses ResearchBonuses?
 ---@return NormalizedProductionLine
 ---@return ModuleEffects
-function M.normalize_production_line(line)
+function M.normalize_production_line(line, bonuses)
     local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
     local recipe_quality = line.recipe_typed_name.quality
     local machine = tn.typed_name_to_machine(line.machine_typed_name)
     local machine_quality = line.machine_typed_name.quality
-    local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-    local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
+    local module_counts = M.get_total_modules(machine, line.module_typed_names,
+        line.affected_by_beacons, bonuses)
+    local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver,
+        line.recipe_typed_name, machine, bonuses)
     local crafting_energy = M.get_crafting_energy(recipe)
     local crafting_speed_cap = M.get_crafting_speed_cap(recipe)
     local crafting_speed = M.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)

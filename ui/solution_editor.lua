@@ -44,10 +44,11 @@ function handlers.make_production_line_table(event)
         fs_util.add_gui(elem, def)
     end
 
+    local bonuses = save.get_research_bonuses(event.player_index)
     for line_index, line in ipairs(solution.production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
-        local n = acc.normalize_production_line(line)
+        local n = acc.normalize_production_line(line, bonuses)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
         do
