@@ -22,6 +22,27 @@ local function is_bridge_line(line)
     return string.sub(line.recipe_typed_name.name, 1, #bridge_prefix) == bridge_prefix
 end
 
+---Iterate every ingredient consumed by the line: real recipe ingredients first,
+---then the burner fuel as a trailing pseudo-ingredient when present. The LP
+---treats them uniformly (fuel is just another material flow); the separation
+---only exists so the UI / totals can render the fuel slot apart from the
+---Ingredients column.
+---@param line NormalizedProductionLine
+---@return fun(_: any, i: integer): integer?, NormalizedAmount?
+---@return any
+---@return integer
+local function each_ingredient(line)
+    local n = #line.ingredients
+    return function(_, i)
+        i = i + 1
+        if i <= n then
+            return i, line.ingredients[i]
+        elseif i == n + 1 and line.fuel_ingredient then
+            return i, line.fuel_ingredient
+        end
+    end, nil, 0
+end
+
 ---For a temperature-suffixed fluid variable name ("fluid/<X>@T" / "fluid/<X>@[lo,hi]"),
 ---return the bare-fluid limit dual name ("|limit|fluid/<X>") so constraints on a
 ---temperature-agnostic fluid pick can aggregate flow across every variant.
@@ -64,7 +85,7 @@ function M.create_temperature_bridges(production_lines)
                 s[product.temperature] = true
             end
         end
-        for _, ingredient in ipairs(line.ingredients) do
+        for _, ingredient in each_ingredient(line) do
             if ingredient.type == "fluid" and ingredient.minimum_temperature then
                 local r = ranges[ingredient.name]
                 if not r then
@@ -158,7 +179,7 @@ function M.compute_reachable_materials(production_lines)
 
     local reachable = {} ---@type table<string, true>
     for _, line in ipairs(production_lines) do
-        for _, ingredient in ipairs(line.ingredients) do
+        for _, ingredient in each_ingredient(line) do
             local name = tn.typed_name_to_variable_name(ingredient)
             if not has_producer[name] then
                 reachable[name] = true
@@ -172,7 +193,7 @@ function M.compute_reachable_materials(production_lines)
         for i, line in ipairs(production_lines) do
             if not fired[i] then
                 local all_ingredients_reachable = true
-                for _, ingredient in ipairs(line.ingredients) do
+                for _, ingredient in each_ingredient(line) do
                     if not reachable[tn.typed_name_to_variable_name(ingredient)] then
                         all_ingredients_reachable = false
                         break
@@ -245,7 +266,7 @@ function M.create_problem(solution_name, constraints, production_lines)
             end
         end
 
-        for _, value in ipairs(line.ingredients) do
+        for _, value in each_ingredient(line) do
             local constraint_name = tn.typed_name_to_variable_name(value)
             included_ingresients[constraint_name] = true
 

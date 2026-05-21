@@ -347,24 +347,10 @@ function M.get_total_amounts(solution)
     end
 
     for _, line in ipairs(solution.production_lines) do
-        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
-        local machine = tn.typed_name_to_machine(line.machine_typed_name)
-        local machine_quality = line.machine_typed_name.quality
-        local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
-        local crafting_energy = acc.get_crafting_energy(recipe)
-        local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
+        local n = acc.normalize_production_line(line)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
-        for _, product in ipairs(recipe.products) do
-            local amount = acc.raw_product_to_amount(
-                product,
-                "unknown-quality",
-                crafting_energy,
-                crafting_speed,
-                effectivity.productivity
-            )
+        for _, amount in ipairs(n.products) do
             local filter_type = amount.type
             local name = amount.name
             local amount_per_second = amount.amount_per_second * quantity_of_machines_required
@@ -386,14 +372,7 @@ function M.get_total_amounts(solution)
             end
         end
 
-        for _, ingredient in ipairs(recipe.ingredients) do
-            local amount = acc.raw_ingredient_to_amount(
-                ingredient,
-                "unknown-quality",
-                crafting_energy,
-                crafting_speed
-            )
-            acc.apply_lab_input_productivity_to_ingredient(amount, machine)
+        for _, amount in ipairs(n.ingredients) do
             local filter_type = amount.type
             local name = amount.name
             local amount_per_second = amount.amount_per_second * quantity_of_machines_required
@@ -412,24 +391,24 @@ function M.get_total_amounts(solution)
             end
         end
 
-        if acc.is_use_fuel(machine) then
-            local ftn = assert(line.fuel_typed_name)
-            local fuel = tn.typed_name_to_material(ftn)
-            local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
-                fuel, ftn.quality, effectivity.consumption, ftn) * quantity_of_machines_required
+        local fuel_amount = n.fuel_ingredient
+        if fuel_amount then
+            local filter_type = fuel_amount.type
+            local name = fuel_amount.name
+            local amount_per_second = fuel_amount.amount_per_second * quantity_of_machines_required
 
-            if fuel.type == "item" then
-                item_totals[ftn.name] = (item_totals[ftn.name] or 0) - amount_per_second
-            elseif fuel.type == "fluid" then
+            if filter_type == "item" then
+                item_totals[name] = (item_totals[name] or 0) - amount_per_second
+            elseif filter_type == "fluid" then
                 -- line.fuel_typed_name may be bare on solutions migrated from
                 -- pre-0.4.0 saves. Widen here so the totals key matches the
                 -- ranged LP variable name the bridge target lands on.
                 local temperature, min_t, max_t = acc.resolve_bare_fluid_ingredient(
-                    ftn.name, ftn.temperature, ftn.minimum_temperature, ftn.maximum_temperature)
-                add_fluid(tn.create_typed_name("fluid", ftn.name, ftn.quality,
+                    name, fuel_amount.temperature, fuel_amount.minimum_temperature, fuel_amount.maximum_temperature)
+                add_fluid(tn.create_typed_name("fluid", name, fuel_amount.quality,
                     temperature, min_t, max_t), -amount_per_second)
-            elseif fuel.type == "virtual_material" then
-                virtual_totals[ftn.name] = (virtual_totals[ftn.name] or 0) - amount_per_second
+            elseif filter_type == "virtual_material" then
+                virtual_totals[name] = (virtual_totals[name] or 0) - amount_per_second
             else
                 virtual_totals["<material-unknown>"] = (virtual_totals["<material-unknown>"] or 0) + amount_per_second
             end
@@ -476,18 +455,9 @@ function M.get_total_power(solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
-        local machine = tn.typed_name_to_machine(line.machine_typed_name)
-        local machine_quality = line.machine_typed_name.quality
-        local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
-        local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
+        local n = acc.normalize_production_line(line)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
-
-        local power = acc.get_power_per_second(machine, machine_quality,
-            effectivity.consumption, line.fuel_typed_name)
-        total = total + power * quantity_of_machines_required
+        total = total + n.power_per_second * quantity_of_machines_required
     end
 
     return total
@@ -500,16 +470,9 @@ function M.get_total_pollution(solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
-        local machine = tn.typed_name_to_machine(line.machine_typed_name)
-        local machine_quality = line.machine_typed_name.quality
-        local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
+        local n = acc.normalize_production_line(line)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
-
-        local pollution = acc.get_pollution_per_second(machine, "pollution",
-            machine_quality, effectivity.consumption, effectivity.pollution,
-            line.fuel_typed_name)
-        total = total + pollution * quantity_of_machines_required
+        total = total + n.pollution_per_second * quantity_of_machines_required
     end
 
     return total
@@ -522,132 +485,6 @@ end
 function M.get_quantity_of_machines_required(solution, typed_name)
     local variable_name = string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
     return solution.quantity_of_machines_required[variable_name] or 1
-end
-
----comment
----@param module_typed_names table<string, TypedName>
----@param module_inventory_size integer
----@return table<string, TypedName>
-function M.trim_modules(module_typed_names, module_inventory_size)
-    local ret = {}
-    for index = 1, module_inventory_size do
-        ret[tostring(index)] = module_typed_names[tostring(index)]
-    end
-    return ret
-end
-
----comment
----@param machine LuaEntityPrototype
----@param module_typed_names table<string, TypedName>
----@param affected_by_beacons AffectedByBeacon[]
----@return table<string, table<string, number>>
-function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
-    local module_counts = {}
-
-    ---@param typed_name TypedName
-    ---@param effectivity number
-    local function count(typed_name, effectivity)
-        local name = typed_name.name
-        local quality = typed_name.quality
-        if not module_counts[name] then
-            module_counts[name] = {}
-        end
-        local inner = module_counts[name]
-        local value = inner[quality] or 0
-        inner[quality] = value + effectivity
-    end
-
-    module_typed_names = M.trim_modules(module_typed_names, machine.module_inventory_size)
-    for _, typed_name in pairs(module_typed_names) do
-        count(typed_name, 1)
-    end
-
-    for _, affected_by_beacon in ipairs(affected_by_beacons) do
-        local beacon_typed_name = affected_by_beacon.beacon_typed_name
-        local beacon = beacon_typed_name and tn.get_beacon(beacon_typed_name.name)
-        if beacon then
-            local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
-            local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
-                beacon.module_inventory_size)
-
-            for _, typed_name in pairs(beacon_module_names) do
-                count(typed_name, effectivity)
-            end
-        end
-    end
-
-    return module_counts
-end
-
----comment
----@param module_counts table<string, table<string, number>>
----@param effect_receiver EffectReceiver?
----@return ModuleEffects
-function M.get_total_effectivity(module_counts, effect_receiver)
-    ---@type ModuleEffects
-    local ret = {
-        speed = 1,
-        consumption = 1,
-        productivity = 0,
-        pollution = 1,
-        quality = 0,
-    }
-
-    ---@param effect number?
-    ---@param count number
-    ---@param quality_level integer
-    ---@param is_negative boolean
-    ---@return number
-    local function modify(effect, count, quality_level, is_negative)
-        effect = effect or 0
-        local multiplier = (1 + quality_level * 0.3)
-        if is_negative then
-            if effect < 0 then
-                effect = effect * multiplier
-            end
-        else
-            if effect > 0 then
-                effect = effect * multiplier
-            end
-        end
-        return effect * count
-    end
-
-    for name, inner in pairs(module_counts) do
-        for quality, count in pairs(inner) do
-            local module = tn.get_module(name)
-            if not module then
-                goto continue
-            end
-
-            local effects = assert(module.module_effects)
-            local quality_level = acc.get_quality_level(quality)
-
-            ret.speed = ret.speed + modify(effects.speed, count, quality_level, false)
-            ret.consumption = ret.consumption + modify(effects.consumption, count, quality_level, true)
-            ret.productivity = ret.productivity + modify(effects.productivity, count, quality_level, false)
-            ret.pollution = ret.pollution + modify(effects.pollution, count, quality_level, true)
-            ret.quality = ret.quality + modify(effects.quality, count, quality_level, false)
-            ::continue::
-        end
-    end
-
-    if effect_receiver then
-        local base_effect = effect_receiver.base_effect
-        ret.speed = ret.speed + (base_effect.speed or 0)
-        ret.consumption = ret.consumption + (base_effect.consumption or 0)
-        ret.productivity = ret.productivity + (base_effect.productivity or 0)
-        ret.pollution = ret.pollution + (base_effect.pollution or 0)
-        ret.quality = ret.quality + (base_effect.quality or 0)
-    end
-
-    ret.speed = math.max(ret.speed, 0.2)
-    ret.consumption = math.max(ret.consumption, 0.2)
-    ret.productivity = math.max(ret.productivity, 0)
-    ret.pollution = math.max(ret.pollution, 0.2)
-    ret.quality = math.max(ret.quality, 0)
-
-    return ret
 end
 
 ---comment

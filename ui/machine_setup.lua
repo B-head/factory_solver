@@ -358,7 +358,7 @@ function handlers.on_make_total_effectivity(event)
     local machine = tn.typed_name_to_machine(machine_typed_name)
     local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
-    local total_modules = save.get_total_modules(machine, module_typed_names, affected_by_beacons)
+    local total_modules = acc.get_total_modules(machine, module_typed_names, affected_by_beacons)
 
     elem.clear()
     for name, inner in pairs(total_modules) do

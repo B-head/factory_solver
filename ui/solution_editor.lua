@@ -46,14 +46,8 @@ function handlers.make_production_line_table(event)
 
     for line_index, line in ipairs(solution.production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
-        local recipe_quality = line.recipe_typed_name.quality
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
-        local machine_quality = line.machine_typed_name.quality
-        local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = save.get_total_effectivity(module_counts, machine.effect_receiver)
-        local crafting_energy = acc.get_crafting_energy(recipe)
-        local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
+        local n = acc.normalize_production_line(line)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
         do
@@ -139,7 +133,7 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(buttons, def)
             end
 
-            local total_modules = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+            local total_modules = acc.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
 
             for name, inner in pairs(total_modules) do
                 for quality, count in pairs(inner) do
@@ -167,15 +161,7 @@ function handlers.make_production_line_table(event)
 
         do
             local buttons = {}
-            for _, product in ipairs(recipe.products) do
-                local amount = acc.raw_product_to_amount(
-                    product,
-                    recipe_quality,
-                    crafting_energy,
-                    crafting_speed,
-                    effectivity.productivity
-                )
-
+            for _, amount in ipairs(n.products) do
                 local typed_name = tn.create_typed_name(
                     amount.type, amount.name, amount.quality,
                     amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
@@ -214,15 +200,7 @@ function handlers.make_production_line_table(event)
 
         do
             local buttons = {}
-            for _, ingredient in ipairs(recipe.ingredients) do
-                local amount = acc.raw_ingredient_to_amount(
-                    ingredient,
-                    recipe_quality,
-                    crafting_energy,
-                    crafting_speed
-                )
-                acc.apply_lab_input_productivity_to_ingredient(amount, machine)
-
+            for _, amount in ipairs(n.ingredients) do
                 local typed_name = tn.create_typed_name(
                     amount.type, amount.name, amount.quality,
                     amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
@@ -262,15 +240,12 @@ function handlers.make_production_line_table(event)
         do
             local children = {}
 
-            if not acc.is_use_fuel(machine) or acc.is_generator(machine) then
-                local power = acc.get_power_per_second(machine, machine_quality,
-                    effectivity.consumption, line.fuel_typed_name)
-
+            if not n.fuel_ingredient or acc.is_generator(machine) then
                 local def = {
                     type = "label",
                     tags = {
                         result_typed_name = line.recipe_typed_name,
-                        raw_amount = power,
+                        raw_amount = n.power_per_second,
                     },
                     handler = {
                         on_added = handlers.update_power,
@@ -281,13 +256,11 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(children, def)
             end
 
-            if acc.is_use_fuel(machine) then
+            if n.fuel_ingredient then
                 local ftn = assert(line.fuel_typed_name)
                 local fuel = tn.typed_name_to_material(ftn)
                 local is_hidden = acc.is_hidden(fuel)
                 local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)
-                local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
-                    fuel, ftn.quality, effectivity.consumption, ftn)
 
                 local def = common.create_decorated_sprite_button {
                     typed_name = ftn,
@@ -298,7 +271,7 @@ function handlers.make_production_line_table(event)
                         typed_name = ftn,
                         is_product = false,
                         result_typed_name = line.recipe_typed_name,
-                        raw_amount = amount_per_second,
+                        raw_amount = n.fuel_ingredient.amount_per_second,
                     },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_inout_click,
@@ -319,9 +292,7 @@ function handlers.make_production_line_table(event)
         end
 
         do
-            local pollution = acc.get_pollution_per_second(machine, "pollution",
-                machine_quality, effectivity.consumption, effectivity.pollution,
-                line.fuel_typed_name)
+            local pollution = n.pollution_per_second
 
             local def = {
                 type = "label",

@@ -115,6 +115,7 @@ __factory_solver__storage = {}
 ---@field recipe_typed_name TypedName
 ---@field products NormalizedAmount[]
 ---@field ingredients NormalizedAmount[]
+---@field fuel_ingredient NormalizedAmount?
 ---@field power_per_second number
 ---@field pollution_per_second number
 

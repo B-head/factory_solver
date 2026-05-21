@@ -76,9 +76,10 @@ function M.apply_lab_input_productivity_to_ingredient(amount, machine)
     if not item_proto then
         return
     end
-    -- get_total_amounts emits the "unknown-quality" sentinel; let the
-    -- prototypes.quality lookup filter that case to nil before we reach
-    -- get_durability (which would otherwise raise).
+    -- prototypes.quality returns nil for any string the engine doesn't know
+    -- (e.g. legacy sentinels on migrated saves); skip the durability scaling
+    -- in that case so get_durability — which would otherwise raise on an
+    -- invalid QualityID — never sees it.
     local quality_proto = prototypes.quality[amount.quality]
     if not quality_proto then
         return
@@ -898,6 +899,209 @@ end
 function M.get_quality_level(quality)
     local quality_prototype = (type(quality) == "string") and prototypes.quality[quality] or quality
     return quality_prototype and quality_prototype.level or 0
+end
+
+---comment
+---@param module_typed_names table<string, TypedName>
+---@param module_inventory_size integer
+---@return table<string, TypedName>
+function M.trim_modules(module_typed_names, module_inventory_size)
+    local ret = {}
+    for index = 1, module_inventory_size do
+        ret[tostring(index)] = module_typed_names[tostring(index)]
+    end
+    return ret
+end
+
+---comment
+---@param machine LuaEntityPrototype
+---@param module_typed_names table<string, TypedName>
+---@param affected_by_beacons AffectedByBeacon[]
+---@return table<string, table<string, number>>
+function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
+    local module_counts = {}
+
+    ---@param typed_name TypedName
+    ---@param effectivity number
+    local function count(typed_name, effectivity)
+        local name = typed_name.name
+        local quality = typed_name.quality
+        if not module_counts[name] then
+            module_counts[name] = {}
+        end
+        local inner = module_counts[name]
+        local value = inner[quality] or 0
+        inner[quality] = value + effectivity
+    end
+
+    module_typed_names = M.trim_modules(module_typed_names, machine.module_inventory_size)
+    for _, typed_name in pairs(module_typed_names) do
+        count(typed_name, 1)
+    end
+
+    for _, affected_by_beacon in ipairs(affected_by_beacons) do
+        local beacon_typed_name = affected_by_beacon.beacon_typed_name
+        local beacon = beacon_typed_name and tn.get_beacon(beacon_typed_name.name)
+        if beacon then
+            local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
+            local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
+                beacon.module_inventory_size)
+
+            for _, typed_name in pairs(beacon_module_names) do
+                count(typed_name, effectivity)
+            end
+        end
+    end
+
+    return module_counts
+end
+
+---comment
+---@param module_counts table<string, table<string, number>>
+---@param effect_receiver EffectReceiver?
+---@return ModuleEffects
+function M.get_total_effectivity(module_counts, effect_receiver)
+    ---@type ModuleEffects
+    local ret = {
+        speed = 1,
+        consumption = 1,
+        productivity = 0,
+        pollution = 1,
+        quality = 0,
+    }
+
+    ---@param effect number?
+    ---@param count number
+    ---@param quality_level integer
+    ---@param is_negative boolean
+    ---@return number
+    local function modify(effect, count, quality_level, is_negative)
+        effect = effect or 0
+        local multiplier = (1 + quality_level * 0.3)
+        if is_negative then
+            if effect < 0 then
+                effect = effect * multiplier
+            end
+        else
+            if effect > 0 then
+                effect = effect * multiplier
+            end
+        end
+        return effect * count
+    end
+
+    for name, inner in pairs(module_counts) do
+        for quality, count in pairs(inner) do
+            local module = tn.get_module(name)
+            if not module then
+                goto continue
+            end
+
+            local effects = assert(module.module_effects)
+            local quality_level = M.get_quality_level(quality)
+
+            ret.speed = ret.speed + modify(effects.speed, count, quality_level, false)
+            ret.consumption = ret.consumption + modify(effects.consumption, count, quality_level, true)
+            ret.productivity = ret.productivity + modify(effects.productivity, count, quality_level, false)
+            ret.pollution = ret.pollution + modify(effects.pollution, count, quality_level, true)
+            ret.quality = ret.quality + modify(effects.quality, count, quality_level, false)
+            ::continue::
+        end
+    end
+
+    if effect_receiver then
+        local base_effect = effect_receiver.base_effect
+        ret.speed = ret.speed + (base_effect.speed or 0)
+        ret.consumption = ret.consumption + (base_effect.consumption or 0)
+        ret.productivity = ret.productivity + (base_effect.productivity or 0)
+        ret.pollution = ret.pollution + (base_effect.pollution or 0)
+        ret.quality = ret.quality + (base_effect.quality or 0)
+    end
+
+    ret.speed = math.max(ret.speed, 0.2)
+    ret.consumption = math.max(ret.consumption, 0.2)
+    ret.productivity = math.max(ret.productivity, 0)
+    ret.pollution = math.max(ret.pollution, 0.2)
+    ret.quality = math.max(ret.quality, 0)
+
+    return ret
+end
+
+---Fold one ProductionLine into a per-second NormalizedProductionLine:
+---products, ingredients (with lab input productivity), fuel, power and
+---pollution all live on the returned table. Quality decomposition and
+---bare-fluid temperature widening are deliberately NOT applied here — they
+---are LP-only post-steps owned by pre_solve and would distort UI / totals
+---views that need the raw per-recipe-quality amounts.
+---The companion ModuleEffects is returned so pre_solve can drive
+---quality_decomposition with effectivity.quality without recomputing.
+---UI / totals callers that don't need it can drop the second return.
+---@param line ProductionLine
+---@return NormalizedProductionLine
+---@return ModuleEffects
+function M.normalize_production_line(line)
+    local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+    local recipe_quality = line.recipe_typed_name.quality
+    local machine = tn.typed_name_to_machine(line.machine_typed_name)
+    local machine_quality = line.machine_typed_name.quality
+    local module_counts = M.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+    local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
+    local crafting_energy = M.get_crafting_energy(recipe)
+    local crafting_speed_cap = M.get_crafting_speed_cap(recipe)
+    local crafting_speed = M.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
+
+    ---@type NormalizedAmount[]
+    local products = {}
+    for _, product in ipairs(recipe.products) do
+        local amount = M.raw_product_to_amount(
+            product, recipe_quality, crafting_energy, crafting_speed, effectivity.productivity)
+        flib_table.insert(products, amount)
+    end
+
+    ---@type NormalizedAmount[]
+    local ingredients = {}
+    for _, ingredient in ipairs(recipe.ingredients) do
+        local amount = M.raw_ingredient_to_amount(
+            ingredient, recipe_quality, crafting_energy, crafting_speed)
+        M.apply_lab_input_productivity_to_ingredient(amount, machine)
+        flib_table.insert(ingredients, amount)
+    end
+
+    ---@type NormalizedAmount?
+    local fuel_ingredient = nil
+    if M.is_use_fuel(machine) then
+        local ftn = assert(line.fuel_typed_name)
+        local fuel = tn.typed_name_to_material(ftn)
+        local amount_per_second = M.get_fuel_amount_per_second(machine, machine_quality,
+            fuel, ftn.quality, effectivity.consumption, ftn)
+        ---@type NormalizedAmount
+        fuel_ingredient = {
+            type = ftn.type, ---@diagnostic disable-line: assign-type-mismatch
+            name = ftn.name,
+            quality = ftn.quality,
+            amount_per_second = amount_per_second,
+            temperature = ftn.temperature,
+            minimum_temperature = ftn.minimum_temperature,
+            maximum_temperature = ftn.maximum_temperature,
+        }
+    end
+
+    local power = M.get_power_per_second(machine, machine_quality,
+        effectivity.consumption, line.fuel_typed_name)
+    local pollution = M.get_pollution_per_second(machine, "pollution",
+        machine_quality, effectivity.consumption, effectivity.pollution,
+        line.fuel_typed_name)
+
+    ---@type NormalizedProductionLine
+    local normalized_line = {
+        recipe_typed_name = line.recipe_typed_name,
+        products = products,
+        ingredients = ingredients,
+        fuel_ingredient = fuel_ingredient,
+        power_per_second = power,
+        pollution_per_second = pollution,
+    }
+    return normalized_line, effectivity
 end
 
 return M

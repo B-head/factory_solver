@@ -1,7 +1,5 @@
 local flib_table = require "__flib__/table"
 local acc = require "manage/accessor"
-local save = require "manage/save"
-local tn = require "manage/typed_name"
 local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 
@@ -60,78 +58,18 @@ end
 function M.to_normalized_production_lines(production_lines)
     local normalized_production_lines = {}
     for _, line in ipairs(production_lines) do
-        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
-        local recipe_quality = line.recipe_typed_name.quality
-        local machine = tn.typed_name_to_machine(line.machine_typed_name)
-        local machine_quality = line.machine_typed_name.quality
-        local module_counts = save.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
-        local effectivity = save.get_total_effectivity(module_counts, machine.effect_receiver)
-        local crafting_energy = acc.get_crafting_energy(recipe)
-        local crafting_speed_cap = acc.get_crafting_speed_cap(recipe)
-        local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
+        local normalized_line, effectivity = acc.normalize_production_line(line)
 
-        ---@type NormalizedAmount[]
-        local products = {}
-        for _, product in ipairs(recipe.products) do
-            local amount = acc.raw_product_to_amount(
-                product,
-                recipe_quality,
-                crafting_energy,
-                crafting_speed,
-                effectivity.productivity
-            )
-
-            local decomposed = M.quality_decomposition(amount, effectivity.quality)
-            for _, value in ipairs(decomposed) do
-                flib_table.insert(products, value)
+        -- Quality decomposition is LP-only: it splits one per-quality product
+        -- amount into the distribution that module quality bonus would
+        -- actually emit. UI and totals consume the pre-decomposition amount.
+        local decomposed = {}
+        for _, product in ipairs(normalized_line.products) do
+            for _, value in ipairs(M.quality_decomposition(product, effectivity.quality)) do
+                flib_table.insert(decomposed, value)
             end
         end
-
-        ---@type NormalizedAmount[]
-        local ingredients = {}
-        for _, ingredient in ipairs(recipe.ingredients) do
-            local amount = acc.raw_ingredient_to_amount(
-                ingredient,
-                recipe_quality,
-                crafting_energy,
-                crafting_speed
-            )
-            acc.apply_lab_input_productivity_to_ingredient(amount, machine)
-
-            flib_table.insert(ingredients, amount)
-        end
-
-        if acc.is_use_fuel(machine) then
-            local ftn = assert(line.fuel_typed_name)
-            local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
-                tn.typed_name_to_material(ftn), ftn.quality, effectivity.consumption, ftn)
-
-            ---@type NormalizedAmount
-            local amount = {
-                type = ftn.type, ---@diagnostic disable-line: assign-type-mismatch
-                name = ftn.name,
-                quality = ftn.quality,
-                amount_per_second = amount_per_second,
-                temperature = ftn.temperature,
-                minimum_temperature = ftn.minimum_temperature,
-                maximum_temperature = ftn.maximum_temperature,
-            }
-            flib_table.insert(ingredients, amount)
-        end
-
-        local power = acc.get_power_per_second(machine, machine_quality,
-            effectivity.consumption, line.fuel_typed_name)
-
-        ---@type NormalizedProductionLine
-        local normalized_line = {
-            recipe_typed_name = line.recipe_typed_name,
-            products = products,
-            ingredients = ingredients,
-            power_per_second = power,
-            pollution_per_second = acc.get_pollution_per_second(machine, "pollution",
-                machine_quality, effectivity.consumption, effectivity.pollution,
-                line.fuel_typed_name),
-        }
+        normalized_line.products = decomposed
 
         flib_table.insert(normalized_production_lines, normalized_line)
     end
@@ -145,6 +83,15 @@ end
 ---computed from these same NormalizedAmounts.
 ---@param normalized_production_lines NormalizedProductionLine[]
 function M.resolve_bare_fluids(normalized_production_lines)
+    local function resolve_ingredient(amount)
+        if amount.type ~= "fluid" then return end
+        amount.temperature, amount.minimum_temperature, amount.maximum_temperature =
+            acc.resolve_bare_fluid_ingredient(amount.name,
+                amount.temperature,
+                amount.minimum_temperature,
+                amount.maximum_temperature)
+    end
+
     for _, line in ipairs(normalized_production_lines) do
         for _, product in ipairs(line.products) do
             if product.type == "fluid" then
@@ -156,13 +103,10 @@ function M.resolve_bare_fluids(normalized_production_lines)
             end
         end
         for _, ingredient in ipairs(line.ingredients) do
-            if ingredient.type == "fluid" then
-                ingredient.temperature, ingredient.minimum_temperature, ingredient.maximum_temperature =
-                    acc.resolve_bare_fluid_ingredient(ingredient.name,
-                        ingredient.temperature,
-                        ingredient.minimum_temperature,
-                        ingredient.maximum_temperature)
-            end
+            resolve_ingredient(ingredient)
+        end
+        if line.fuel_ingredient then
+            resolve_ingredient(line.fuel_ingredient)
         end
     end
 end
