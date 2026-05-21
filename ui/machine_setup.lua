@@ -383,7 +383,14 @@ function handlers.on_fuel_visible(event)
     local machine = tn.typed_name_to_machine(machine_typed_name)
     local energy_source_type = acc.get_energy_source_type(machine)
     if energy_source_type == "burner" or energy_source_type == "fluid" then
-        elem.visible = acc.try_get_fixed_fuel(machine) == nil
+        if acc.try_get_fixed_fuel(machine) == nil then
+            elem.visible = true
+        else
+            -- Fixed-fuel machines normally hide the picker, but burns_fluid=false
+            -- machines may have temperature variants worth offering as a sub-choice.
+            local variants = acc.get_fluid_fuel_temperature_variants(machine)
+            elem.visible = variants ~= nil and 0 < #variants
+        end
     else
         elem.visible = false
     end
@@ -412,26 +419,28 @@ function handlers.on_make_fuel_table(event)
         fuels = acc.get_any_fluid_fuels()
     end
 
-    if fuels then
-        local fuel_name = fuel_typed_name and fuel_typed_name.name
-        local pos = fs_util.find(fuels, function(value)
-            return value.name == fuel_name
-        end)
-        if not pos then
-            fuel_typed_name = assert(save.get_fuel_preset(event.player_index, machine_typed_name))
-            dialog_tags.fuel_typed_name = fuel_typed_name
+    local temp_variants = acc.get_fluid_fuel_temperature_variants(machine)
+
+    if fuels or (temp_variants and 0 < #temp_variants) then
+        if fuels then
+            local fuel_name = fuel_typed_name and fuel_typed_name.name
+            local pos = fs_util.find(fuels, function(value)
+                return value.name == fuel_name
+            end)
+            if not pos then
+                fuel_typed_name = assert(save.get_fuel_preset(event.player_index, machine_typed_name))
+                dialog_tags.fuel_typed_name = fuel_typed_name
+            end
         end
 
         elem.clear()
-        for _, fuel in ipairs(fuels) do
-            local typed_name = tn.craft_to_typed_name(fuel)
-            local is_hidden = acc.is_hidden(fuel)
-            local is_unresearched = acc.is_unresearched(fuel, relation_to_recipes)
 
+        local function add_button(craft)
+            local typed_name = tn.craft_to_typed_name(craft)
             local def = common.create_decorated_sprite_button {
                 typed_name = typed_name,
-                is_hidden = is_hidden,
-                is_unresearched = is_unresearched,
+                is_hidden = acc.is_hidden(craft),
+                is_unresearched = acc.is_unresearched(craft, relation_to_recipes),
                 tags = {
                     typed_name = typed_name,
                 },
@@ -441,6 +450,13 @@ function handlers.on_make_fuel_table(event)
                 },
             }
             fs_util.add_gui(elem, def)
+        end
+
+        for _, fuel in ipairs(fuels or {}) do
+            add_button(fuel)
+        end
+        for _, variant in ipairs(temp_variants or {}) do
+            add_button(variant)
         end
     end
 

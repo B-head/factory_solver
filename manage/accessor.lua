@@ -610,6 +610,50 @@ function M.is_generator(machine)
     return machine.type == "generator" or machine.type == "burner-generator"
 end
 
+---Returns the single-temperature virtual_material variants of the machine's
+---filter fluid. Only meaningful for burns_fluid=false machines, where the
+---power output depends on input temperature; returns nil for other cases so
+---the caller knows there is nothing to expand. Filterless machines are also
+---out of scope here (the candidate fluid set is unbounded).
+---
+---We deliberately do not clip by the machine's maximum_temperature: the
+---engine accepts hotter fluid and merely discards the excess heat, so the
+---picker should still surface those variants and let the user choose.
+---Out-of-range temperatures are handled correctly downstream by
+---get_generator_power and get_fuel_amount_per_second, which clamp T_in.
+---@param machine LuaEntityPrototype
+---@return VirtualMaterial[]?
+function M.get_fluid_fuel_temperature_variants(machine)
+    ---@type LuaFluidPrototype?
+    local filter
+    if machine.fluid_energy_source_prototype then
+        local energy = machine.fluid_energy_source_prototype
+        if energy.burns_fluid then return nil end
+        filter = energy.fluid_box.filter
+    elseif machine.type == "generator" then
+        if machine.burns_fluid then return nil end
+        filter = M.get_fluidbox_filter_prototype(machine, 1)
+    else
+        return nil
+    end
+    if not filter then return nil end
+
+    local prefix = "fluid/" .. filter.name .. "@"
+    local prefix_len = #prefix
+    local results = {}
+    for key, material in pairs(storage.virtuals.material) do
+        if string.sub(key, 1, prefix_len) == prefix then
+            -- Single-temperature variants stringify to a bare number after
+            -- the "@". Range variants stringify to "[lo,hi]" and fail
+            -- tonumber, so they're naturally excluded.
+            if tonumber(string.sub(key, prefix_len + 1)) then
+                results[#results + 1] = material
+            end
+        end
+    end
+    return fs_util.sort_prototypes(results)
+end
+
 ---@param recipe LuaRecipePrototype | VirtualRecipe
 ---@return number
 function M.get_crafting_energy(recipe)
