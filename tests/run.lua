@@ -45,6 +45,7 @@ local case_files = {
     "fs_log",
     "typed_name_format",
     "lp_fluid_bridge",
+    "lp_fluid_constraint",
 }
 
 local total, passed, failed = 0, 0, 0

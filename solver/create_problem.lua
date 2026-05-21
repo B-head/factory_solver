@@ -22,6 +22,25 @@ local function is_bridge_line(line)
     return string.sub(line.recipe_typed_name.name, 1, #bridge_prefix) == bridge_prefix
 end
 
+---For a temperature-suffixed fluid variable name ("fluid/<X>@T" / "fluid/<X>@[lo,hi]"),
+---return the bare-fluid limit dual name ("|limit|fluid/<X>") so constraints on a
+---temperature-agnostic fluid pick can aggregate flow across every variant.
+---Constraints on temperature-specific variants keep going through their own
+---"|limit|fluid/<X>@..." dual, untouched. Returns nil for non-fluid variables and
+---for already-bare fluid names (no aggregation to do).
+---@param variable_name string
+---@return string?
+local function bare_fluid_limit_dual(variable_name)
+    if string.sub(variable_name, 1, 6) ~= "fluid/" then
+        return nil
+    end
+    local at = string.find(variable_name, "@", 7, true)
+    if not at then
+        return nil
+    end
+    return "|limit|" .. string.sub(variable_name, 1, at - 1)
+end
+
 ---For every (single_temperature, temperature_range) pair found in the production
 ---line set where the single value falls inside the range, emit a zero-cost
 ---virtual recipe that converts the single-temperature fluid variable into the
@@ -210,6 +229,15 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_subject_term(objective_name, constraint_name, amount)
             problem:add_subject_term(objective_name, "|limit|" .. constraint_name, amount)
 
+            -- Skip bridges from the bare-fluid aggregation: a bridge re-labels
+            -- single-T flow as range-T (or vice versa) without creating any new
+            -- fluid, so counting both the boiler's steam@165 product and the
+            -- bridge's steam@[15,1000] product would double the bare-fluid total.
+            local bare_limit = bare_fluid_limit_dual(constraint_name)
+            if bare_limit and not bridge then
+                problem:add_subject_term(objective_name, bare_limit, amount)
+            end
+
             if value.type == "item" then
                 product_count = product_count + amount
             else
@@ -266,6 +294,11 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
             problem:add_subject_term(elastic_name, "|limit|" .. constraint_name, 1)
+
+            local bare_limit = bare_fluid_limit_dual(constraint_name)
+            if bare_limit then
+                problem:add_subject_term(elastic_name, bare_limit, 1)
+            end
         end
         ::continue::
     end
@@ -285,6 +318,11 @@ function M.create_problem(solution_name, constraints, production_lines)
         problem:add_objective(slack_name, slack_cost)
         problem:add_subject_term(slack_name, constraint_name, 1)
         problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
+
+        local bare_limit = bare_fluid_limit_dual(constraint_name)
+        if bare_limit then
+            problem:add_subject_term(slack_name, bare_limit, 1)
+        end
     end
 
     for _, constraint in ipairs(constraints) do
