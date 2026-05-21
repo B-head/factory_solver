@@ -324,13 +324,9 @@ function handlers.make_production_line_table(event)
         end
 
         do
-            local pollution = acc.raw_emission_to_pollution(machine, "pollution", machine_quality,
-                effectivity.consumption, effectivity.pollution)
-
-            if acc.is_use_fuel(machine) then
-                local fuel = tn.typed_name_to_material(line.fuel_typed_name)
-                pollution = pollution * acc.get_fuel_emissions_multiplier(fuel)
-            end
+            local pollution = acc.get_pollution_per_second(machine, "pollution",
+                machine_quality, effectivity.consumption, effectivity.pollution,
+                line.fuel_typed_name)
 
             local def = {
                 type = "label",

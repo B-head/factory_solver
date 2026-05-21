@@ -203,6 +203,28 @@ function M.raw_emission_to_pollution(machine, pollutant_type, quality, effectivi
     return emissions_per_joule[pollutant_type] * energy_per_tick * M.second_per_tick
 end
 
+---Per-second emission rate at full throughput, combining the energy
+---source's base (raw_emission_to_pollution) with the burned fuel's
+---multiplier (fuel_emissions_multiplier for items, emissions_multiplier
+---for fluids). Returns the base rate alone for non-fuel machines.
+---@param machine LuaEntityPrototype
+---@param pollutant_type string
+---@param quality QualityID
+---@param effectivity_consumption number
+---@param effectivity_pollution number
+---@param fuel_typed_name TypedName?
+---@return number
+function M.get_pollution_per_second(machine, pollutant_type, quality,
+    effectivity_consumption, effectivity_pollution, fuel_typed_name)
+    local pollution = M.raw_emission_to_pollution(machine, pollutant_type, quality,
+        effectivity_consumption, effectivity_pollution)
+    if M.is_use_fuel(machine) and fuel_typed_name then
+        local fuel = tn.typed_name_to_material(fuel_typed_name)
+        pollution = pollution * M.get_fuel_emissions_multiplier(fuel)
+    end
+    return pollution
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@param quality QualityID

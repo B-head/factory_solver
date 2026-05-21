@@ -485,16 +485,10 @@ function M.get_total_pollution(solution)
         local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
-        local pollution = acc.raw_emission_to_pollution(machine, "pollution", machine_quality,
-            effectivity.consumption, effectivity.pollution)
-        pollution = pollution * quantity_of_machines_required
-
-        if acc.is_use_fuel(machine) then
-            local fuel = tn.typed_name_to_material(line.fuel_typed_name)
-            pollution = pollution * acc.get_fuel_emissions_multiplier(fuel)
-        end
-
-        total = total + pollution
+        local pollution = acc.get_pollution_per_second(machine, "pollution",
+            machine_quality, effectivity.consumption, effectivity.pollution,
+            line.fuel_typed_name)
+        total = total + pollution * quantity_of_machines_required
     end
 
     return total

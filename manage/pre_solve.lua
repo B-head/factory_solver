@@ -136,8 +136,9 @@ function M.to_normalized_production_lines(production_lines)
             products = products,
             ingredients = ingredients,
             power_per_second = power,
-            pollution_per_second = acc.raw_emission_to_pollution(machine, "pollution", machine_quality,
-                effectivity.consumption, effectivity.pollution),
+            pollution_per_second = acc.get_pollution_per_second(machine, "pollution",
+                machine_quality, effectivity.consumption, effectivity.pollution,
+                line.fuel_typed_name),
         }
 
         flib_table.insert(normalized_production_lines, normalized_line)
