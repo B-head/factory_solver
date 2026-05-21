@@ -416,6 +416,16 @@ function M.new_production_line(player_index, solution, recipe_typed_name, fuel_t
     local machine_typed_name = preset.get_machine_preset(player_index, recipe_typed_name)
     fuel_typed_name = fuel_typed_name or preset.get_fuel_preset(player_index, machine_typed_name)
 
+    -- Plant lines default substrate to the first tile listed in the plant's
+    -- autoplace_specification.tile_restriction. Non-plant recipes leave it
+    -- nil. Mutated later through the substrate widget in solution_editor.
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    local substrate_tile_name = nil
+    if machine.type == "plant" then
+        local tiles = acc.get_plant_substrate_tiles(machine)
+        substrate_tile_name = tiles[1]
+    end
+
     ---@type ProductionLine
     local line = {
         recipe_typed_name = recipe_typed_name,
@@ -423,6 +433,7 @@ function M.new_production_line(player_index, solution, recipe_typed_name, fuel_t
         module_typed_names = {},
         affected_by_beacons = {},
         fuel_typed_name = fuel_typed_name,
+        substrate_tile_name = substrate_tile_name,
     }
     flib_table.insert(production_lines, line_index, line)
 
@@ -450,6 +461,7 @@ function M.update_production_line(solution, line_index, data)
     line.module_typed_names = data.module_typed_names
     line.affected_by_beacons = data.affected_by_beacons
     line.fuel_typed_name = data.fuel_typed_name
+    line.substrate_tile_name = data.substrate_tile_name
 
     solution.solver_state = "ready"
 end

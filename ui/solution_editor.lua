@@ -120,7 +120,12 @@ function handlers.make_production_line_table(event)
             local is_hidden = acc.is_hidden(machine)
             local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
-            do
+            -- Plant lines display the selected substrate tile instead of the
+            -- plant entity here; the substrate button further below replaces
+            -- it. Showing the plant entity as a "machine" misleads the user
+            -- (1 craft = 1 plant slot, not 1 tower or 1 plant). The plant
+            -- entity is still bound as machine_typed_name internally.
+            if machine.type ~= "plant" then
                 local def = common.create_decorated_sprite_button {
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,
@@ -149,6 +154,25 @@ function handlers.make_production_line_table(event)
                     }
                     flib_table.insert(buttons, def)
                 end
+            end
+
+            if line.substrate_tile_name then
+                -- Plant production lines surface their selected substrate as
+                -- a tile sprite in the machine cell so it's readable at a
+                -- glance without opening machine_setup. Clicking routes
+                -- through the same recipe-click handler so the same dialog
+                -- opens, where Substrate section lets the user switch.
+                local def = {
+                    type = "sprite-button",
+                    style = "flib_slot_button_default",
+                    sprite = "tile/" .. line.substrate_tile_name,
+                    elem_tooltip = { type = "tile", name = line.substrate_tile_name },
+                    tags = recipe_tags,
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
+                    },
+                }
+                flib_table.insert(buttons, def)
             end
 
             local def = {

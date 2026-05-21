@@ -100,6 +100,7 @@ __factory_solver__storage = {}
 ---@field module_typed_names table<string, TypedName>
 ---@field affected_by_beacons AffectedByBeacon[]
 ---@field fuel_typed_name TypedName?
+---@field substrate_tile_name string?
 
 ---@class AffectedByBeacon
 ---@field beacon_typed_name TypedName?
@@ -162,6 +163,7 @@ __factory_solver__storage = {}
 ---@field pumped_fluid_name string?
 ---@field consumed_pack_name string?
 ---@field crafting_speed_cap number?
+---@field pollution_per_craft number?
 ---@field hidden boolean
 ---@field source_entity_name string?
 ---@field source_planet_names string[]?

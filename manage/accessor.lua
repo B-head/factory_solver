@@ -762,6 +762,38 @@ function M.is_generator(machine)
         or machine.type == "fusion-generator"
 end
 
+---Substrate (soil tile) names a plant entity can be planted on, derived
+---dynamically from plant.autoplace_specification.tile_restriction. Used by
+---the production-line UI to populate the substrate picker and by
+---new_production_line to pick a default substrate for plant lines.
+---
+---Vanilla Space Age plants (yumako-tree, jellystem, tree-plant) list every
+---player-plantable soil tile in tile_restriction including artificial-*
+---variants that never appear in autoplace, so this list matches the
+---agricultural tower's actual plot acceptance. Returns a sorted, deduped
+---array; empty array when the machine is not a plant or has no restriction.
+---@param machine LuaEntityPrototype
+---@return string[]
+function M.get_plant_substrate_tiles(machine)
+    if machine.type ~= "plant" then return {} end
+    local ap = machine.autoplace_specification
+    if not ap or not ap.tile_restriction then return {} end
+    local seen = {}
+    local list = {}
+    for _, r in ipairs(ap.tile_restriction) do
+        if r.first and not seen[r.first] then
+            seen[r.first] = true
+            flib_table.insert(list, r.first)
+        end
+        if r.second and not seen[r.second] then
+            seen[r.second] = true
+            flib_table.insert(list, r.second)
+        end
+    end
+    table.sort(list)
+    return list
+end
+
 ---Returns the single-temperature virtual_material variants of the machine's
 ---filter fluid. Only meaningful for burns_fluid=false machines, where the
 ---power output depends on input temperature; returns nil for other cases so
@@ -894,6 +926,14 @@ function M.get_crafting_speed(machine, quality, effectivity_speed, crafting_spee
         -- get_pumping_speed returns per-tick units; offshore-pump virtual
         -- recipes bake acc.second_per_tick into product.amount to compensate.
         ret = machine.get_pumping_speed(quality)
+    elseif machine.type == "plant" then
+        -- A plant is its own "machine" for <grow>{plant}:{seed} virtual
+        -- recipes; 1 craft = 1 growth cycle of one plant slot. growth_ticks
+        -- is intrinsic to the plant prototype and is not scaled by tower
+        -- quality or any other factor exposed to runtime, so the rate must
+        -- stay at 1.0. The fallback quality multiplier below would otherwise
+        -- silently boost growth rate per quality level.
+        ret = 1
     else
         ret = machine.get_crafting_speed(quality) or machine.mining_speed
     end
@@ -1100,6 +1140,25 @@ function M.normalize_production_line(line)
     local pollution = M.get_pollution_per_second(machine, "pollution",
         machine_quality, effectivity.consumption, effectivity.pollution,
         line.fuel_typed_name)
+
+    -- Recipe-intrinsic pollution (plant.harvest_emissions baked into
+    -- VirtualRecipe.pollution_per_craft by manage/virtual.lua). Real recipes
+    -- and other virtual recipes leave this nil and contribute nothing here.
+    -- Approximation: per-harvest emission scaled by craft rate so module
+    -- pollution effectivity still applies symmetrically with the energy-
+    -- source pollution above.
+    -- LuaRecipePrototype rejects unknown-key indexing at the C++ layer, so
+    -- gate the lookup on the VirtualRecipe branch (see get_crafting_speed_cap
+    -- for the same pattern).
+    ---@diagnostic disable-next-line: undefined-field
+    if recipe.object_name ~= "LuaRecipePrototype" then
+        ---@diagnostic disable-next-line: undefined-field
+        local pollution_per_craft = recipe.pollution_per_craft
+        if pollution_per_craft then
+            pollution = pollution
+                + pollution_per_craft * (crafting_speed / crafting_energy) * effectivity.pollution
+        end
+    end
 
     ---@type NormalizedProductionLine
     local normalized_line = {

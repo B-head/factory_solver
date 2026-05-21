@@ -108,6 +108,109 @@ function handlers.on_modules_visible(event)
     elem.visible = 0 < machine.module_inventory_size
 end
 
+---Substrate section is plant-only. The whole flow is hidden for any other
+---machine type so non-plant production lines see no extra UI.
+---@param event EventDataTrait
+function handlers.on_substrate_visible(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    elem.visible = machine.type == "plant"
+end
+
+---Counterpart to on_substrate_visible: hides Machine / Quality / their
+---separator line for plant lines so Substrate becomes the only "machine
+---identity" section visible. The plant entity is still bound as
+---machine_typed_name internally (picker would return only the plant anyway),
+---but its UI is redundant noise — Substrate carries all the meaningful
+---per-line choice. Sets visible=false only; leaves non-plant defaults alone
+---so e.g. Quality's `visible = script.feature_flags.quality` still applies.
+---@param event EventDataTrait
+function handlers.on_hide_for_plant(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    if machine.type == "plant" then
+        elem.visible = false
+    end
+end
+
+---One sprite-button per tile in plant.autoplace_specification.tile_restriction.
+---Substrate is pure metadata (no LP / normalization effect), so this is built
+---once on_added — no need to react to other dialog changes. Tile names are
+---not in the TypedName vocabulary, so we render plain sprite-buttons rather
+---than going through common.create_decorated_sprite_button.
+---@param event EventDataTrait
+function handlers.on_make_substrate_table(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    if machine.type ~= "plant" then
+        return
+    end
+
+    local tiles = acc.get_plant_substrate_tiles(machine)
+
+    -- If the line's saved substrate is no longer in the restriction list
+    -- (mod data drift), snap to the first available one and write it back so
+    -- the rest of the dialog and the saved line agree.
+    local current = dialog.tags.substrate_tile_name --[[@as string?]]
+    if current and not flib_table.find(tiles, current) then
+        current = nil
+    end
+    if not current and tiles[1] then
+        local dialog_tags = dialog.tags
+        dialog_tags.substrate_tile_name = tiles[1]
+        dialog.tags = dialog_tags
+    end
+
+    elem.clear()
+    for _, tile_name in ipairs(tiles) do
+        local def = {
+            type = "sprite-button",
+            style = "flib_slot_button_default",
+            sprite = "tile/" .. tile_name,
+            elem_tooltip = { type = "tile", name = tile_name },
+            tags = {
+                substrate_tile_name = tile_name,
+            },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_substrate_click,
+                on_substrate_changed = handlers.on_substrate_change_toggle,
+            },
+        }
+        fs_util.add_gui(elem, def)
+    end
+    fs_util.dispatch_to_subtree(dialog, "on_substrate_changed")
+end
+
+---@param event EventData.on_gui_click
+function handlers.on_substrate_click(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local dialog_tags = dialog.tags
+    dialog_tags.substrate_tile_name = elem.tags.substrate_tile_name
+    dialog.tags = dialog_tags
+
+    fs_util.dispatch_to_subtree(dialog, "on_substrate_changed")
+end
+
+---@param event EventDataTrait
+function handlers.on_substrate_change_toggle(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local selected = dialog.tags.substrate_tile_name --[[@as string?]]
+    elem.toggled = selected == elem.tags.substrate_tile_name
+end
+
 ---@param event EventDataTrait
 function handlers.on_make_machine_modules(event)
     local elem = event.element
@@ -543,10 +646,16 @@ return {
             type = "label",
             style = "caption_label",
             caption = "Machine",
+            handler = {
+                on_added = handlers.on_hide_for_plant,
+            },
         },
         {
             type = "frame",
             style = "factory_solver_slot_background_frame",
+            handler = {
+                on_added = handlers.on_hide_for_plant,
+            },
             {
                 type = "table",
                 style = "filter_slot_table",
@@ -567,6 +676,9 @@ return {
             style = "factory_solver_centering_horizontal_flow",
             direction = "horizontal",
             visible = script.feature_flags.quality,
+            handler = {
+                on_added = handlers.on_hide_for_plant,
+            },
             {
                 type = "label",
                 caption = "Quality",
@@ -582,6 +694,34 @@ return {
         {
             type = "line",
             style = "factory_solver_line",
+            handler = {
+                on_added = handlers.on_hide_for_plant,
+            },
+        },
+        {
+            type = "flow",
+            style = "factory_solver_no_spacing_vertical_flow_style",
+            direction = "vertical",
+            handler = {
+                on_added = handlers.on_substrate_visible,
+            },
+            {
+                type = "label",
+                style = "caption_label",
+                caption = "Substrate",
+            },
+            {
+                type = "frame",
+                style = "factory_solver_slot_background_frame",
+                {
+                    type = "table",
+                    style = "filter_slot_table",
+                    column_count = 6,
+                    handler = {
+                        on_added = handlers.on_make_substrate_table,
+                    },
+                },
+            },
         },
         {
             type = "flow",

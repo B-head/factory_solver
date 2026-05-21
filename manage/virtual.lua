@@ -68,6 +68,8 @@ function M.create_virtuals()
             result_crafts = M.create_thruster_virtual(entity)
         elseif entity.type == "resource" then
             result_crafts = M.create_resource_virtual(entity, planet_index)
+        elseif entity.type == "plant" then
+            result_crafts = M.create_plant_virtual(entity, planet_index)
         end
 
         for _, craft in ipairs(result_crafts) do
@@ -864,6 +866,111 @@ function M.create_resource_virtual(resource_prototype, planet_index)
     }
 
     return { recipe }
+end
+
+---One virtual recipe per (plant, seed) pair. Vanilla plants have a single
+---seed item with plant_result pointing back at the plant, so only one recipe
+---is emitted per plant; modded plants may have several seeds, in which case
+---each gets its own recipe with that seed as the sole ingredient.
+---
+---The plant entity itself is the fixed_crafting_machine: 1 craft = 1 plant
+---growing through one full cycle = 1 occupied slot in some agricultural
+---tower's radius. quantity_of_machines_required at the LP layer therefore
+---represents the number of concurrent plant slots, not the number of towers.
+---The tower's crane action time is not surfaced at runtime (only
+---crane_energy_usage is) so it is intentionally not modeled; growth_ticks is
+---the sole rate-limiting factor.
+---
+---Substrate (soil tile) selection is purely user metadata stored on the
+---ProductionLine as substrate_tile_name; it does not flow through here.
+---The picker UI reads plant.autoplace_specification.tile_restriction at
+---render time to populate the substrate choices.
+---
+---harvest_emissions is baked into pollution_per_craft on the recipe; the
+---per-second pollution layer in accessor.normalize_production_line picks
+---this up and adds (pollution_per_craft * crafts_per_second * effectivity)
+---to the line's pollution total.
+---@param plant_prototype LuaEntityPrototype
+---@param planet_index PlanetIndex
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_plant_virtual(plant_prototype, planet_index)
+    local growth_ticks = plant_prototype.growth_ticks
+    if not growth_ticks or growth_ticks <= 0 then
+        return {}
+    end
+    local growth_seconds = growth_ticks / acc.second_per_tick
+
+    local seed_items = prototypes.get_item_filtered {
+        { filter = "plant-result", elem_filters = { { filter = "name", name = plant_prototype.name } } },
+    }
+    local seeds = {}
+    for _, seed in pairs(seed_items) do
+        flib_table.insert(seeds, seed)
+    end
+    if #seeds == 0 then
+        return {}
+    end
+    table.sort(seeds, function(a, b) return a.name < b.name end)
+
+    local mineable = plant_prototype.mineable_properties
+    local products = {}
+    for _, value in ipairs(mineable.products or {}) do
+        local amount = M.modify_product_or_ingredient(value, growth_seconds)
+        flib_table.insert(products, amount)
+    end
+
+    -- harvest_emissions["pollution"] is per-harvest (emitted once on each
+    -- crane harvest cycle). Normalize to per-second by dividing by the
+    -- growth cycle length, matching the per-second product/ingredient
+    -- scaling above. accessor.normalize_production_line then multiplies by
+    -- (crafting_speed / crafting_energy) — both 1 for plant virtual recipes
+    -- at base — and by effectivity.pollution, so module/beacon pollution
+    -- boosts still scale this contribution symmetrically with energy-source
+    -- pollution on conventional machines.
+    local harvest_pollution = nil
+    if plant_prototype.harvest_emissions then
+        local raw = plant_prototype.harvest_emissions["pollution"]
+        if raw then
+            harvest_pollution = raw / growth_seconds
+        end
+    end
+
+    local source_planet_names = M.collect_planets_for_prototype(plant_prototype.name,
+        plant_prototype.autoplace_specification,
+        planet_index.entity_planets, planet_index.control_planets)
+
+    local fixed_machine = tn.craft_to_typed_name(plant_prototype)
+
+    local crafts = {}
+    for _, seed in ipairs(seeds) do
+        ---@type Ingredient
+        local seed_ingredient = {
+            type = "item",
+            name = seed.name,
+            amount = 1 / growth_seconds,
+        }
+
+        ---@type VirtualRecipe
+        local recipe = {
+            type = "virtual_recipe",
+            name = string.format("<grow>%s:%s", plant_prototype.name, seed.name),
+            sprite_path = "entity/" .. plant_prototype.name,
+            elem_tooltip = { type = "entity", name = plant_prototype.name },
+            order = plant_prototype.order .. ":" .. seed.order,
+            group_name = plant_prototype.group.name,
+            subgroup_name = plant_prototype.subgroup.name,
+            products = products,
+            ingredients = { seed_ingredient },
+            fixed_crafting_machine = fixed_machine,
+            pollution_per_craft = harvest_pollution,
+            hidden = plant_prototype.hidden,
+            source_entity_name = plant_prototype.name,
+            source_planet_names = source_planet_names,
+        }
+        flib_table.insert(crafts, recipe)
+    end
+
+    return crafts
 end
 
 ---One virtual recipe per fluid-bearing tile. The picker dispatches by
