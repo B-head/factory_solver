@@ -11,6 +11,7 @@
 
 local flib_table = require "__flib__/table"
 local fs_log = require "fs_log"
+local report = require "manage/report"
 local save = require "manage/save"
 
 local log = fs_log.for_module("smoke")
@@ -64,9 +65,9 @@ local function plant_missing_prototype_solution(player_index)
 end
 
 local function exercise_read_side(solution)
-    save.get_total_amounts(solution)
-    save.get_total_power(solution)
-    save.get_total_pollution(solution)
+    report.get_total_amounts(solution)
+    report.get_total_power(solution)
+    report.get_total_pollution(solution)
 end
 
 function M.on_player_created(event)

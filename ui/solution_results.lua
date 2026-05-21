@@ -1,6 +1,7 @@
 local flib_format = require "__flib__/format"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
+local report = require "manage/report"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
@@ -19,7 +20,7 @@ function handlers.make_final_products_table(event)
     if not solution or type(solution.solver_state) == "number" then
         return
     end
-    local item_totals, fluid_totals, virtual_totals = save.get_total_amounts(solution)
+    local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(solution)
 
     local function add(typed_name, number)
         if number <= acc.tolerance then
@@ -72,7 +73,7 @@ function handlers.make_basic_ingredients_table(event)
     if not solution or type(solution.solver_state) == "number" then
         return
     end
-    local item_totals, fluid_totals, virtual_totals = save.get_total_amounts(solution)
+    local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(solution)
 
     local function add(typed_name, number)
         if -acc.tolerance <= number then
@@ -146,7 +147,7 @@ function handlers.update_total_power_label(event)
         return
     end
 
-    local total_power = fs_util.to_scale(save.get_total_power(solution), player_data.time_scale)
+    local total_power = fs_util.to_scale(report.get_total_power(solution), player_data.time_scale)
     elem.caption = common.format_power(total_power)
 end
 
@@ -161,7 +162,7 @@ function handlers.update_total_pollution_label(event)
         return
     end
 
-    local total_pollution = fs_util.to_scale(save.get_total_pollution(solution), player_data.time_scale)
+    local total_pollution = fs_util.to_scale(report.get_total_pollution(solution), player_data.time_scale)
     elem.caption = flib_format.number(total_pollution, true, 5)
 end
 
