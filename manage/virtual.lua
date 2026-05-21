@@ -60,6 +60,8 @@ function M.create_virtuals()
             result_crafts = M.create_burner_generator_virtual(entity)
         elseif entity.type == "reactor" then
             result_crafts = M.create_reactor_virtual(entity)
+        elseif entity.type == "fusion-reactor" then
+            result_crafts = M.create_fusion_reactor_virtual(entity)
         elseif entity.type == "resource" then
             result_crafts = M.create_resource_virtual(entity, planet_index)
         end
@@ -547,6 +549,59 @@ function M.create_reactor_virtual(reactor_prototype)
         fixed_crafting_machine = tn.craft_to_typed_name(reactor_prototype),
         hidden = reactor_prototype.hidden,
         source_entity_name = reactor_prototype.name,
+    }
+
+    return { recipe }
+end
+
+---Space Age fusion-reactor: not a `reactor` subtype, so it needs its own
+---branch. Consumes a cold input fluid (e.g. fluoroketone-cold) plus burner
+---fuel cells and emits a hot output fluid (e.g. fusion-plasma). Burner fuel
+---is auto-injected by pre_solve via line.fuel_typed_name, so only the input
+---fluid is listed here. Rate is the entity's get_fluid_usage_per_tick scaled
+---to per-second; quality scaling is layered on by acc.get_crafting_speed at
+---pre_solve time, matching the boiler / generator pattern. The output fluid
+---comes out at its prototype default_temperature because the output fluidbox
+---carries no temperature filter.
+---@param fusion_reactor_prototype LuaEntityPrototype
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_fusion_reactor_virtual(fusion_reactor_prototype)
+    local input_filter = acc.get_fluidbox_filter_prototype(fusion_reactor_prototype, 1)
+    local output_filter = acc.get_fluidbox_filter_prototype(fusion_reactor_prototype, 2)
+    if not input_filter or not output_filter then
+        return {}
+    end
+
+    local rate = fusion_reactor_prototype.get_fluid_usage_per_tick() * acc.second_per_tick
+
+    ---@type VirtualRecipe
+    local recipe = {
+        type = "virtual_recipe",
+        name = "<run>" .. fusion_reactor_prototype.name,
+        sprite_path = "entity/" .. fusion_reactor_prototype.name,
+        elem_tooltip = { type = "entity", name = fusion_reactor_prototype.name },
+        order = fusion_reactor_prototype.order,
+        group_name = fusion_reactor_prototype.group.name,
+        subgroup_name = fusion_reactor_prototype.subgroup.name,
+        products = {
+            {
+                type = "fluid",
+                name = output_filter.name,
+                amount = rate,
+                probability = 1,
+                temperature = output_filter.default_temperature,
+            },
+        },
+        ingredients = {
+            {
+                type = "fluid",
+                name = input_filter.name,
+                amount = rate,
+            },
+        },
+        fixed_crafting_machine = tn.craft_to_typed_name(fusion_reactor_prototype),
+        hidden = fusion_reactor_prototype.hidden,
+        source_entity_name = fusion_reactor_prototype.name,
     }
 
     return { recipe }
