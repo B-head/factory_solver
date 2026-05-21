@@ -539,49 +539,40 @@ function M.create_resource_virtual(resource_prototype)
     return { recipe }
 end
 
+---One virtual recipe per fluid-bearing tile. The picker dispatches by
+---pumped_fluid_name to the set of offshore-pumps whose fluid_box filter
+---matches (or is unset). Product amount is normalized to per-tick units of 1
+---scaled by acc.second_per_tick, so multiplying by the picked pump's
+---get_pumping_speed(quality) (per tick) inside acc.get_crafting_speed yields
+---fluid/sec at the LP layer.
 ---@param tile_prototype LuaTilePrototype
 ---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_offshore_tile_virtual(tile_prototype)
     local fluid_prototype = assert(tile_prototype.fluid)
-    local offshore_pump_prototypes = prototypes.get_entity_filtered {
-        { filter = "type", type = "offshore-pump" }
+
+    ---@type VirtualRecipe
+    local recipe = {
+        type = "virtual_recipe",
+        name = "<pump>" .. tile_prototype.name,
+        sprite_path = "tile/" .. tile_prototype.name,
+        elem_tooltip = { type = "tile", name = tile_prototype.name },
+        order = tile_prototype.order,
+        group_name = tile_prototype.group.name,
+        subgroup_name = tile_prototype.subgroup.name,
+        products = {
+            {
+                type = "fluid",
+                name = fluid_prototype.name,
+                amount = acc.second_per_tick,
+                probability = 1,
+                temperature = fluid_prototype.default_temperature,
+            }
+        },
+        ingredients = {},
+        pumped_fluid_name = fluid_prototype.name,
+        hidden = tile_prototype.hidden,
     }
-
-    local crafts = {}
-    for _, offshore_pump_prototype in pairs(offshore_pump_prototypes) do
-        local fluidbox_filter = acc.get_fluidbox_filter_prototype(offshore_pump_prototype, 1)
-        if fluidbox_filter and fluidbox_filter.name ~= fluid_prototype.name then
-            goto continue
-        end
-
-        ---@type VirtualRecipe
-        local recipe = {
-            type = "virtual_recipe",
-            name = string.format("<pump>%s:%s", offshore_pump_prototype.name, tile_prototype.name),
-            sprite_path = "tile/" .. tile_prototype.name,
-            elem_tooltip = { type = "tile", name = tile_prototype.name },
-            order = tile_prototype.order,
-            group_name = tile_prototype.group.name,
-            subgroup_name = tile_prototype.subgroup.name,
-            products = {
-                {
-                    type = "fluid",
-                    name = fluid_prototype.name,
-                    amount = offshore_pump_prototype.pumping_speed,
-                    probability = 1,
-                    temperature = fluid_prototype.default_temperature,
-                }
-            },
-            ingredients = {},
-            fixed_crafting_machine = tn.craft_to_typed_name(offshore_pump_prototype),
-            hidden = offshore_pump_prototype.hidden or tile_prototype.hidden,
-            source_entity_name = offshore_pump_prototype.name,
-        }
-        flib_table.insert(crafts, recipe)
-        ::continue::
-    end
-
-    return crafts
+    return { recipe }
 end
 
 return M

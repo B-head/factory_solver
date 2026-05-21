@@ -403,6 +403,38 @@ function M.create_resource_presets(origin)
     return ret
 end
 
+---Preset machine per fluid name across all fluid-bearing tiles. Keyed by
+---fluid name because the picker's compatible-pump set is determined by the
+---fluid (tile.fluid.name), so two tiles producing the same fluid can share
+---one preset entry.
+---@param origin table<string, TypedName>?
+---@return table<string, TypedName>
+function M.create_pump_presets(origin)
+    local ret = {}
+    if origin then
+        ret = flib_table.deep_copy(origin)
+    end
+
+    for _, tile in pairs(prototypes.tile) do
+        if not tile.fluid then
+            goto continue
+        end
+        local fluid_name = tile.fluid.name
+        tn.typed_name_migration(ret[fluid_name])
+        if tn.validate_typed_name(ret[fluid_name]) then
+            goto continue
+        end
+
+        local pumps = acc.get_offshore_pumps_for_fluid(fluid_name)
+        -- 0 件のケースも get_default_preset が `unknown-entity` センチネルに倒すので、
+        -- そのまま preset を埋めて get_machine_preset の assert を満たす。
+        ret[fluid_name] = M.get_default_preset(pumps, "machine")
+        ::continue::
+    end
+
+    return ret
+end
+
 ---comment
 ---@param origin table<string, TypedName>?
 ---@return table<string, TypedName>

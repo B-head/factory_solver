@@ -30,6 +30,7 @@ function M.init_player_data(player_index)
                 fluid_fuel = info.create_fluid_fuel_preset(),
                 resource = info.create_resource_presets(),
                 machine = info.create_machine_presets(),
+                pump = info.create_pump_presets(),
             },
             opened_gui = {},
         }
@@ -55,12 +56,14 @@ function M.reinit_player_data(player_index)
             presets.fluid_fuel = info.create_fluid_fuel_preset(presets.fluid_fuel)
             presets.resource = info.create_resource_presets(presets.resource)
             presets.machine = info.create_machine_presets(presets.machine)
+            presets.pump = info.create_pump_presets(presets.pump)
         else
             player_data.presets = {
                 fuel = info.create_fuel_presets(player_data.fuel_presets),
                 fluid_fuel = info.create_fluid_fuel_preset(),
                 resource = info.create_resource_presets(player_data.resource_presets),
                 machine = info.create_machine_presets(player_data.machine_presets),
+                pump = info.create_pump_presets(),
             }
             player_data.fuel_presets = nil
             player_data.resource_presets = nil
@@ -102,6 +105,16 @@ function M.reinit_force_data(force_index)
                 tn.typed_name_migration(line.recipe_typed_name)
                 tn.typed_name_migration(line.machine_typed_name)
                 tn.typed_name_migration(line.fuel_typed_name)
+
+                -- Pre-machine-picker offshore-pump recipes were keyed
+                -- <pump>{pump}:{tile}; the new form is <pump>{tile}, with
+                -- the pump moved into machine_typed_name (already migrated
+                -- above) and dispatched dynamically by pumped_fluid_name.
+                local recipe_name = line.recipe_typed_name.name
+                local _, tile_name = recipe_name:match("^(<pump>[^:]+):(.+)$")
+                if tile_name then
+                    line.recipe_typed_name.name = "<pump>" .. tile_name
+                end
 
                 -- Legacy lines for burns_fluid=false machines held a bare or
                 -- range-only fluid TypedName; the picker now offers concrete
@@ -158,6 +171,12 @@ function M.reinit_force_data(force_index)
             
             for _, constraint in ipairs(solution.constraints) do
                 tn.typed_name_migration(constraint)
+                if constraint.type == "virtual_recipe" then
+                    local _, tile_name = constraint.name:match("^(<pump>[^:]+):(.+)$")
+                    if tile_name then
+                        constraint.name = "<pump>" .. tile_name
+                    end
+                end
             end
 
             -- Phase 4 / 5 (fluid temperature dimension) changed the LP variable
@@ -279,6 +298,8 @@ function M.get_machine_preset(player_index, recipe_typed_name)
             return recipe.fixed_crafting_machine
         elseif recipe.resource_category then
             return assert(player_data.presets.resource[recipe.resource_category])
+        elseif recipe.pumped_fluid_name then
+            return assert(player_data.presets.pump[recipe.pumped_fluid_name])
         else
             return assert()
         end

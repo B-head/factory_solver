@@ -367,6 +367,22 @@ function M.get_machines_in_resource_category(category_name)
     return machines
 end
 
+---Offshore pumps compatible with a tile-bound fluid. An empty fluid_box
+---filter on the pump means "any fluid"; a set filter must match by name.
+---@param fluid_name string
+---@return LuaEntityPrototype[]
+function M.get_offshore_pumps_for_fluid(fluid_name)
+    local pumps = prototypes.get_entity_filtered {
+        { filter = "type", type = "offshore-pump" },
+    }
+    pumps = flib_table.filter(pumps, function(value)
+        local filter = M.get_fluidbox_filter_prototype(value, 1)
+        return filter == nil or filter.name == fluid_name
+    end)
+    pumps = fs_util.sort_prototypes(fs_util.to_list(pumps))
+    return pumps
+end
+
 ---comment
 ---@param recipe LuaRecipePrototype | VirtualRecipe
 ---@return LuaEntityPrototype[]
@@ -378,6 +394,8 @@ function M.get_machines_for_recipe(recipe)
         return { tn.typed_name_to_machine(recipe.fixed_crafting_machine) }
     elseif recipe.resource_category then
         return M.get_machines_in_resource_category(recipe.resource_category)
+    elseif recipe.pumped_fluid_name then
+        return M.get_offshore_pumps_for_fluid(recipe.pumped_fluid_name)
     else
         return assert()
     end
@@ -791,6 +809,11 @@ end
 ---@return number
 function M.get_crafting_speed(machine, quality, effectivity_speed, crafting_speed_cap)
     local ret = machine.get_crafting_speed(quality) or machine.mining_speed
+    if not ret and machine.type == "offshore-pump" then
+        -- get_pumping_speed returns per-tick units; offshore-pump virtual
+        -- recipes bake acc.second_per_tick into product.amount to compensate.
+        ret = machine.get_pumping_speed(quality)
+    end
     if not ret then
         ret = 1 + M.get_quality_level(quality) * 0.3
     end

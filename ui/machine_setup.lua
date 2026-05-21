@@ -41,7 +41,7 @@ function handlers.on_make_machine_table(event)
     local no_machine_label = elem.parent.parent.no_machine_label
     no_machine_label.visible = #machines == 0
     if #machines == 0 then
-        local category = recipe.category or recipe.resource_category
+        local category = recipe.category or recipe.resource_category or recipe.pumped_fluid_name
         if category then
             no_machine_label.caption = string.format(
                 "No machine in any loaded mod can craft this recipe (category: %s).",
