@@ -757,7 +757,9 @@ end
 ---@param machine LuaEntityPrototype
 ---@return boolean
 function M.is_generator(machine)
-    return machine.type == "generator" or machine.type == "burner-generator"
+    return machine.type == "generator"
+        or machine.type == "burner-generator"
+        or machine.type == "fusion-generator"
 end
 
 ---Returns the single-temperature virtual_material variants of the machine's

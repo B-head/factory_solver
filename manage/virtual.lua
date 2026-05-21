@@ -62,6 +62,8 @@ function M.create_virtuals()
             result_crafts = M.create_reactor_virtual(entity)
         elseif entity.type == "fusion-reactor" then
             result_crafts = M.create_fusion_reactor_virtual(entity)
+        elseif entity.type == "fusion-generator" then
+            result_crafts = M.create_fusion_generator_virtual(entity)
         elseif entity.type == "resource" then
             result_crafts = M.create_resource_virtual(entity, planet_index)
         end
@@ -602,6 +604,64 @@ function M.create_fusion_reactor_virtual(fusion_reactor_prototype)
         fixed_crafting_machine = tn.craft_to_typed_name(fusion_reactor_prototype),
         hidden = fusion_reactor_prototype.hidden,
         source_entity_name = fusion_reactor_prototype.name,
+    }
+
+    return { recipe }
+end
+
+---Space Age fusion-generator: consumes hot plasma (input fluidbox carries a
+---minimum_temperature, e.g. fusion-plasma ≥1000°C) and emits a spent fluid
+---(output filter at default_temperature) plus electrical power. The power
+---output is surfaced via acc.is_generator → get_generator_power for the UI
+---power column; only the fluid conversion enters the LP. Forwarding the
+---input box's minimum_temperature on the ingredient steers pre_solve toward
+---the hot temperature variant of the input fluid so the fusion-reactor's
+---hot plasma output binds to it through add_fluid_temperature_virtuals.
+---@param fusion_generator_prototype LuaEntityPrototype
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_fusion_generator_virtual(fusion_generator_prototype)
+    local input_filter = acc.get_fluidbox_filter_prototype(fusion_generator_prototype, 1)
+    local output_filter = acc.get_fluidbox_filter_prototype(fusion_generator_prototype, 2)
+    if not input_filter or not output_filter then
+        return {}
+    end
+
+    local input_box = fusion_generator_prototype.fluidbox_prototypes[1]
+    local in_min_temp = input_box and input_box.minimum_temperature
+    local in_max_temp = input_box and input_box.maximum_temperature
+
+    local rate = fusion_generator_prototype.get_fluid_usage_per_tick() * acc.second_per_tick
+
+    ---@type VirtualRecipe
+    local recipe = {
+        type = "virtual_recipe",
+        name = "<run>" .. fusion_generator_prototype.name,
+        sprite_path = "entity/" .. fusion_generator_prototype.name,
+        elem_tooltip = { type = "entity", name = fusion_generator_prototype.name },
+        order = fusion_generator_prototype.order,
+        group_name = fusion_generator_prototype.group.name,
+        subgroup_name = fusion_generator_prototype.subgroup.name,
+        products = {
+            {
+                type = "fluid",
+                name = output_filter.name,
+                amount = rate,
+                probability = 1,
+                temperature = output_filter.default_temperature,
+            },
+        },
+        ingredients = {
+            {
+                type = "fluid",
+                name = input_filter.name,
+                amount = rate,
+                minimum_temperature = in_min_temp,
+                maximum_temperature = in_max_temp,
+            },
+        },
+        fixed_crafting_machine = tn.craft_to_typed_name(fusion_generator_prototype),
+        hidden = fusion_generator_prototype.hidden,
+        source_entity_name = fusion_generator_prototype.name,
     }
 
     return { recipe }
