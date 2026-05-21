@@ -135,7 +135,7 @@ function handlers.on_make_machine_modules(event)
         local _, added = fs_util.add_gui(elem, def)
         local typed_name = module_typed_names[tostring(index)]
         if typed_name then
-            if tn.get_module(typed_name.name) then
+            if acc.get_module(typed_name.name) then
                 added.elem_value = { name = typed_name.name, quality = typed_name.quality }
             else
                 added.elem_value = { name = "item-unknown", quality = typed_name.quality }
@@ -182,7 +182,7 @@ function handlers.on_make_beacons_table(event)
     elem.clear()
     for beacon_index, affected_by_beacon in ipairs(affected_by_beacons) do
         local beacon_typed_name = affected_by_beacon.beacon_typed_name
-        local beacon = beacon_typed_name and tn.get_beacon(beacon_typed_name.name)
+        local beacon = beacon_typed_name and acc.get_beacon(beacon_typed_name.name)
 
         do
             local def = {
@@ -254,7 +254,7 @@ function handlers.on_make_beacons_table(event)
                     local _, added = fs_util.add_gui(flow, def)
                     local typed_name = module_typed_names[tostring(slot_index)]
                     if typed_name then
-                        if tn.get_module(typed_name.name) then
+                        if acc.get_module(typed_name.name) then
                             added.elem_value = { name = typed_name.name, quality = typed_name.quality }
                         else
                             added.elem_value = { name = "item-unknown", quality = typed_name.quality }

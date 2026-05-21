@@ -389,6 +389,42 @@ function M.join_categories(categories)
 end
 
 ---comment
+---@param name string?
+---@return LuaItemPrototype?
+function M.get_module(name)
+    if not name then
+        return nil
+    end
+
+    local module = prototypes.item[name]
+    if not module then
+        return nil
+    elseif module.type ~= "module" then
+        return nil
+    else
+        return module
+    end
+end
+
+---comment
+---@param name string?
+---@return LuaEntityPrototype?
+function M.get_beacon(name)
+    if not name then
+        return nil
+    end
+
+    local beacon = prototypes.entity[name]
+    if not beacon then
+        return nil
+    elseif beacon.type ~= "beacon" then
+        return nil
+    else
+        return beacon
+    end
+end
+
+---comment
 ---@param category_name string
 ---@return LuaEntityPrototype[]
 function M.get_machines_in_category(category_name)
@@ -941,7 +977,7 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons)
 
     for _, affected_by_beacon in ipairs(affected_by_beacons) do
         local beacon_typed_name = affected_by_beacon.beacon_typed_name
-        local beacon = beacon_typed_name and tn.get_beacon(beacon_typed_name.name)
+        local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
         if beacon then
             local effectivity = assert(beacon.distribution_effectivity) * affected_by_beacon.beacon_quantity
             local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
@@ -992,7 +1028,7 @@ function M.get_total_effectivity(module_counts, effect_receiver)
 
     for name, inner in pairs(module_counts) do
         for quality, count in pairs(inner) do
-            local module = tn.get_module(name)
+            local module = M.get_module(name)
             if not module then
                 goto continue
             end
