@@ -100,12 +100,10 @@ function M.to_normalized_production_lines(production_lines)
             flib_table.insert(ingredients, amount)
         end
 
-        local power = 0
         if acc.is_use_fuel(machine) then
             local ftn = assert(line.fuel_typed_name)
-            local fuel = tn.typed_name_to_material(ftn)
             local amount_per_second = acc.get_fuel_amount_per_second(machine, machine_quality,
-                fuel, ftn.quality, effectivity.consumption, ftn)
+                tn.typed_name_to_material(ftn), ftn.quality, effectivity.consumption, ftn)
 
             ---@type NormalizedAmount
             local amount = {
@@ -118,17 +116,10 @@ function M.to_normalized_production_lines(production_lines)
                 maximum_temperature = ftn.maximum_temperature,
             }
             flib_table.insert(ingredients, amount)
-
-            if acc.is_generator(machine) then
-                power = acc.get_generator_power(machine, machine_quality, fuel, ftn)
-            end
-        elseif acc.is_generator(machine) then
-            -- Defense-in-depth: a generator whose energy source isn't
-            -- detected as fuel-based (e.g. void) bypasses the branch above.
-            power = acc.raw_energy_production_to_power(machine, machine_quality)
-        else
-            power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
         end
+
+        local power = acc.get_power_per_second(machine, machine_quality,
+            effectivity.consumption, line.fuel_typed_name)
 
         ---@type NormalizedProductionLine
         local normalized_line = {

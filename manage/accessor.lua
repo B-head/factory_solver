@@ -292,6 +292,27 @@ function M.get_generator_power(machine, machine_quality, fuel, fuel_typed_name)
     return max_power
 end
 
+---Per-second electric power flow for a machine running at full throughput.
+---Positive = consumption, negative = production, zero = the machine
+---exchanges its energy in fuel form (and so doesn't appear on the electric
+---grid). Generators are bounded by both max_power_output and the supplied
+---fuel's energy density.
+---@param machine LuaEntityPrototype
+---@param machine_quality QualityID
+---@param effectivity_consumption number
+---@param fuel_typed_name TypedName?
+---@return number
+function M.get_power_per_second(machine, machine_quality, effectivity_consumption, fuel_typed_name)
+    if M.is_generator(machine) then
+        local fuel = fuel_typed_name and tn.typed_name_to_material(fuel_typed_name)
+        return M.get_generator_power(machine, machine_quality, fuel, fuel_typed_name)
+    end
+    if M.is_use_fuel(machine) then
+        return 0
+    end
+    return M.raw_energy_usage_to_power(machine, machine_quality, effectivity_consumption)
+end
+
 ---comment
 ---@param value number
 ---@param scale TimeScale

@@ -458,15 +458,9 @@ function M.get_total_power(solution)
         local crafting_speed = acc.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
         local quantity_of_machines_required = M.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
-        if not acc.is_use_fuel(machine) then
-            local power = acc.raw_energy_usage_to_power(machine, machine_quality, effectivity.consumption)
-            total = total + power * quantity_of_machines_required
-        elseif acc.is_generator(machine) then
-            local ftn = line.fuel_typed_name
-            local fuel = ftn and tn.typed_name_to_material(ftn)
-            local power = acc.get_generator_power(machine, machine_quality, fuel, ftn)
-            total = total + power * quantity_of_machines_required
-        end
+        local power = acc.get_power_per_second(machine, machine_quality,
+            effectivity.consumption, line.fuel_typed_name)
+        total = total + power * quantity_of_machines_required
     end
 
     return total
