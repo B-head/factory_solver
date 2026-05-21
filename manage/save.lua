@@ -31,6 +31,7 @@ function M.init_player_data(player_index)
                 resource = info.create_resource_presets(),
                 machine = info.create_machine_presets(),
                 pump = info.create_pump_presets(),
+                lab = info.create_lab_presets(),
             },
             opened_gui = {},
         }
@@ -57,6 +58,7 @@ function M.reinit_player_data(player_index)
             presets.resource = info.create_resource_presets(presets.resource)
             presets.machine = info.create_machine_presets(presets.machine)
             presets.pump = info.create_pump_presets(presets.pump)
+            presets.lab = info.create_lab_presets(presets.lab)
         else
             player_data.presets = {
                 fuel = info.create_fuel_presets(player_data.fuel_presets),
@@ -64,6 +66,7 @@ function M.reinit_player_data(player_index)
                 resource = info.create_resource_presets(player_data.resource_presets),
                 machine = info.create_machine_presets(player_data.machine_presets),
                 pump = info.create_pump_presets(),
+                lab = info.create_lab_presets(),
             }
             player_data.fuel_presets = nil
             player_data.resource_presets = nil
@@ -300,6 +303,8 @@ function M.get_machine_preset(player_index, recipe_typed_name)
             return assert(player_data.presets.resource[recipe.resource_category])
         elseif recipe.pumped_fluid_name then
             return assert(player_data.presets.pump[recipe.pumped_fluid_name])
+        elseif recipe.consumed_pack_name then
+            return assert(player_data.presets.lab[recipe.consumed_pack_name])
         else
             return assert()
         end
@@ -388,6 +393,7 @@ function M.get_total_amounts(solution)
                 crafting_energy,
                 crafting_speed
             )
+            acc.apply_lab_input_productivity_to_ingredient(amount, machine)
             local filter_type = amount.type
             local name = amount.name
             local amount_per_second = amount.amount_per_second * quantity_of_machines_required

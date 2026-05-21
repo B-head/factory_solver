@@ -42,6 +42,7 @@ __factory_solver__storage = {}
 ---@field resource table<string, TypedName>
 ---@field machine table<string, TypedName>
 ---@field pump table<string, TypedName>
+---@field lab table<string, TypedName>
 
 ---@class ForceLocalData
 ---@field relation_to_recipes RelationToRecipes
@@ -158,6 +159,7 @@ __factory_solver__storage = {}
 ---@field fixed_crafting_machine TypedName?
 ---@field resource_category string?
 ---@field pumped_fluid_name string?
+---@field consumed_pack_name string?
 ---@field crafting_speed_cap number?
 ---@field hidden boolean
 ---@field source_entity_name string?

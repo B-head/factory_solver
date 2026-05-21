@@ -28,6 +28,16 @@ function M.create_virtuals()
             subgroup_name = "other",
             hidden = true,
         },
+        ["<research>"] = {
+            type = "virtual_material",
+            name = "<research>",
+            sprite_path = "utility/technology_white",
+            tooltip = "Research progress",
+            order = "a",
+            group_name = "other",
+            subgroup_name = "other",
+            hidden = false,
+        },
     }
 
     ---@type table<string, VirtualRecipe>
@@ -84,6 +94,34 @@ function M.create_virtuals()
                 recipes[craft.name] = craft
             else
                 assert()
+            end
+        end
+    end
+
+    ---@type table<string, LuaEntityPrototype[]>
+    local pack_to_labs = {}
+    for _, entity in pairs(prototypes.entity) do
+        if entity.type == "lab" then
+            for _, pack_name in ipairs(entity.lab_inputs or {}) do
+                if not pack_to_labs[pack_name] then
+                    pack_to_labs[pack_name] = {}
+                end
+                flib_table.insert(pack_to_labs[pack_name], entity)
+            end
+        end
+    end
+    for pack_name, labs in pairs(pack_to_labs) do
+        local pack_prototype = prototypes.item[pack_name]
+        if pack_prototype then
+            local result_crafts = M.create_lab_research_virtual(pack_prototype, labs)
+            for _, craft in ipairs(result_crafts) do
+                if craft.type == "virtual_material" then
+                    materials[craft.name] = craft
+                elseif craft.type == "virtual_recipe" then
+                    recipes[craft.name] = craft
+                else
+                    assert()
+                end
             end
         end
     end
@@ -690,6 +728,53 @@ function M.create_offshore_tile_virtual(tile_prototype, planet_index)
         source_planet_names = M.collect_planets_for_prototype(tile_prototype.name,
             tile_prototype.autoplace_specification,
             planet_index.tile_planets, planet_index.control_planets),
+    }
+    return { recipe }
+end
+
+---One virtual recipe per science pack item that at least one lab accepts.
+---The picker dispatches by consumed_pack_name to the set of labs whose
+---lab_inputs contains the pack. crafting_speed is folded in acc.get_crafting_speed
+---as researching_speed × science_pack_drain_rate_percent/100, so 1 craft = 1
+---pack consumed = 1 <research> emitted at base speed/drain.
+---@param pack_prototype LuaItemPrototype
+---@param labs LuaEntityPrototype[]
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_lab_research_virtual(pack_prototype, labs)
+    local all_labs_hidden = true
+    for _, lab in ipairs(labs) do
+        if not lab.hidden then
+            all_labs_hidden = false
+            break
+        end
+    end
+
+    ---@type VirtualRecipe
+    local recipe = {
+        type = "virtual_recipe",
+        name = "<research>" .. pack_prototype.name,
+        sprite_path = "item/" .. pack_prototype.name,
+        elem_tooltip = { type = "item", name = pack_prototype.name },
+        order = pack_prototype.order,
+        group_name = pack_prototype.group.name,
+        subgroup_name = pack_prototype.subgroup.name,
+        products = {
+            {
+                type = "virtual_material",
+                name = "<research>",
+                amount = 1,
+                probability = 1,
+            }
+        },
+        ingredients = {
+            {
+                type = "item",
+                name = pack_prototype.name,
+                amount = 1,
+            }
+        },
+        consumed_pack_name = pack_prototype.name,
+        hidden = pack_prototype.hidden or all_labs_hidden,
     }
     return { recipe }
 end

@@ -459,6 +459,40 @@ function M.create_pump_presets(origin)
     return ret
 end
 
+---Preset lab per science pack name. Keyed by the consumed pack item name
+---because the picker's compatible-lab set is determined by which labs accept
+---that pack in their lab_inputs.
+---@param origin table<string, TypedName>?
+---@return table<string, TypedName>
+function M.create_lab_presets(origin)
+    local ret = {}
+    if origin then
+        ret = flib_table.deep_copy(origin)
+    end
+
+    local pack_seen = {}
+    for _, entity in pairs(prototypes.entity) do
+        if entity.type == "lab" then
+            for _, pack_name in ipairs(entity.lab_inputs or {}) do
+                pack_seen[pack_name] = true
+            end
+        end
+    end
+
+    for pack_name, _ in pairs(pack_seen) do
+        tn.typed_name_migration(ret[pack_name])
+        if tn.validate_typed_name(ret[pack_name]) then
+            goto continue
+        end
+
+        local labs = acc.get_labs_for_pack(pack_name)
+        ret[pack_name] = M.get_default_preset(labs, "machine")
+        ::continue::
+    end
+
+    return ret
+end
+
 ---comment
 ---@param origin table<string, TypedName>?
 ---@return table<string, TypedName>

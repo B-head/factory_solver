@@ -221,6 +221,7 @@ function handlers.make_production_line_table(event)
                     crafting_energy,
                     crafting_speed
                 )
+                acc.apply_lab_input_productivity_to_ingredient(amount, machine)
 
                 local typed_name = tn.create_typed_name(
                     amount.type, amount.name, amount.quality,

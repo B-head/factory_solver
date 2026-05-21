@@ -96,6 +96,7 @@ function M.to_normalized_production_lines(production_lines)
                 crafting_energy,
                 crafting_speed
             )
+            acc.apply_lab_input_productivity_to_ingredient(amount, machine)
 
             flib_table.insert(ingredients, amount)
         end

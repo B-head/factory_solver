@@ -50,6 +50,51 @@ function M.raw_product_to_amount(product, quality, craft_energy, crafting_speed,
     }
 end
 
+---Scale a normalized lab ingredient amount in place by every input-side
+---productivity-like factor that does NOT come from modules:
+---  * science_pack_drain_rate_percent (lab/biolab intrinsic): fewer packs
+---    drained per research unit.
+---  * pack quality durability (LuaItemPrototype:get_durability(quality)): a
+---    quality-N pack carries durability-N research units worth of drain, so
+---    one pack item is consumed once every `durability` research units.
+---Both reduce per-second pack consumption, stack multiplicatively with each
+---other and with module productivity (which raw_product_to_amount already
+---applied on products). Module productivity is intentionally NOT applied
+---here — that's a separate axis on the output side.
+---Every caller that turns a recipe ingredient into a per-second amount for
+---a lab-driven recipe must call this so the LP, the per-line UI, and the
+---totals display agree.
+---@param amount NormalizedAmount
+---@param machine LuaEntityPrototype
+function M.apply_lab_input_productivity_to_ingredient(amount, machine)
+    if machine.type ~= "lab" then
+        return
+    end
+    amount.amount_per_second = amount.amount_per_second
+        * (machine.science_pack_drain_rate_percent / 100)
+    local item_proto = prototypes.item[amount.name]
+    if not item_proto then
+        return
+    end
+    -- get_total_amounts emits the "unknown-quality" sentinel; let the
+    -- prototypes.quality lookup filter that case to nil before we reach
+    -- get_durability (which would otherwise raise).
+    local quality_proto = prototypes.quality[amount.quality]
+    if not quality_proto then
+        return
+    end
+    -- LuaItemPrototype.get_durability is bound to the item proto at index
+    -- time — its in-game signature is `(QualityID) -> double?`, NOT a Lua
+    -- method. Calling with colon (`item_proto:get_durability(q)`) would
+    -- pass item_proto in the QualityID slot and trip Factorio's "Invalid
+    -- QualityID" runtime check. pcall keeps non-tool items (no durability)
+    -- from crashing the solve.
+    local ok, durability = pcall(item_proto.get_durability, quality_proto)
+    if ok and durability and durability > 0 then
+        amount.amount_per_second = amount.amount_per_second / durability
+    end
+end
+
 ---comment
 ---@param ingredient IngredientEx
 ---@param quality string
@@ -383,6 +428,27 @@ function M.get_offshore_pumps_for_fluid(fluid_name)
     return pumps
 end
 
+---Labs that accept a particular science pack item (their lab_inputs contains
+---the given name). Drives the machine picker for <research>{pack} virtual
+---recipes.
+---@param pack_name string
+---@return LuaEntityPrototype[]
+function M.get_labs_for_pack(pack_name)
+    local labs = prototypes.get_entity_filtered {
+        { filter = "type", type = "lab" },
+    }
+    labs = flib_table.filter(labs, function(value)
+        for _, input in ipairs(value.lab_inputs or {}) do
+            if input == pack_name then
+                return true
+            end
+        end
+        return false
+    end)
+    labs = fs_util.sort_prototypes(fs_util.to_list(labs))
+    return labs
+end
+
 ---comment
 ---@param recipe LuaRecipePrototype | VirtualRecipe
 ---@return LuaEntityPrototype[]
@@ -396,6 +462,8 @@ function M.get_machines_for_recipe(recipe)
         return M.get_machines_in_resource_category(recipe.resource_category)
     elseif recipe.pumped_fluid_name then
         return M.get_offshore_pumps_for_fluid(recipe.pumped_fluid_name)
+    elseif recipe.consumed_pack_name then
+        return M.get_labs_for_pack(recipe.consumed_pack_name)
     else
         return assert()
     end
@@ -804,11 +872,20 @@ end
 ---@param crafting_speed_cap number
 ---@return number
 function M.get_crafting_speed(machine, quality, effectivity_speed, crafting_speed_cap)
-    local ret = machine.get_crafting_speed(quality) or machine.mining_speed
-    if not ret and machine.type == "offshore-pump" then
+    local ret
+    if machine.type == "lab" then
+        -- 1 craft of a <research>{pack} virtual recipe represents 1 unit of
+        -- research progress. researching_speed alone defines the rate; the
+        -- pack-consumption side of drain_rate is applied as an input-only
+        -- productivity-like factor in pre_solve, so output (research) and
+        -- input (pack) can scale independently.
+        ret = machine.get_researching_speed(quality)
+    elseif machine.type == "offshore-pump" then
         -- get_pumping_speed returns per-tick units; offshore-pump virtual
         -- recipes bake acc.second_per_tick into product.amount to compensate.
         ret = machine.get_pumping_speed(quality)
+    else
+        ret = machine.get_crafting_speed(quality) or machine.mining_speed
     end
     if not ret then
         ret = 1 + M.get_quality_level(quality) * 0.3
