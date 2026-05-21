@@ -55,6 +55,7 @@ __factory_solver__storage = {}
 ---@field item table<string, RelationToRecipe>
 ---@field fluid table<string, RelationToRecipe>
 ---@field virtual_recipe table<string, RelationToRecipe>
+---@field virtual_recipe_researched table<string, boolean>
 
 ---@class RelationToRecipe
 ---@field craftable_count integer
@@ -160,6 +161,7 @@ __factory_solver__storage = {}
 ---@field crafting_speed_cap number?
 ---@field hidden boolean
 ---@field source_entity_name string?
+---@field source_planet_names string[]?
 
 ---@class VirtualProduct
 ---@field type "virtual_material"

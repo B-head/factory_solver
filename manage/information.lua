@@ -168,20 +168,38 @@ function M.create_relation_to_recipes(force_index)
 
     -- Virtual recipes have no per-force `enabled` flag; their researched-ness
     -- is derived from the source entity (its `items_to_place_this` against the
-    -- item table built above). Reuse `acc.entity_is_unresearched` by handing it
-    -- a partial relation_to_recipes that only exposes the items map.
+    -- item table built above) and, for entity-less tile / resource virtuals,
+    -- from `force.is_space_location_unlocked` against the planets that autoplace
+    -- them. The result is cached per name on `virtual_recipe_researched` so
+    -- accessor.is_unresearched can look it up without re-deriving (and without
+    -- needing a force handle).
     ---@diagnostic disable-next-line: missing-fields
     local items_view = { item = items } ---@type RelationToRecipes
+    local virtual_recipe_researched = {} ---@type table<string, boolean>
     ---@param recipe VirtualRecipe
-    local function virtual_recipe_visible(recipe)
-        if recipe.hidden then return false end
-        if not recipe.source_entity_name then return true end
-        local entity = prototypes.entity[recipe.source_entity_name]
-        return not acc.entity_is_unresearched(entity, items_view)
+    ---@return boolean
+    local function compute_researched(recipe)
+        if recipe.source_entity_name then
+            local entity = prototypes.entity[recipe.source_entity_name]
+            if acc.entity_is_unresearched(entity, items_view) then return false end
+        end
+        if recipe.source_planet_names then
+            local any_unlocked = false
+            for _, planet_name in ipairs(recipe.source_planet_names) do
+                if force.is_space_location_unlocked(planet_name) then
+                    any_unlocked = true
+                    break
+                end
+            end
+            if not any_unlocked then return false end
+        end
+        return true
     end
 
     for _, recipe in pairs(storage.virtuals.recipe) do
-        local is_visible = virtual_recipe_visible(recipe)
+        local researched = compute_researched(recipe)
+        virtual_recipe_researched[recipe.name] = researched
+        local is_visible = researched and not recipe.hidden
         for _, value in pairs(recipe.products) do
             local info = get_info(value.type, value.name)
             flib_table.insert(info.recipe_for_product, recipe.name)
@@ -234,7 +252,13 @@ function M.create_relation_to_recipes(force_index)
         end
     end
 
-    return { enabled_recipe = enabled_recipe, item = items, fluid = fluids, virtual_recipe = virtuals }
+    return {
+        enabled_recipe = enabled_recipe,
+        item = items,
+        fluid = fluids,
+        virtual_recipe = virtuals,
+        virtual_recipe_researched = virtual_recipe_researched,
+    }
 end
 
 ---Create caches of additional information for groups.

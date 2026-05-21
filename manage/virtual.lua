@@ -36,6 +36,8 @@ function M.create_virtuals()
     ---@type table<string, { [string]: true }>
     local fuel_categories_dictionary = {}
 
+    local planet_index = M.build_planet_index()
+
     for _, entity in pairs(prototypes.entity) do
         local result_crafts = {}
         if entity.type == "rocket-silo" then
@@ -49,7 +51,7 @@ function M.create_virtuals()
         elseif entity.type == "reactor" then
             result_crafts = M.create_reactor_virtual(entity)
         elseif entity.type == "resource" then
-            result_crafts = M.create_resource_virtual(entity)
+            result_crafts = M.create_resource_virtual(entity, planet_index)
         end
 
         for _, craft in ipairs(result_crafts) do
@@ -72,7 +74,7 @@ function M.create_virtuals()
     for _, tile in pairs(prototypes.tile) do
         local result_crafts = {}
         if tile.fluid then
-            result_crafts = M.create_offshore_tile_virtual(tile)
+            result_crafts = M.create_offshore_tile_virtual(tile, planet_index)
         end
 
         for _, craft in ipairs(result_crafts) do
@@ -499,9 +501,106 @@ function M.create_reactor_virtual(reactor_prototype)
     return { recipe }
 end
 
+---@class PlanetIndex
+---@field entity_planets table<string, table<string, true>>
+---@field tile_planets table<string, table<string, true>>
+---@field control_planets table<string, table<string, true>>
+
+---Scan every planet's map_gen_settings to build reverse maps from
+---autoplaced entity/tile name (and from autoplace control name) back to
+---the set of planet space-location names that reference it. Used by the
+---resource / offshore-tile virtual builders to attach `source_planet_names`
+---so the picker can gate them on `force.is_space_location_unlocked` at
+---runtime. Planets without runtime support (no `prototypes.planet` table)
+---return empty maps and every caller falls back to the unconditional path.
+---@return PlanetIndex
+function M.build_planet_index()
+    local entity_planets = {} ---@type table<string, table<string, true>>
+    local tile_planets = {}   ---@type table<string, table<string, true>>
+    local control_planets = {} ---@type table<string, table<string, true>>
+
+    -- Planets are surfaced under `prototypes.space_location` (LuaSpaceLocationPrototype);
+    -- the planet subclass is the only kind that carries `map_gen_settings`, so we
+    -- gate on its presence rather than on a `type == "planet"` discriminator.
+    for planet_name, planet in pairs(prototypes.space_location or {}) do
+        local mgs = planet.map_gen_settings
+        if mgs then
+            local autoplace_settings = mgs.autoplace_settings
+            if autoplace_settings then
+                local entity_settings = autoplace_settings["entity"]
+                if entity_settings and entity_settings.settings then
+                    for name, _ in pairs(entity_settings.settings) do
+                        local set = entity_planets[name] or {}
+                        set[planet_name] = true
+                        entity_planets[name] = set
+                    end
+                end
+                local tile_settings = autoplace_settings["tile"]
+                if tile_settings and tile_settings.settings then
+                    for name, _ in pairs(tile_settings.settings) do
+                        local set = tile_planets[name] or {}
+                        set[planet_name] = true
+                        tile_planets[name] = set
+                    end
+                end
+            end
+            if mgs.autoplace_controls then
+                for control_name, _ in pairs(mgs.autoplace_controls) do
+                    local set = control_planets[control_name] or {}
+                    set[planet_name] = true
+                    control_planets[control_name] = set
+                end
+            end
+        end
+    end
+
+    return {
+        entity_planets = entity_planets,
+        tile_planets = tile_planets,
+        control_planets = control_planets,
+    }
+end
+
+---Resolve a resource entity or fluid tile back to the set of planets that
+---autoplace it, by name and by autoplace_control. Returns a sorted array
+---to keep storage deterministic across save/load (pairs over the per-name
+---set is not order-stable). Returns nil if no planet linkage was found —
+---callers treat that as "no planet gate", preserving the historical
+---always-researched behavior for vanilla-only and modded resources.
+---@param name string
+---@param autoplace_specification AutoplaceSpecification?
+---@param name_to_planets table<string, table<string, true>>
+---@param control_planets table<string, table<string, true>>
+---@return string[]?
+function M.collect_planets_for_prototype(name, autoplace_specification, name_to_planets, control_planets)
+    local union = {}
+    if name_to_planets[name] then
+        for planet_name, _ in pairs(name_to_planets[name]) do
+            union[planet_name] = true
+        end
+    end
+    if autoplace_specification and autoplace_specification.control then
+        local hit = control_planets[autoplace_specification.control]
+        if hit then
+            for planet_name, _ in pairs(hit) do
+                union[planet_name] = true
+            end
+        end
+    end
+
+    local sorted = {}
+    for planet_name, _ in pairs(union) do
+        flib_table.insert(sorted, planet_name)
+    end
+    if #sorted == 0 then return nil end
+    table.sort(sorted)
+    return sorted
+end
+
 ---@param resource_prototype LuaEntityPrototype
+---@param planet_index PlanetIndex
 ---@return (VirtualRecipe|VirtualMaterial)[]
-function M.create_resource_virtual(resource_prototype)
+function M.create_resource_virtual(resource_prototype, planet_index)
     local mineable = resource_prototype.mineable_properties
 
     local products = {}
@@ -534,6 +633,9 @@ function M.create_resource_virtual(resource_prototype)
         ingredients = ingredients,
         resource_category = resource_prototype.resource_category,
         hidden = resource_prototype.hidden,
+        source_planet_names = M.collect_planets_for_prototype(resource_prototype.name,
+            resource_prototype.autoplace_specification,
+            planet_index.entity_planets, planet_index.control_planets),
     }
 
     return { recipe }
@@ -546,8 +648,9 @@ end
 ---get_pumping_speed(quality) (per tick) inside acc.get_crafting_speed yields
 ---fluid/sec at the LP layer.
 ---@param tile_prototype LuaTilePrototype
+---@param planet_index PlanetIndex
 ---@return (VirtualRecipe|VirtualMaterial)[]
-function M.create_offshore_tile_virtual(tile_prototype)
+function M.create_offshore_tile_virtual(tile_prototype, planet_index)
     local fluid_prototype = assert(tile_prototype.fluid)
 
     ---@type VirtualRecipe
@@ -571,6 +674,9 @@ function M.create_offshore_tile_virtual(tile_prototype)
         ingredients = {},
         pumped_fluid_name = fluid_prototype.name,
         hidden = tile_prototype.hidden,
+        source_planet_names = M.collect_planets_for_prototype(tile_prototype.name,
+            tile_prototype.autoplace_specification,
+            planet_index.tile_planets, planet_index.control_planets),
     }
     return { recipe }
 end

@@ -491,11 +491,7 @@ function M.is_unresearched(craft, relation_to_recipes)
             return false
         end
     elseif craft.type == "virtual_recipe" then
-        if craft.source_entity_name then
-            return M.entity_is_unresearched(prototypes.entity[craft.source_entity_name], relation_to_recipes)
-        else
-            return false
-        end
+        return not relation_to_recipes.virtual_recipe_researched[craft.name]
     else
         return assert()
     end
