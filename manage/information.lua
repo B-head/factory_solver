@@ -166,11 +166,26 @@ function M.create_relation_to_recipes(force_index)
         end
     end
 
+    -- Virtual recipes have no per-force `enabled` flag; their researched-ness
+    -- is derived from the source entity (its `items_to_place_this` against the
+    -- item table built above). Reuse `acc.entity_is_unresearched` by handing it
+    -- a partial relation_to_recipes that only exposes the items map.
+    ---@diagnostic disable-next-line: missing-fields
+    local items_view = { item = items } ---@type RelationToRecipes
+    ---@param recipe VirtualRecipe
+    local function virtual_recipe_visible(recipe)
+        if recipe.hidden then return false end
+        if not recipe.source_entity_name then return true end
+        local entity = prototypes.entity[recipe.source_entity_name]
+        return not acc.entity_is_unresearched(entity, items_view)
+    end
+
     for _, recipe in pairs(storage.virtuals.recipe) do
+        local is_visible = virtual_recipe_visible(recipe)
         for _, value in pairs(recipe.products) do
             local info = get_info(value.type, value.name)
             flib_table.insert(info.recipe_for_product, recipe.name)
-            if true then -- TODO
+            if is_visible then
                 info.craftable_count = info.craftable_count + 1
             end
         end
@@ -281,14 +296,24 @@ function M.create_group_infos(force_index, relation_to_recipes)
 
     for _, virtual_material in pairs(storage.virtuals.material) do
         local virtual_group = virtuals[virtual_material.group_name]
-        virtual_group.researched_count = virtual_group.researched_count + 1
-        -- TODO hidden and unreserched
+        if acc.is_hidden(virtual_material) then
+            virtual_group.hidden_count = virtual_group.hidden_count + 1
+        elseif acc.is_unresearched(virtual_material, relation_to_recipes) then
+            virtual_group.unresearched_count = virtual_group.unresearched_count + 1
+        else
+            virtual_group.researched_count = virtual_group.researched_count + 1
+        end
     end
 
     for _, virtual_recipe in pairs(storage.virtuals.recipe) do
         local virtual_group = virtuals[virtual_recipe.group_name]
-        virtual_group.researched_count = virtual_group.researched_count + 1
-        -- TODO hidden and unreserched
+        if acc.is_hidden(virtual_recipe) then
+            virtual_group.hidden_count = virtual_group.hidden_count + 1
+        elseif acc.is_unresearched(virtual_recipe, relation_to_recipes) then
+            virtual_group.unresearched_count = virtual_group.unresearched_count + 1
+        else
+            virtual_group.researched_count = virtual_group.researched_count + 1
+        end
     end
 
     return { item = items, fluid = fluids, recipe = recipes, virtual_recipe = virtuals }

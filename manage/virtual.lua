@@ -16,6 +16,7 @@ function M.create_virtuals()
             order = "a",
             group_name = "other",
             subgroup_name = "other",
+            hidden = false,
         },
         ["<material-unknown>"] = {
             type = "virtual_material",
@@ -25,6 +26,7 @@ function M.create_virtuals()
             order = "z",
             group_name = "other",
             subgroup_name = "other",
+            hidden = true,
         },
     }
 
@@ -147,6 +149,8 @@ function M.register_fluid_temperature_single(materials, fluid_name, temperature)
         order = fluid_proto.order .. string.format("@%020.6f", temperature),
         group_name = fluid_proto.group.name,
         subgroup_name = fluid_proto.subgroup.name,
+        hidden = fluid_proto.hidden,
+        source_fluid_name = fluid_name,
     }
 end
 
@@ -176,6 +180,8 @@ function M.register_fluid_temperature_range(materials, fluid_name, min_temperatu
         order = fluid_proto.order .. string.format("@z[%020.6f,%020.6f]", min_temperature, max_temperature),
         group_name = fluid_proto.group.name,
         subgroup_name = fluid_proto.subgroup.name,
+        hidden = fluid_proto.hidden,
+        source_fluid_name = fluid_name,
     }
 end
 
@@ -257,6 +263,8 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                 order = display_prototype.order,
                 group_name = display_prototype.group.name,
                 subgroup_name = display_prototype.subgroup.name,
+                hidden = rocket_silo_prototype.hidden,
+                source_entity_name = rocket_silo_prototype.name,
             }
             flib_table.insert(crafts, space_rocket)
 
@@ -281,6 +289,8 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                 ingredients = ingredients,
                 fixed_crafting_machine = tn.craft_to_typed_name(rocket_silo_prototype),
                 crafting_speed_cap = crafting_speed_cap,
+                hidden = rocket_silo_prototype.hidden,
+                source_entity_name = rocket_silo_prototype.name,
             }
             flib_table.insert(crafts, recipe)
         else
@@ -316,6 +326,8 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     ingredients = modify_ingredients,
                     fixed_crafting_machine = tn.craft_to_typed_name(rocket_silo_prototype),
                     crafting_speed_cap = crafting_speed_cap,
+                    hidden = rocket_silo_prototype.hidden,
+                    source_entity_name = rocket_silo_prototype.name,
                 }
                 flib_table.insert(crafts, recipe)
             end
@@ -401,6 +413,8 @@ function M.create_boiler_virtual(boiler_prototype)
                 }
             },
             fixed_crafting_machine = tn.craft_to_typed_name(boiler_prototype),
+            hidden = boiler_prototype.hidden,
+            source_entity_name = boiler_prototype.name,
         }
         flib_table.insert(crafts, recipe)
     end
@@ -427,6 +441,8 @@ function M.create_generator_virtual(generator_prototype)
         products = {},
         ingredients = {},
         fixed_crafting_machine = tn.craft_to_typed_name(generator_prototype),
+        hidden = generator_prototype.hidden,
+        source_entity_name = generator_prototype.name,
     }
 
     return { recipe }
@@ -447,6 +463,8 @@ function M.create_burner_generator_virtual(burner_generator_prototype)
         products = {},
         ingredients = {},
         fixed_crafting_machine = tn.craft_to_typed_name(burner_generator_prototype),
+        hidden = burner_generator_prototype.hidden,
+        source_entity_name = burner_generator_prototype.name,
     }
 
     return { recipe }
@@ -474,6 +492,8 @@ function M.create_reactor_virtual(reactor_prototype)
         },
         ingredients = {},
         fixed_crafting_machine = tn.craft_to_typed_name(reactor_prototype),
+        hidden = reactor_prototype.hidden,
+        source_entity_name = reactor_prototype.name,
     }
 
     return { recipe }
@@ -513,6 +533,7 @@ function M.create_resource_virtual(resource_prototype)
         products = products,
         ingredients = ingredients,
         resource_category = resource_prototype.resource_category,
+        hidden = resource_prototype.hidden,
     }
 
     return { recipe }
@@ -553,6 +574,8 @@ function M.create_offshore_tile_virtual(tile_prototype)
             },
             ingredients = {},
             fixed_crafting_machine = tn.craft_to_typed_name(offshore_pump_prototype),
+            hidden = offshore_pump_prototype.hidden or tile_prototype.hidden,
+            source_entity_name = offshore_pump_prototype.name,
         }
         flib_table.insert(crafts, recipe)
         ::continue::

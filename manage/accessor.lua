@@ -428,13 +428,26 @@ function M.is_hidden(craft)
     elseif craft.object_name == "LuaEntityPrototype" then
         return craft.hidden
     elseif craft.type == "virtual_material" then
-        return false --TODO
+        return craft.hidden
     elseif craft.type == "virtual_recipe" then
-        return false --TODO
+        return craft.hidden
     else
         return assert()
     end
     ---@diagnostic enable: param-type-mismatch
+end
+
+---@param entity LuaEntityPrototype
+---@param relation_to_recipes RelationToRecipes
+---@return boolean
+function M.entity_is_unresearched(entity, relation_to_recipes)
+    local ret = true
+    for _, value in ipairs(entity.items_to_place_this or {}) do
+        local item = prototypes.item[value.name]
+        local is_researched = 0 < relation_to_recipes.item[item.name].craftable_count
+        ret = ret and not is_researched
+    end
+    return ret
 end
 
 ---comment
@@ -450,17 +463,21 @@ function M.is_unresearched(craft, relation_to_recipes)
     elseif craft.object_name == "LuaRecipePrototype" then
         return not relation_to_recipes.enabled_recipe[craft.name]
     elseif craft.object_name == "LuaEntityPrototype" then
-        local ret = true
-        for _, value in ipairs(craft.items_to_place_this or {}) do
-            local item = prototypes.item[value.name]
-            local is_researched = 0 < relation_to_recipes.item[item.name].craftable_count
-            ret = ret and not is_researched
-        end
-        return ret
+        return M.entity_is_unresearched(craft, relation_to_recipes)
     elseif craft.type == "virtual_material" then
-        return false --TODO
+        if craft.source_fluid_name then
+            return not (0 < relation_to_recipes.fluid[craft.source_fluid_name].craftable_count)
+        elseif craft.source_entity_name then
+            return M.entity_is_unresearched(prototypes.entity[craft.source_entity_name], relation_to_recipes)
+        else
+            return false
+        end
     elseif craft.type == "virtual_recipe" then
-        return false --TODO
+        if craft.source_entity_name then
+            return M.entity_is_unresearched(prototypes.entity[craft.source_entity_name], relation_to_recipes)
+        else
+            return false
+        end
     else
         return assert()
     end

@@ -138,6 +138,9 @@ __factory_solver__storage = {}
 ---@field order string
 ---@field group_name string
 ---@field subgroup_name string
+---@field hidden boolean
+---@field source_entity_name string?
+---@field source_fluid_name string?
 
 ---@class VirtualRecipe
 ---@field type "virtual_recipe"
@@ -153,6 +156,8 @@ __factory_solver__storage = {}
 ---@field fixed_crafting_machine TypedName?
 ---@field resource_category string?
 ---@field crafting_speed_cap number?
+---@field hidden boolean
+---@field source_entity_name string?
 
 ---@class VirtualProduct
 ---@field type "virtual_material"
