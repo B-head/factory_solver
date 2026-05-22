@@ -162,7 +162,7 @@ function M.quality_decomposition(normalized_amount, effectivity_quality, unlocke
             type = normalized_amount.type,
             name = normalized_amount.name,
             quality = current_quality,
-            amount_per_second = current_probability - next_probability,
+            amount_per_second = (current_probability - next_probability) * normalized_amount.amount_per_second,
             temperature = normalized_amount.temperature,
             minimum_temperature = normalized_amount.minimum_temperature,
             maximum_temperature = normalized_amount.maximum_temperature,
