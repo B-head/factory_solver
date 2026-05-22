@@ -263,16 +263,6 @@ styles.factory_solver_slot_label = {
     height = 40,
 }
 
-styles.factory_solver_slot_image_with_quality = {
-    type = "image_style",
-    width = 32,
-    height = 32,
-    top_padding = 18,
-    bottom_padding = 1,
-    right_padding = 19,
-    stretch_image_to_widget_size = true,
-}
-
 styles.factory_solver_slot_temperature_label = {
     type = "label_style",
     height = 10,

@@ -84,15 +84,6 @@ function M.create_decorated_sprite_button(data)
     local is_unresearched = data.is_unresearched or false
     local children = {}
 
-    if typed_name.quality ~= "normal" then
-        local def = {
-            type = "sprite",
-            style = "factory_solver_slot_image_with_quality",
-            sprite = "quality/" .. typed_name.quality,
-        }
-        flib_table.insert(children, def)
-    end
-
     if typed_name.temperature ~= nil then
         flib_table.insert(children, {
             type = "flow",
@@ -135,6 +126,7 @@ function M.create_decorated_sprite_button(data)
         type = "sprite-button",
         style = M.get_style(is_hidden, is_unresearched, typed_name.type),
         sprite = tn.get_sprite_path(typed_name),
+        quality = typed_name.quality,
         tooltip = tn.typed_name_to_tooltip(typed_name),
         elem_tooltip = tn.typed_name_to_elem_id(typed_name),
         number = data.number,
