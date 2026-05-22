@@ -6,8 +6,12 @@
 -- 1/4 of input by Factorio convention (matches Space Age recipe-recycling).
 --
 -- These shapes are the simplest LPs that reproduce the structural difficulty
--- the mod exists to handle. lp_deep_recycling_xfail exercises the full
--- 5-tier Space Age case (currently not solvable by the IPM).
+-- the mod exists to handle. The full 5-tier Space Age case (the headline
+-- workload for this mod) lives at the bottom of this file — it used to sit
+-- in a separate lp_deep_recycling_xfail file documenting an IPM convergence
+-- wall, but the IPM rewrite (long-step path-following with data-scaled cold
+-- start, relative residual tests, and retry-on-NaN Cholesky regularisation)
+-- now converges it from a fresh start in ~20 iterations.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
@@ -126,9 +130,6 @@ table.insert(cases, {
     -- A slightly deeper loop than the 2-tier case: producer and recycler at
     -- normal/uncommon/rare. Reaches rare via either the producer's cascade
     -- or repeated recycling. Constraint puts a small demand on rare plate.
-    -- This is the largest recycling chain we currently expect to solve from
-    -- a fresh start; 4-5 tier cases get progressively harder and the 5-tier
-    -- one is captured in lp_deep_recycling_xfail.
     run = function()
         local lines = {
             line("iron-mining", "normal",
@@ -165,6 +166,84 @@ table.insert(cases, {
         harness.assert_near(
             vars.x["%positive_slack%|limit|item/iron-plate/rare"] or 0,
             0, 0.01, "positive_slack on rare constraint")
+    end,
+})
+
+table.insert(cases, {
+    name = "5-tier electronic-circuit recycling chain (legendary upper bound) converges",
+    -- The full Space Age quality recycling workload: producers for
+    -- iron-plate, copper-cable, and electronic-circuit at every quality
+    -- tier, recyclers at every tier except legendary (recycling legendary
+    -- has nowhere to upgrade), with an upper-bound constraint on legendary
+    -- electronic-circuit. Iron-ore and copper-plate are not produced --
+    -- create_problem.lua bridges them through |basic_source| (matches the
+    -- in-game shape where mining drills feed the chain from outside the
+    -- solver's view). Reachable in ~20 iterations with the long-step IPM.
+    run = function()
+        local lines = {}
+
+        table.insert(lines, line("iron-plate", "normal",
+            cascade("iron-plate", 1, "normal", 5),
+            { item("iron-ore", "normal", 1) }))
+        table.insert(lines, line("copper-cable", "normal",
+            cascade("copper-cable", 2, "normal", 5),
+            { item("copper-plate", "normal", 1) }))
+
+        for i, q in ipairs(QUALITY) do
+            local tiers = #QUALITY - i + 1
+            table.insert(lines, line("electronic-circuit", q,
+                cascade("electronic-circuit", 1, q, tiers),
+                { item("iron-plate", q, 1), item("copper-cable", q, 3) }))
+        end
+
+        for i = 1, #QUALITY - 1 do
+            local q = QUALITY[i]
+            local tiers = #QUALITY - i + 1
+            local rec_products = {}
+            for _, ingredient_amount in ipairs({
+                { "iron-plate", 1 * 0.25 },
+                { "copper-cable", 3 * 0.25 },
+            }) do
+                for _, amt in ipairs(cascade(ingredient_amount[1], ingredient_amount[2], q, tiers)) do
+                    table.insert(rec_products, amt)
+                end
+            end
+            table.insert(lines, line("electronic-circuit-recycling", q,
+                rec_products,
+                { item("electronic-circuit", q, 1) }))
+        end
+
+        local constraints = {
+            { type = "item", name = "electronic-circuit", quality = "legendary",
+              limit_type = "upper", limit_amount_per_second = 1 },
+        }
+
+        local problem = cp.create_problem("deep-recycling", constraints, lines)
+        local state, vars = harness.solve_to_completion(lp, problem,
+            { tolerance = 1e-6, iterate_limit = 600 })
+
+        harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "expected packed variables on finished state")
+
+        -- The legendary EC recipe must run: it is the only producer of the
+        -- constrained material. The recycler cascade can lift mass from
+        -- lower tiers but cannot create the final tier directly.
+        harness.assert_true(
+            (vars.x["recipe/electronic-circuit/legendary"] or 0) > 0,
+            "legendary electronic-circuit recipe runs (got "
+                .. tostring(vars.x["recipe/electronic-circuit/legendary"]) .. ")"
+        )
+        -- The constraint is upper-bound at 1; |final_sink| is the LP variable
+        -- absorbing all constrained output, so its value reports how much of
+        -- the legendary circuit demand is met.
+        harness.assert_near(
+            vars.x["|final_sink|item/electronic-circuit/legendary"] or 0,
+            1, 0.01, "legendary electronic-circuit final_sink meets constraint")
+        -- positive_slack is the LP's escape valve when the constraint can't
+        -- be met from the recipes; a healthy solve uses none of it.
+        harness.assert_near(
+            vars.x["%positive_slack%|limit|item/electronic-circuit/legendary"] or 0,
+            0, 0.01, "no positive_slack consumed on the legendary constraint")
     end,
 })
 

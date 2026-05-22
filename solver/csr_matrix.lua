@@ -185,7 +185,7 @@ function M.with_diagonal(list, length)
         row_ranges[i + 1] = t
     end
 
-    return M.new(#list, values, column_indexes, row_ranges)
+    return M.new(length, values, column_indexes, row_ranges)
 end
 
 ---comment

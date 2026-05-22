@@ -44,7 +44,6 @@ local case_files = {
     "lp_short_loop",
     "lp_quality_cascade",
     "lp_quality_recycling_loop",
-    "lp_deep_recycling_xfail",
     "fs_log",
     "typed_name_format",
     "lp_fluid_bridge",
