@@ -155,6 +155,9 @@ table.insert(cases, {
 
 table.insert(cases, {
     name = "bridge is not flagged as is_result (not surfaced to UI)",
+    -- A Constraint is required to keep the chain active after the
+    -- compute_active_lines pruning; without one all lines (including
+    -- bridges) collapse to inactive and the LP is empty.
     run = function()
         local lines = {
             recipe("boiler",
@@ -164,7 +167,11 @@ table.insert(cases, {
                 { item("power", 1) },
                 { fluid_range("steam", 15, 1000, 1) }),
         }
-        local problem = cp.create_problem("bridge-hidden", {}, lines)
+        local constraints = {
+            { type = "item", name = "power", quality = "normal",
+              limit_type = "equal", limit_amount_per_second = 1 },
+        }
+        local problem = cp.create_problem("bridge-hidden", constraints, lines)
 
         local bridge_key = bridge_primal_key("steam", 165, 15, 1000)
         local primal = problem.primals[bridge_key]

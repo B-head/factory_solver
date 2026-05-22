@@ -216,6 +216,115 @@ function M.compute_reachable_materials(production_lines)
     return reachable
 end
 
+---Compute the set of recipes whose LP variables are connected (via shared
+---material flows or recipe limit duals) to at least one user Constraint.
+---Lines outside this set would only contribute negative-cost slack to the LP
+---without any anchor pulling them back, so the IPM would push their
+---variables to the clamp ceiling (2^52) and emit nonsense quantities to the
+---UI. Pruning them keeps the LP tight and lets the UI gray them out.
+---
+---The connectivity graph mirrors the subject-term pairs create_problem
+---would emit if it built the whole problem unconditionally:
+---  - recipe ↔ each product / ingredient material variable
+---  - recipe ↔ |limit|<material> for each product (production aggregation)
+---  - recipe ↔ |limit|<bare-fluid> for each fluid product variant (only
+---    on non-bridge lines, matching the bare_fluid aggregation rule)
+---  - recipe ↔ |limit|<recipe> for non-bridge lines (so a Constraint that
+---    pins the recipe variable itself anchors the line)
+---  - <material> ↔ |limit|<material> and <material> ↔ |limit|<bare-fluid>:
+---    `|basic_source|` and `|shortage_source|` always link these in the
+---    actual LP (the source slack contributes to both the equivalence dual
+---    and the limit aggregation), so a bare-fluid Constraint must be able
+---    to reach a consumer-only recipe that has no direct |limit| edge.
+---@param all_lines NormalizedProductionLine[]
+---@param constraints Constraint[]
+---@return table<integer, true> active_line_indices Indices into `all_lines`.
+---@return table<string, true> inactive_recipe_variables Recipe variable names of inactive lines (includes bridges).
+function M.compute_active_lines(all_lines, constraints)
+    local adjacency = {} ---@type table<string, table<string, true>>
+    local function link(a, b)
+        local sa = adjacency[a]
+        if not sa then sa = {}; adjacency[a] = sa end
+        sa[b] = true
+        local sb = adjacency[b]
+        if not sb then sb = {}; adjacency[b] = sb end
+        sb[a] = true
+    end
+
+    local recipe_vars = {} ---@type string[]
+    local seen_materials = {} ---@type table<string, true>
+    local function touch_material(material_var)
+        if seen_materials[material_var] then return end
+        seen_materials[material_var] = true
+        link(material_var, "|limit|" .. material_var)
+        local bare_limit = bare_fluid_limit_dual(material_var)
+        if bare_limit then
+            link(material_var, bare_limit)
+        end
+    end
+
+    for i, line in ipairs(all_lines) do
+        local recipe_var = tn.typed_name_to_variable_name(line.recipe_typed_name)
+        recipe_vars[i] = recipe_var
+        local bridge = is_bridge_line(line)
+
+        for _, value in ipairs(line.products) do
+            local material_var = tn.typed_name_to_variable_name(value)
+            link(recipe_var, material_var)
+            link(recipe_var, "|limit|" .. material_var)
+            local bare_limit = bare_fluid_limit_dual(material_var)
+            if bare_limit and not bridge then
+                link(recipe_var, bare_limit)
+            end
+            touch_material(material_var)
+        end
+        for _, value in each_ingredient(line) do
+            local material_var = tn.typed_name_to_variable_name(value)
+            link(recipe_var, material_var)
+            touch_material(material_var)
+        end
+        if not bridge then
+            link(recipe_var, "|limit|" .. recipe_var)
+        end
+    end
+
+    local visited = {} ---@type table<string, true>
+    local queue = {} ---@type string[]
+    for _, c in ipairs(constraints) do
+        local anchor = "|limit|" .. tn.typed_name_to_variable_name(c)
+        if not visited[anchor] then
+            visited[anchor] = true
+            queue[#queue + 1] = anchor
+        end
+    end
+
+    local head = 1
+    while head <= #queue do
+        local node = queue[head]
+        head = head + 1
+        local neighbors = adjacency[node]
+        if neighbors then
+            for n, _ in pairs(neighbors) do
+                if not visited[n] then
+                    visited[n] = true
+                    queue[#queue + 1] = n
+                end
+            end
+        end
+    end
+
+    local active = {} ---@type table<integer, true>
+    local inactive_vars = {} ---@type table<string, true>
+    for i, recipe_var in ipairs(recipe_vars) do
+        if visited[recipe_var] then
+            active[i] = true
+        else
+            inactive_vars[recipe_var] = true
+        end
+    end
+    return active, inactive_vars
+end
+
 ---Create linear programming problems.
 ---@param solution_name string
 ---@param constraints Constraint[]
@@ -234,10 +343,16 @@ function M.create_problem(solution_name, constraints, production_lines)
     for _, line in ipairs(production_lines) do all_lines[#all_lines + 1] = line end
     for _, line in ipairs(bridges) do all_lines[#all_lines + 1] = line end
 
+    local active_line_indices, inactive_recipe_variables = M.compute_active_lines(all_lines, constraints)
+    problem.inactive_recipe_variables = inactive_recipe_variables
+
     local reachable = M.compute_reachable_materials(all_lines)
 
     local included_products, included_ingresients = {}, {} ---@type table<string, true>, table<string, true>
-    for _, line in ipairs(all_lines) do
+    for i, line in ipairs(all_lines) do
+        if not active_line_indices[i] then
+            goto continue_line
+        end
         local objective_name = tn.typed_name_to_variable_name(line.recipe_typed_name)
         local bridge = is_bridge_line(line)
         local product_count, ingredient_count = 0, 0
@@ -287,6 +402,7 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_objective(objective_name, recipe_cost, true)
             problem:add_subject_term(objective_name, "|limit|" .. objective_name, 1)
         end
+        ::continue_line::
     end
 
     for constraint_name, _ in pairs(included_products) do

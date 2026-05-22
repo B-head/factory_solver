@@ -8,6 +8,7 @@ local csr_matrix = require "solver/csr_matrix"
 ---@field dual_length integer
 ---@field subject_terms number[][]
 ---@field bridges NormalizedProductionLine[] Temperature bridges injected by create_problem; populated externally after construction.
+---@field inactive_recipe_variables table<string, true>? Recipe variables omitted from the LP because they are not connected to any user Constraint; populated by create_problem.
 local M = {}
 
 ---@class Primal

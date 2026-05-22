@@ -46,6 +46,7 @@ local case_files = {
     "typed_name_format",
     "lp_fluid_bridge",
     "lp_fluid_constraint",
+    "isolated_line",
 }
 
 local total, passed, failed = 0, 0, 0

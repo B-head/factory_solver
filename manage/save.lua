@@ -385,7 +385,18 @@ end
 ---@return number
 function M.get_quantity_of_machines_required(solution, typed_name)
     local variable_name = string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
-    return solution.quantity_of_machines_required[variable_name] or 1
+    local solved = solution.quantity_of_machines_required[variable_name]
+    if solved then
+        return solved
+    end
+    -- A line that create_problem flagged as inactive has no LP variable, so no
+    -- solved quantity exists. Return 0 instead of the 1-fallback so the UI
+    -- shows "0 machines / 0 / unit" and grayed-out totals; the fallback itself
+    -- still applies before the first solve completes, when inactive set is nil.
+    if solution.inactive_recipe_variables and solution.inactive_recipe_variables[variable_name] then
+        return 0
+    end
+    return 1
 end
 
 ---comment

@@ -22,6 +22,23 @@ local headers = {
 
 local handlers = {}
 
+-- Dim color applied to label captions on lines that create_problem flagged as
+-- inactive (= not graph-connected to any user Constraint). The numeric values
+-- on those lines already collapse to 0 via get_quantity_of_machines_required,
+-- but tinting the labels makes the disabled state read at a glance.
+local inactive_font_color = { 0.5, 0.5, 0.5 }
+local active_font_color = { 1, 1, 1 }
+
+---@param solution Solution
+---@param typed_name TypedName
+---@return boolean
+local function is_line_inactive(solution, typed_name)
+    local set = solution.inactive_recipe_variables
+    if not set then return false end
+    local variable_name = string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
+    return set[variable_name] == true
+end
+
 ---@param event EventDataTrait
 function handlers.make_production_line_table(event)
     local elem = event.element
@@ -362,6 +379,8 @@ function handlers.update_machines_required(event)
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
     elem.caption = flib_format.number(quantity_of_machines_required, true, 5)
+    elem.style.font_color = is_line_inactive(solution, result_typed_name)
+        and inactive_font_color or active_font_color
 end
 
 ---@param event EventDataTrait
@@ -374,7 +393,11 @@ function handlers.update_amount(event)
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    elem.number = fs_util.to_scale(raw_amount, player_data.time_scale) * (quantity_of_machines_required + acc.tolerance)
+    -- Inactive lines suppress the acc.tolerance pad so the slot number reads
+    -- a clean 0 rather than a microscopic tail (~1e-9) from the tolerance.
+    local inactive = is_line_inactive(solution, result_typed_name)
+    local pad = inactive and 0 or acc.tolerance
+    elem.number = fs_util.to_scale(raw_amount, player_data.time_scale) * (quantity_of_machines_required + pad)
 end
 
 ---@param event EventDataTrait
@@ -389,6 +412,8 @@ function handlers.update_power(event)
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
     local amount = fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = common.format_power(amount)
+    elem.style.font_color = is_line_inactive(solution, result_typed_name)
+        and inactive_font_color or active_font_color
 end
 
 ---@param event EventDataTrait
@@ -403,6 +428,8 @@ function handlers.update_pollution(event)
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
     local amount = fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
     elem.caption = flib_format.number(amount, true, 5)
+    elem.style.font_color = is_line_inactive(solution, result_typed_name)
+        and inactive_font_color or active_font_color
 end
 
 ---@param event EventData.on_gui_click

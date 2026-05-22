@@ -40,6 +40,10 @@ function M.forwerd_solve(force_data, solution)
             solution.constraints,
             M.to_normalized_production_lines(solution.production_lines, bonuses)
         )
+        -- Mirror the inactive-recipe set onto the solution so save / UI lookups
+        -- (which see solution, not problem) can gray out isolated lines without
+        -- reaching through solution.problem (which is nil after migrations).
+        solution.inactive_recipe_variables = solution.problem.inactive_recipe_variables
         solution.raw_variables = nil
     end
 

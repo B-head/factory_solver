@@ -93,6 +93,7 @@ __factory_solver__storage = {}
 ---@field constraints Constraint[]
 ---@field production_lines ProductionLine[]
 ---@field quantity_of_machines_required table<string, number>
+---@field inactive_recipe_variables table<string, true>?
 ---@field problem Problem?
 ---@field solver_state SolverState
 ---@field raw_variables PackedVariables?
