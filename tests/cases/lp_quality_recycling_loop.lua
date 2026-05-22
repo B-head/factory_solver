@@ -247,4 +247,93 @@ table.insert(cases, {
     end,
 })
 
+table.insert(cases, {
+    name = "5-tier all-in-cycle: solver auto-promotes cu/normal + ir/normal to basic_source",
+    -- Same fixture as the test above but with iron-plate / copper-cable
+    -- producer recipes removed: the chain has no open boundary and every
+    -- material has a producer recipe in the line set, so the existing
+    -- reachability seed is empty. Without deficit promotion the LP could
+    -- only satisfy the constraint via |shortage_source| at penalty cost;
+    -- with it, material_cycles.find_deficit_materials picks cu/normal and
+    -- ir/normal as the cycle's natural entry points and the LP recovers
+    -- the cascade solution. The assertions check both convergence and
+    -- the LP variable presence so a future regression that pushes the
+    -- deficit promotion to higher qualities (the over-detection bug the
+    -- source-SCC gate exists to prevent) fails the test.
+    run = function()
+        local lines = {}
+        for i, q in ipairs(QUALITY) do
+            local tiers = #QUALITY - i + 1
+            table.insert(lines, line("electronic-circuit", q,
+                cascade("electronic-circuit", 1, q, tiers),
+                { item("iron-plate", q, 1), item("copper-cable", q, 3) }))
+        end
+        for i = 1, #QUALITY - 1 do
+            local q = QUALITY[i]
+            local tiers = #QUALITY - i + 1
+            local rec_products = {}
+            for _, ingredient_amount in ipairs({
+                { "iron-plate", 1 * 0.25 },
+                { "copper-cable", 3 * 0.25 },
+            }) do
+                for _, amt in ipairs(cascade(ingredient_amount[1], ingredient_amount[2], q, tiers)) do
+                    table.insert(rec_products, amt)
+                end
+            end
+            table.insert(lines, line("electronic-circuit-recycling", q,
+                rec_products,
+                { item("electronic-circuit", q, 1) }))
+        end
+
+        local constraints = {
+            { type = "item", name = "electronic-circuit", quality = "legendary",
+              limit_type = "upper", limit_amount_per_second = 1 },
+        }
+
+        local problem = cp.create_problem("all-in-cycle", constraints, lines)
+        local state, vars = harness.solve_to_completion(lp, problem,
+            { tolerance = 1e-6, iterate_limit = 600 })
+
+        harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "expected packed variables on finished state")
+
+        -- The promoted deficits must be present as LP variables and
+        -- carry positive flow.
+        harness.assert_true(
+            (vars.x["|basic_source|item/copper-cable/normal"] or 0) > 0,
+            "copper-cable/normal basic_source is active (got " ..
+                tostring(vars.x["|basic_source|item/copper-cable/normal"]) .. ")"
+        )
+        harness.assert_true(
+            (vars.x["|basic_source|item/iron-plate/normal"] or 0) > 0,
+            "iron-plate/normal basic_source is active (got " ..
+                tostring(vars.x["|basic_source|item/iron-plate/normal"]) .. ")"
+        )
+
+        -- Higher-quality basic_sources must NOT exist: the source-SCC
+        -- gate keeps them out of the deficit set so the LP variable is
+        -- never created.
+        for i = 2, #QUALITY do
+            local q = QUALITY[i]
+            harness.assert_true(
+                vars.x["|basic_source|item/copper-cable/" .. q] == nil,
+                "copper-cable/" .. q .. " basic_source must not exist"
+            )
+            harness.assert_true(
+                vars.x["|basic_source|item/iron-plate/" .. q] == nil,
+                "iron-plate/" .. q .. " basic_source must not exist"
+            )
+        end
+
+        -- The user constraint must actually be met by the cascade, not
+        -- by penalised slack.
+        harness.assert_near(
+            vars.x["|final_sink|item/electronic-circuit/legendary"] or 0,
+            1, 0.01, "legendary electronic-circuit final_sink meets constraint")
+        harness.assert_near(
+            vars.x["%positive_slack%|limit|item/electronic-circuit/legendary"] or 0,
+            0, 0.01, "no positive_slack consumed on the legendary constraint")
+    end,
+})
+
 return cases

@@ -1,5 +1,6 @@
 local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
+local material_cycles = require "solver/material_cycles"
 
 local slack_cost = 0
 local elastic_cost = 2 ^ 10
@@ -167,9 +168,16 @@ end
 ---(materials with no producer recipe in the line set) or from recipes
 ---with no ingredients. Materials not in this set are stuck in dead-end
 ---cycles and need a |shortage_source| escape hatch in the LP.
+---
+---`extra_seeds` lets callers inject additional seed materials (e.g. the
+---deficit set from `material_cycles.find_deficit_materials`, which are
+---cycle entry points that will receive a `|basic_source|` and therefore
+---behave like raw inputs for reachability purposes). Without this, an
+---all-in-cycle chain has an empty seed set and the BFS never fires.
 ---@param production_lines NormalizedProductionLine[]
+---@param extra_seeds table<string, true>?
 ---@return table<string, true> reachable
-function M.compute_reachable_materials(production_lines)
+function M.compute_reachable_materials(production_lines, extra_seeds)
     local has_producer = {} ---@type table<string, true>
     for _, line in ipairs(production_lines) do
         for _, product in ipairs(line.products) do
@@ -184,6 +192,11 @@ function M.compute_reachable_materials(production_lines)
             if not has_producer[name] then
                 reachable[name] = true
             end
+        end
+    end
+    if extra_seeds then
+        for name in pairs(extra_seeds) do
+            reachable[name] = true
         end
     end
 
@@ -346,7 +359,18 @@ function M.create_problem(solution_name, constraints, production_lines)
     local active_line_indices, inactive_recipe_variables = M.compute_active_lines(all_lines, constraints)
     problem.inactive_recipe_variables = inactive_recipe_variables
 
-    local reachable = M.compute_reachable_materials(all_lines)
+    -- Identify cycle materials that need external supply and seed reachability
+    -- with them, so the |basic_source| we add downstream behaves like a raw
+    -- input. Filter to materials not already reachable through the open
+    -- boundary -- an iron-ore that already has a mining recipe doesn't need
+    -- a second free supply line just because it also participates in a cycle.
+    local pre_reachable = M.compute_reachable_materials(all_lines)
+    local raw_deficits = material_cycles.find_deficit_materials(all_lines)
+    local deficits = {} ---@type table<string, true>
+    for name in pairs(raw_deficits) do
+        if not pre_reachable[name] then deficits[name] = true end
+    end
+    local reachable = M.compute_reachable_materials(all_lines, deficits)
 
     local included_products, included_ingresients = {}, {} ---@type table<string, true>, table<string, true>
     for i, line in ipairs(all_lines) do
@@ -419,14 +443,34 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, -1)
         end
-        -- |shortage_source| is gated on reachability: materials reachable from
-        -- raw inputs must run their producer chain. Without this gating the LP
-        -- would pay elastic_cost to fabricate intermediates rather than run long
-        -- recycling chains (e.g. Fulgora scrap), which produces wrong solutions.
-        -- Materials stuck in dead-end cycles (mass-losing loops like fs-test-base
-        -- + fs-test-short-negative) keep the escape hatch — otherwise the LP can
-        -- only return all-zero.
-        if not reachable[constraint_name] then
+        -- Cycle entry points identified by find_deficit_materials get a
+        -- free |basic_source| at slack_cost: they are the natural external
+        -- inputs of the cycle (think cu/normal + ir/normal in a quality
+        -- recycling chain with no copper / iron producer registered).
+        -- Without this, an all-in-cycle chain has no way to start and the
+        -- LP would have to lean on |shortage_source| at penalty cost,
+        -- producing solutions that look "OK" numerically but hide the
+        -- external input behind the slack-vs-source distinction.
+        if deficits[constraint_name] then
+            local slack_name = "|basic_source|" .. constraint_name
+            problem:add_objective(slack_name, slack_cost)
+            problem:add_subject_term(slack_name, constraint_name, 1)
+            problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
+
+            local bare_limit = bare_fluid_limit_dual(constraint_name)
+            if bare_limit then
+                problem:add_subject_term(slack_name, bare_limit, 1)
+            end
+        elseif not reachable[constraint_name] then
+            -- |shortage_source| is gated on reachability: materials reachable
+            -- from raw inputs (or promoted deficits) must run their producer
+            -- chain. Without this gating the LP would pay elastic_cost to
+            -- fabricate intermediates rather than run long recycling chains
+            -- (e.g. Fulgora scrap), which produces wrong solutions. Materials
+            -- stuck in dead-end cycles that the deficit heuristic did not
+            -- catch (mass-losing loops like fs-test-base + fs-test-short-
+            -- negative) keep the escape hatch — otherwise the LP can only
+            -- return all-zero.
             local elastic_name = "|shortage_source|" .. constraint_name
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)

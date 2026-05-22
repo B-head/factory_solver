@@ -50,6 +50,7 @@ local case_files = {
     "lp_fluid_constraint",
     "isolated_line",
     "lp_scale_invariance",
+    "material_cycles",
 }
 
 local total, passed, failed = 0, 0, 0
