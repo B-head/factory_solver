@@ -49,16 +49,16 @@ function handlers.make_final_products_table(event)
         fs_util.add_gui(elem, def)
     end
 
-    for name, number in pairs(item_totals) do
-        add(tn.create_typed_name("item", name), number)
+    for _, entry in pairs(item_totals) do
+        add(entry.typed_name, entry.amount_per_second)
     end
 
     for _, entry in pairs(fluid_totals) do
         add(entry.typed_name, entry.amount_per_second)
     end
 
-    for name, number in pairs(virtual_totals) do
-        add(tn.create_typed_name("virtual_material", name), number)
+    for _, entry in pairs(virtual_totals) do
+        add(entry.typed_name, entry.amount_per_second)
     end
 end
 
@@ -102,16 +102,16 @@ function handlers.make_basic_ingredients_table(event)
         fs_util.add_gui(elem, def)
     end
     
-    for name, number in pairs(item_totals) do
-        add(tn.create_typed_name("item", name), number)
+    for _, entry in pairs(item_totals) do
+        add(entry.typed_name, entry.amount_per_second)
     end
 
     for _, entry in pairs(fluid_totals) do
         add(entry.typed_name, entry.amount_per_second)
     end
 
-    for name, number in pairs(virtual_totals) do
-        add(tn.create_typed_name("virtual_material", name), number)
+    for _, entry in pairs(virtual_totals) do
+        add(entry.typed_name, entry.amount_per_second)
     end
 end
 
