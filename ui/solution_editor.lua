@@ -144,7 +144,20 @@ function handlers.make_production_line_table(event)
             -- it. Showing the plant entity as a "machine" misleads the user
             -- (1 craft = 1 plant slot, not 1 tower or 1 plant). The plant
             -- entity is still bound as machine_typed_name internally.
-            if machine.type ~= "plant" then
+            --
+            -- Spoilage virtual recipes share the same convention: there is
+            -- no real machine that performs spoilage, so virtual.lua plugs
+            -- an entity-unknown sentinel into machine_typed_name and we hide
+            -- it here. The recipe icon mirrors the spoil_result item so the
+            -- picker entry looks like "this thing turns into <result>".
+            --
+            -- Guard with `object_name == nil` first: real LuaRecipePrototype
+            -- userdata raises on access to unknown keys, so probing
+            -- `recipe.is_spoilage` directly would crash for every non-virtual
+            -- recipe. Plain-table VirtualRecipes have no `object_name`.
+            local is_spoilage_recipe = recipe and recipe.object_name == nil
+                and recipe.is_spoilage == true
+            if machine.type ~= "plant" and not is_spoilage_recipe then
                 local def = common.create_decorated_sprite_button {
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,
@@ -186,6 +199,25 @@ function handlers.make_production_line_table(event)
                     style = "flib_slot_button_default",
                     sprite = "tile/" .. line.substrate_tile_name,
                     elem_tooltip = { type = "tile", name = line.substrate_tile_name },
+                    tags = recipe_tags,
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
+                    },
+                }
+                flib_table.insert(buttons, def)
+            end
+
+            if is_spoilage_recipe then
+                -- Spoilage virtual recipes use a clock sprite in place of a
+                -- real machine: there is no entity that performs spoilage,
+                -- so the clock conveys "time-driven decay" while still
+                -- filling the machine cell so the row visually lines up
+                -- with the rest of the table. Same click target as the
+                -- substrate button above for consistency.
+                local def = {
+                    type = "sprite-button",
+                    style = "flib_slot_button_default",
+                    sprite = "utility/clock",
                     tags = recipe_tags,
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,

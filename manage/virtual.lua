@@ -1,6 +1,9 @@
 local flib_table = require "__flib__/table"
 local acc = require "manage/accessor"
 local tn = require "manage/typed_name"
+local fs_log = require "fs_log"
+
+local log = fs_log.for_module("virtual")
 
 local M = {}
 
@@ -133,6 +136,22 @@ function M.create_virtuals()
             end
         end
     end
+
+    local spoilage_recipe_count = 0
+    for _, item in pairs(prototypes.item) do
+        local result_crafts = M.create_spoilage_virtual(item)
+        for _, craft in ipairs(result_crafts) do
+            if craft.type == "virtual_material" then
+                materials[craft.name] = craft
+            elseif craft.type == "virtual_recipe" then
+                recipes[craft.name] = craft
+                spoilage_recipe_count = spoilage_recipe_count + 1
+            else
+                assert()
+            end
+        end
+    end
+    log.info("registered %d spoilage virtual recipes", spoilage_recipe_count)
 
     M.add_fluid_temperature_virtuals(materials, recipes)
 
@@ -1009,6 +1028,79 @@ function M.create_offshore_tile_virtual(tile_prototype, planet_index)
         source_planet_names = M.collect_planets_for_prototype(tile_prototype.name,
             tile_prototype.autoplace_specification,
             planet_index.tile_planets, planet_index.control_planets),
+    }
+    return { recipe }
+end
+
+---One virtual recipe per spoilable item (`spoil_ticks > 0` with a non-nil
+---`spoil_result`). Rate-only 1:1 conversion: the user picks the rate in the
+---production line and the LP treats it like any other recipe at 1
+---ingredient -> 1 product. No time normalization happens here -- spoilage
+---in Factorio is shelf-life, not throughput, and modelling it as
+---spoil_ticks/sec would silently assume a buffer size of 1 that nobody
+---would actually use.
+---
+---Display follows the Plant virtual recipe convention: there is no
+---natural "machine" for spoilage (items just decay in any inventory), so
+---we plug `entity-unknown` into `fixed_crafting_machine` to satisfy the
+---machine pipeline and flip `is_spoilage = true` so solution_editor can
+---hide the machine button the same way it already hides the plant
+---button. The recipe icon, group, subgroup and order all follow the
+---spoil_result so the picker lists spoilage recipes next to whatever
+---they decay into; tried `utility/quantity-time` first but that name
+---does not exist in Factorio 2.0 utility sprites.
+---@param item_prototype LuaItemPrototype
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_spoilage_virtual(item_prototype)
+    -- spoil_ticks is exposed as a quality-aware getter
+    -- (LuaItemPrototype.get_spoil_ticks(quality)), not a bare property — same
+    -- shape as LuaItemPrototype.get_durability. Non-spoilable items raise on
+    -- direct `.spoil_ticks` access because LuaObject __index rejects unknown
+    -- keys, so we probe through pcall. quality has no effect on the
+    -- conversion stoichiometry (1:1 either way), so we use "normal" purely
+    -- to satisfy the API contract.
+    local quality_normal = prototypes.quality["normal"]
+    if not quality_normal then return {} end
+    local ok_ticks, spoil_ticks = pcall(item_prototype.get_spoil_ticks, quality_normal)
+    if not ok_ticks or not spoil_ticks or spoil_ticks <= 0 then return {} end
+
+    -- spoil_result is fixed per item (does not vary with quality), but the
+    -- field may still be absent for items that don't spoil; same pcall guard.
+    local ok_result, spoil_result = pcall(function() return item_prototype.spoil_result end)
+    if not ok_result or not spoil_result then return {} end
+
+    ---@type VirtualRecipe
+    local recipe = {
+        type = "virtual_recipe",
+        name = "<spoil>" .. item_prototype.name,
+        sprite_path = "item/" .. spoil_result.name,
+        elem_tooltip = { type = "item", name = item_prototype.name },
+        order = spoil_result.order .. ":" .. item_prototype.name,
+        group_name = spoil_result.group.name,
+        subgroup_name = spoil_result.subgroup.name,
+        products = {
+            {
+                type = "item",
+                name = spoil_result.name,
+                amount = 1,
+                probability = 1,
+            }
+        },
+        ingredients = {
+            {
+                type = "item",
+                name = item_prototype.name,
+                amount = 1,
+            }
+        },
+        fixed_crafting_machine = {
+            type = "machine",
+            name = "entity-unknown",
+            quality = "normal",
+        },
+        crafting_speed_cap = 1,
+        hidden = item_prototype.hidden or spoil_result.hidden,
+        is_spoilage = true,
     }
     return { recipe }
 end

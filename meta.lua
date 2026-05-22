@@ -181,6 +181,7 @@ __factory_solver__storage = {}
 ---@field hidden boolean
 ---@field source_entity_name string?
 ---@field source_planet_names string[]?
+---@field is_spoilage boolean?
 
 ---@class VirtualProduct
 ---@field type "virtual_material"
