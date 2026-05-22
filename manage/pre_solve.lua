@@ -44,7 +44,12 @@ function M.forwerd_solve(force_data, solution)
         -- (which see solution, not problem) can gray out isolated lines without
         -- reaching through solution.problem (which is nil after migrations).
         solution.inactive_recipe_variables = solution.problem.inactive_recipe_variables
-        solution.raw_variables = nil
+        -- raw_variables intentionally preserved across re-prepares: constraint
+        -- and line edits change b (and sometimes the variable set), but recipe
+        -- x values from the previous converged solve are near the new optimum
+        -- and let the IPM warm-start instead of restarting from the default.
+        -- make_primal_variables falls back to the default for keys missing from
+        -- prev_x, so added/removed lines are handled automatically.
     end
 
     local problem = assert(solution.problem)

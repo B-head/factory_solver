@@ -189,7 +189,7 @@ function M:make_primal_variables(raw_variables)
     local prev_x = raw_variables and raw_variables.x or {}
     local ret = {}
     for k, v in pairs(self.primals) do
-        ret[v.index] = prev_x[k] or 1
+        ret[v.index] = prev_x[k] or 100
     end
     return csr_matrix.with_vector(ret, self.primal_length)
 end

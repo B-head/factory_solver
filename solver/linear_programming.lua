@@ -76,7 +76,10 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         log.debug("-- unfinished solve '%s' --", problem.name)
         log.debug("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
 
-        return "unfinished", problem:pack_variables(x, y, s)
+        -- Drop the partial primal so the next re-prepare warm-starts from the
+        -- default (make_primal_variables fallback) rather than from a stuck-
+        -- at-clamp x that would just reproduce the same non-convergence.
+        return "unfinished", nil
     end
 
     local SX = hpow(hmul(hpow(s, -0.5), hpow(x, 0.5)), 2):diag()
