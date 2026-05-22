@@ -1,4 +1,5 @@
 local acc = require "manage/accessor"
+local pre_solve = require "manage/pre_solve"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 
@@ -37,9 +38,16 @@ function M.get_total_amounts(player_index, solution)
         end
     end
 
-    for _, line in ipairs(solution.production_lines) do
-        local n = acc.normalize_production_line(line, bonuses)
-        local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, line.recipe_typed_name)
+    -- Walk the same per-quality decomposed / fluid-resolved lines that the LP
+    -- saw (pre_solve.to_normalized_production_lines), not the raw
+    -- acc.normalize_production_line output. The decomposition step splits one
+    -- recipe product into its per-quality cascade — without it, the LP sees
+    -- (and balances) uncommon copper-plate as produced internally while the
+    -- report's totals only credit normal copper-plate, leaving the uncommon
+    -- consumption uncanceled and showing up as a phantom "basic ingredient".
+    local normalized_lines = pre_solve.to_normalized_production_lines(solution.production_lines, bonuses)
+    for _, n in ipairs(normalized_lines) do
+        local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, n.recipe_typed_name)
 
         for _, amount in ipairs(n.products) do
             local filter_type = amount.type
@@ -49,12 +57,8 @@ function M.get_total_amounts(player_index, solution)
             if filter_type == "item" then
                 add(item_totals, tn.create_typed_name("item", name, amount.quality), amount_per_second)
             elseif filter_type == "fluid" then
-                -- Match the LP-side widening (pre_solve.resolve_bare_fluids):
-                -- without this, a bare fluid here would land at a different
-                -- key than the bridge endpoint that consumes it.
-                local temperature, min_t, max_t = acc.resolve_bare_fluid_product(
-                    name, amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
-                add(fluid_totals, tn.create_typed_name("fluid", name, nil, temperature, min_t, max_t),
+                add(fluid_totals, tn.create_typed_name("fluid", name, nil,
+                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
                     amount_per_second)
             elseif filter_type == "virtual_material" then
                 add(virtual_totals, tn.create_typed_name("virtual_material", name, amount.quality), amount_per_second)
@@ -71,9 +75,8 @@ function M.get_total_amounts(player_index, solution)
             if filter_type == "item" then
                 add(item_totals, tn.create_typed_name("item", name, amount.quality), -amount_per_second)
             elseif filter_type == "fluid" then
-                local temperature, min_t, max_t = acc.resolve_bare_fluid_ingredient(
-                    name, amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
-                add(fluid_totals, tn.create_typed_name("fluid", name, nil, temperature, min_t, max_t),
+                add(fluid_totals, tn.create_typed_name("fluid", name, nil,
+                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
                     -amount_per_second)
             elseif filter_type == "virtual_material" then
                 add(virtual_totals, tn.create_typed_name("virtual_material", name, amount.quality), -amount_per_second)
@@ -91,13 +94,9 @@ function M.get_total_amounts(player_index, solution)
             if filter_type == "item" then
                 add(item_totals, tn.create_typed_name("item", name, fuel_amount.quality), -amount_per_second)
             elseif filter_type == "fluid" then
-                -- line.fuel_typed_name may be bare on solutions migrated from
-                -- pre-0.4.0 saves. Widen here so the totals key matches the
-                -- ranged LP variable name the bridge target lands on.
-                local temperature, min_t, max_t = acc.resolve_bare_fluid_ingredient(
-                    name, fuel_amount.temperature, fuel_amount.minimum_temperature, fuel_amount.maximum_temperature)
                 add(fluid_totals, tn.create_typed_name("fluid", name, fuel_amount.quality,
-                    temperature, min_t, max_t), -amount_per_second)
+                    fuel_amount.temperature, fuel_amount.minimum_temperature, fuel_amount.maximum_temperature),
+                    -amount_per_second)
             elseif filter_type == "virtual_material" then
                 add(virtual_totals, tn.create_typed_name("virtual_material", name, fuel_amount.quality), -amount_per_second)
             else
