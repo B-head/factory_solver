@@ -105,8 +105,22 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         -- step takes meaningful progress from iteration 1. (Mehrotra's full
         -- starting point also adjusts x via an A·Aᵀ Cholesky; this cheaper
         -- data-scale-only proxy avoids the extra factorisation.)
-        local b_inf_norm = math.max(1, vector_inf_norm(b))
-        local c_inf_norm = math.max(1, vector_inf_norm(c))
+        --
+        -- The same scaling argument applies symmetrically to the primal: an
+        -- LP whose constraint right-hand side has ‖b‖∞ ≈ 1/60 (the in-game
+        -- "1 / min" entry) demands x ≈ 1/60 at optimum, so a starting x = 1
+        -- is ~60× too large. The Newton step then has to shrink most of x
+        -- toward the boundary in one go, find_step picks an α that pins
+        -- many s_i (or x_i) at the 2⁻⁵² clamp, and the very next Cholesky
+        -- factorisation hits the ill-conditioned D²-imbalance regime the
+        -- regularisation comment below describes — at iteration 1, with
+        -- no regularisation strong enough to recover. Use a small positive
+        -- floor instead of 1 so the IPM stays strictly interior without
+        -- blowing the primal scale up out of proportion to b.
+        local b_floor = 2 ^ -32
+        local c_floor = 2 ^ -32
+        local b_inf_norm = math.max(b_floor, vector_inf_norm(b))
+        local c_inf_norm = math.max(c_floor, vector_inf_norm(c))
         x = csr_matrix.with_vector(b_inf_norm, p_degree)
         y = csr_matrix.with_vector(0, d_degree)
         s = csr_matrix.with_vector(c_inf_norm, p_degree)
@@ -114,6 +128,42 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         x = problem:make_primal_variables(raw_variables)
         y = problem:make_dual_variables(raw_variables)
         s = problem:make_slack_variables(raw_variables)
+
+        -- Warm-start recentering, applied only at the first IPM
+        -- iteration after a fresh "ready" handoff (i.e. external
+        -- warm-start: constraint edits, line edits, mod reload). The
+        -- "ready" -> 1 transition returns the caller's raw_variables
+        -- unchanged, so the first solve call to see real work has
+        -- solver_state == 1 with raw_variables from the *previous*
+        -- terminated solve. After a finished solve the complementarity
+        -- x_i·s_i = 0 condition pins one side of every active
+        -- constraint at the 2⁻⁵² lower clamp. Carrying those boundary
+        -- values forward when the next solve scales x or b by 10×
+        -- breaks the unpivoted Cholesky: D² = X·S⁻¹ spans ~2¹⁰⁴ orders
+        -- of magnitude, round-off cancellation drives a pivot to 0 /
+        -- produces NaN, and the LP terminates "unfinished" already at
+        -- the second IPM iteration (observed in-game when the user
+        -- toggled an upper-limit constraint between 1/min and 10/min
+        -- on a 5-tier quality recycling chain).
+        --
+        -- Pull every x_i and s_i back into a band scaled to the problem
+        -- data, keeping the warm-start *direction* but discarding the
+        -- boundary clamps. The 2⁻¹⁰ floor (≈10⁻³ × ‖·‖∞) is narrow
+        -- enough that the warm-start hint still saves iterations on
+        -- small incremental edits, and wide enough to keep D²'s
+        -- dynamic range under ~2²⁰ on the first Newton step.
+        --
+        -- Subsequent iterations (solver_state >= 2) are internal IPM
+        -- progression: x and s legitimately approach the boundary as
+        -- the iterates close in on the optimum, and clamping would
+        -- prevent convergence on LPs whose true optimum has small
+        -- variable values.
+        if solver_state == 1 then
+            local b_inf_norm = math.max(2 ^ -32, vector_inf_norm(b))
+            local c_inf_norm = math.max(2 ^ -32, vector_inf_norm(c))
+            x = x:clamp(b_inf_norm * 2 ^ -10, machine_upper_epsilon)
+            s = s:clamp(c_inf_norm * 2 ^ -10, machine_upper_epsilon)
+        end
     end
 
     local primal = A * x - b
