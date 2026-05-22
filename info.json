@@ -1,17 +1,19 @@
 {
     "name": "factory_solver",
-    "version": "0.3.14",
+    "version": "0.4.0",
     "title": "Factory solver based on IPMs for LP",
     "author": "B_head",
     "description": "The Factorio calculator. Calculate quantities of machine and ingredient required in a factory to achieve materials production speed.",
-    "factorio_version": "2.0.48",
-    "dependencies": ["(?)base", "flib >= 0.15.0"],
+    "factorio_version": "2.0",
+    "dependencies": ["(?)base >= 2.0.48", "flib >= 0.15.0"],
     "package": {
         "git_publish_branch": "stable",
         "sync_portal_details": true,
         "ignore": ["gallery/*", "tests/*", "scenarios/*"],
         "gallery": [
-            "gallery/Nuclear.jpg"
+            "gallery/Fulgora.png",
+            "gallery/Gleba.png",
+            "gallery/Quality.png"
         ]
     }
 }

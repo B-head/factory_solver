@@ -5,11 +5,15 @@ The powerful solver based on IPMs for LP allows factories with complex recipe ch
 ## Feature
 
 - A recipe chain is configured to automatically calculate for each recipe.
-- Supports recipe chains including loops. (still incomplete)
-- Include the effects of modules, beacons and quality in calculation.
+- Supports recipe chains including loops, including quality recycling
+  cascades and byproduct-heavy chains (e.g. Fulgora recycling).
+- Folds modules, beacons, quality tiers, and force productivity research
+  bonuses into the calculation.
 - Calculate the total power used/generated and pollution emitted.
-- Generators and boilers etc. are treated as virtual recipes. (still incomplete)
+- Treats generators, boilers, mining, pumping, labs, fusion reactors,
+  thrusters, agricultural towers and item spoilage as virtual recipes.
 - Set limited machine and material constraints for calculations.
+- Supports Factorio 2.0 / Space Age (quality tiers, fluid temperatures).
 
 Warning: Multiplayer games have not been tested. Note that solution data may be lost if used.
 

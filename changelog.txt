@@ -1,11 +1,43 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.3.14
-Date: ????
+Version: 0.4.0
+Date: 2026-05-23
+  Features:
+    - Solve quality recycling loops (Space Age) without manual unrolling. (Thank you, Claude!)
+    - Solve recipe chains dominated by byproducts (e.g. Fulgora recycling) by
+      gating elastic shortage sources on reachability from raw inputs, so the
+      solver can no longer bypass producer chains by paying elastic cost.
+    - Add a fluid temperature dimension: boilers, heat exchangers, generators,
+      and fusion reactors are split per (fluid, temperature) and bridged automatically.
+    - Add a Research Bonus snapshot dialog that folds force productivity bonuses
+      into the solver.
+    - Add virtual recipes for fusion reactors, fusion generators, thrusters,
+      agricultural towers, labs (dispatched per consumed pack), per-fluid boilers,
+      and item spoilage.
   Changes:
-    - Restrict elastic shortage_source to materials unreachable from raw inputs.
-  Info:
-    - This fixes the solver bypassing producer recipe chains (e.g. Fulgora recycling)
-      by paying elastic cost instead of running the intended production path.
+    - Rewrite the interior-point solver as long-step path-following with cold-start
+      scaling, relative residuals, and retry-on-NaN Cholesky for stable convergence
+      on deep quality recycling cascades.
+    - Auto-promote cycle entry materials to basic sources via SCC analysis so that
+      mass-losing loops with no external input still have a bootstrap.
+    - Prune production lines isolated from any Constraint out of the LP.
+    - Dispatch offshore-pump virtual recipes by fluid name instead of a fixed machine.
+  Gui:
+    - Surface bare-fluid temperature ranges in the constraint and fuel pickers, and
+      bind bare-fluid constraints to every temperature variant.
+    - Use the native sprite-button quality indicator overlay.
+    - Tear down open GUIs on configuration change to avoid stale references.
+    - Display the launched-rocket virtual material as a cargo pod.
+    - Pick the initial filter group deterministically from prototype order.
+    - Decompose production line slots, totals, and constraints by quality tier.
+  Bugfixes:
+    - Fix crash when a production line references a removed prototype.
+    - Fix tile and resource virtual recipes always reporting as researched, so
+      planet-locked materials no longer appear in the picker before the host
+      space location is discovered.
+    - Fix constraint lookup ignoring quality in solution settings.
+    - Fix totals double-counting phantom internal flows from the quality cascade.
+    - Fix IPM instability when the constraint RHS is sub-unit.
+    - Fix module quality effect ignoring the current tier's next_probability.
 ---------------------------------------------------------------------------------------------------
 Version: 0.3.13
 Date: 2024-12-10
