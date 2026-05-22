@@ -7,6 +7,9 @@ local relation = require "manage/relation"
 local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
 
+-- See control.lua for why __DebugAdapter is mirrored as a local snapshot.
+local __DebugAdapter = _G["__DebugAdapter"]
+
 local M = {}
 
 ---comment
@@ -102,7 +105,7 @@ end
 function M.init_force_data(force_index)
     if not storage.forces[force_index] then
         storage.forces[force_index] = {
-            relation_to_recipes = { enabled_recipe = {}, item = {}, fluid = {}, virtual_recipe = {} },
+            relation_to_recipes = { enabled_recipe = {}, item = {}, fluid = {}, virtual_recipe = {}, virtual_recipe_researched = {} },
             relation_to_recipes_needs_updating = true,
             group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {} },
             group_infos_needs_updating = true,

@@ -708,7 +708,7 @@ function M.try_get_fixed_fuel(machine)
     if machine.heat_energy_source_prototype then
         return tn.create_typed_name("virtual_material", "<heat>")
     elseif machine.fluid_energy_source_prototype then
-        local energy = machine.fluid_energy_source_prototype
+        local energy = assert(machine.fluid_energy_source_prototype)
         local fluidbox_filter = energy.fluid_box.filter
         if not fluidbox_filter then
             return nil
@@ -811,7 +811,7 @@ function M.get_fluid_fuel_temperature_variants(machine)
     ---@type LuaFluidPrototype?
     local filter
     if machine.fluid_energy_source_prototype then
-        local energy = machine.fluid_energy_source_prototype
+        local energy = assert(machine.fluid_energy_source_prototype)
         if energy.burns_fluid then return nil end
         filter = energy.fluid_box.filter
     elseif machine.type == "generator" then

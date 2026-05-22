@@ -9,6 +9,12 @@ local virtual = require "manage/virtual"
 local common = require "ui/common"
 local main_window = require "ui/main_window"
 
+-- factoriomod-debug injects __DebugAdapter as a truthy global only when the
+-- VM is running under the debugger. The injection happens before any mod
+-- code loads, so taking a local snapshot here is safe and keeps LuaLS from
+-- flagging the global as undefined.
+local __DebugAdapter = _G["__DebugAdapter"]
+
 -- Activate the in-game smoke driver only when this Factorio instance was
 -- launched with --load-scenario factory_solver/<smoke-variant>. The mod's
 -- normal flow is untouched otherwise. Each variant ships its own driver under
@@ -167,6 +173,7 @@ local function toggle_main_window(player_index)
     end
 end
 
+---@param event EventData.CustomInputEvent
 script.on_event("factory-solver-toggle-main-window", function(event)
     toggle_main_window(event.player_index)
 end)
