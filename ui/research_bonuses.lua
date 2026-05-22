@@ -171,6 +171,13 @@ function handlers.on_apply_click(event)
 
     local re_event = fs_util.create_gui_event(dialog)
     common.on_close_self(re_event)
+
+    -- unlocked_qualities feeds into the per-product quality decomposition that
+    -- make_production_line_table renders, so toggling it has to invalidate the
+    -- Products column's button set — not just the solver state — or the icons
+    -- keep showing the pre-Apply quality cascade.
+    local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
+    fs_util.dispatch_to_subtree(root, "on_production_line_changed")
 end
 
 ---Build the per-recipe rows. Lives in `on_added` of the container so the
