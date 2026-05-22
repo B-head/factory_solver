@@ -2,6 +2,7 @@ local flib_table = require "__flib__/table"
 local flib_format = require "__flib__/format"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
+local pre_solve = require "manage/pre_solve"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
@@ -65,7 +66,7 @@ function handlers.make_production_line_table(event)
     for line_index, line in ipairs(solution.production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
-        local n = acc.normalize_production_line(line, bonuses)
+        local n, effectivity = acc.normalize_production_line(line, bonuses)
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
         do
@@ -203,33 +204,40 @@ function handlers.make_production_line_table(event)
 
         do
             local buttons = {}
-            for _, amount in ipairs(n.products) do
-                local typed_name = tn.create_typed_name(
-                    amount.type, amount.name, amount.quality,
-                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
-                local craft = tn.typed_name_to_material(typed_name)
-                local is_hidden = acc.is_hidden(craft)
-                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+            -- Mirror pre_solve.to_normalized_production_lines: split each
+            -- product into the per-quality cascade the LP actually sees, so the
+            -- UI reflects what the solver is solving. Decomposition is output-
+            -- only — ingredients/fuel below stay single-quality.
+            local unlocked = bonuses and bonuses.unlocked_qualities or nil
+            for _, product in ipairs(n.products) do
+                for _, amount in ipairs(pre_solve.quality_decomposition(product, effectivity.quality, unlocked)) do
+                    local typed_name = tn.create_typed_name(
+                        amount.type, amount.name, amount.quality,
+                        amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
+                    local craft = tn.typed_name_to_material(typed_name)
+                    local is_hidden = acc.is_hidden(craft)
+                    local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
 
-                local def = common.create_decorated_sprite_button {
-                    typed_name = typed_name,
-                    is_hidden = is_hidden,
-                    is_unresearched = is_unresearched,
-                    tags = {
-                        line_index = line_index,
+                    local def = common.create_decorated_sprite_button {
                         typed_name = typed_name,
-                        is_product = true,
-                        result_typed_name = line.recipe_typed_name,
-                        raw_amount = amount.amount_per_second,
-                    },
-                    handler = {
-                        [defines.events.on_gui_click] = handlers.on_production_line_inout_click,
-                        on_added = handlers.update_amount,
-                        on_amount_unit_changed = handlers.update_amount,
-                        on_calculation_changed = handlers.update_amount,
-                    },
-                }
-                flib_table.insert(buttons, def)
+                        is_hidden = is_hidden,
+                        is_unresearched = is_unresearched,
+                        tags = {
+                            line_index = line_index,
+                            typed_name = typed_name,
+                            is_product = true,
+                            result_typed_name = line.recipe_typed_name,
+                            raw_amount = amount.amount_per_second,
+                        },
+                        handler = {
+                            [defines.events.on_gui_click] = handlers.on_production_line_inout_click,
+                            on_added = handlers.update_amount,
+                            on_amount_unit_changed = handlers.update_amount,
+                            on_calculation_changed = handlers.update_amount,
+                        },
+                    }
+                    flib_table.insert(buttons, def)
+                end
             end
 
             local def = {
