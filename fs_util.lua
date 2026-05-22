@@ -107,12 +107,12 @@ end
 
 ---Add a new child or children to the given GUI element.
 ---@param parent LuaGuiElement
----@param def flib.GuiElemDef
+---@param def fs.GuiElemDef
 ---@param append_tags table?
 ---@return table<string, LuaGuiElement> elems
 ---@return LuaGuiElement first
 function M.add_gui(parent, def, append_tags)
-    local res_elems, first = flib_gui.add(parent, def)
+    local res_elems, first = flib_gui.add(parent, def --[[@as flib.GuiElemDef]])
     first.tags = flib_table.shallow_merge{
         first.tags,
         append_tags,

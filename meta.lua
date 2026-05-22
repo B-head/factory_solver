@@ -197,3 +197,72 @@ __factory_solver__storage = {}
 ---@field amount number
 ---@field minimum_temperature number?
 ---@field maximum_temperature number?
+
+---Project-local mirror of `flib.GuiElemDef`. flib defines its type as a
+---single `@class` inheriting from a union of `LuaGuiElement.add_param.*`
+---variants, but since factoriomod-debug 2.0.11 those variants are
+---`(exact)` and LuaLS no longer narrows `type` correctly through that
+---inheritance — every site assigning `type = "frame"` etc. is flagged
+---as `assign-type-mismatch` against `"button"` (the first variant). The
+---workaround is to express the same shape as an `@alias` union of
+---per-variant classes, which LuaLS narrows on the literal `type`. Each
+---variant combines the upstream `(exact)` add_param class with the flib
+---extras (`handler`, `children`, etc.) via multiple inheritance.
+---
+---`fs_util.add_gui` casts to `flib.GuiElemDef` at the actual flib
+---boundary so flib's signature is satisfied at runtime.
+---@class fs.GuiElemDef.extras
+---@field style_mods LuaStyle?
+---@field elem_mods LuaGuiElement?
+---@field drag_target string?
+---@field handler any?
+---@field children fs.GuiElemDef[]?
+---@field tab fs.GuiElemDef?
+---@field content fs.GuiElemDef?
+
+---@class fs.GuiElemDef.button: LuaGuiElement.add_param.button, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.camera: LuaGuiElement.add_param.camera, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.checkbox: LuaGuiElement.add_param.checkbox, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.choose_elem_button: LuaGuiElement.add_param.choose_elem_button, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.drop_down: LuaGuiElement.add_param.drop_down, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.flow: LuaGuiElement.add_param.flow, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.frame: LuaGuiElement.add_param.frame, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.line: LuaGuiElement.add_param.line, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.list_box: LuaGuiElement.add_param.list_box, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.minimap: LuaGuiElement.add_param.minimap, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.progressbar: LuaGuiElement.add_param.progressbar, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.radiobutton: LuaGuiElement.add_param.radiobutton, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.scroll_pane: LuaGuiElement.add_param.scroll_pane, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.slider: LuaGuiElement.add_param.slider, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.sprite: LuaGuiElement.add_param.sprite, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.sprite_button: LuaGuiElement.add_param.sprite_button, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.switch: LuaGuiElement.add_param.switch, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.tab: LuaGuiElement.add_param.tab, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.table: LuaGuiElement.add_param.table, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.text_box: LuaGuiElement.add_param.text_box, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.textfield: LuaGuiElement.add_param.textfield, fs.GuiElemDef.extras
+---@class fs.GuiElemDef.base: LuaGuiElement.add_param.base, fs.GuiElemDef.extras
+
+---@alias fs.GuiElemDef
+---| fs.GuiElemDef.button
+---| fs.GuiElemDef.camera
+---| fs.GuiElemDef.checkbox
+---| fs.GuiElemDef.choose_elem_button
+---| fs.GuiElemDef.drop_down
+---| fs.GuiElemDef.flow
+---| fs.GuiElemDef.frame
+---| fs.GuiElemDef.line
+---| fs.GuiElemDef.list_box
+---| fs.GuiElemDef.minimap
+---| fs.GuiElemDef.progressbar
+---| fs.GuiElemDef.radiobutton
+---| fs.GuiElemDef.scroll_pane
+---| fs.GuiElemDef.slider
+---| fs.GuiElemDef.sprite
+---| fs.GuiElemDef.sprite_button
+---| fs.GuiElemDef.switch
+---| fs.GuiElemDef.tab
+---| fs.GuiElemDef.table
+---| fs.GuiElemDef.text_box
+---| fs.GuiElemDef.textfield
+---| fs.GuiElemDef.base

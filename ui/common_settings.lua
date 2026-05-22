@@ -32,7 +32,8 @@ end
 function handlers.on_time_scale_selection_state_changed(event)
     local elem = event.element
     local player_data = save.get_player_data(event.player_index)
-    local time_scale = flib_table.find(time_scale_to_index, elem.selected_index)
+    local time_scale = assert(flib_table.find(time_scale_to_index, elem.selected_index))
+    ---@cast time_scale TimeScale
     player_data.time_scale = time_scale
 
     local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
@@ -51,8 +52,7 @@ end
 
 fs_util.add_handlers(handlers)
 
----@diagnostic disable: missing-fields
----@type flib.GuiElemDef
+---@type fs.GuiElemDef
 return {
     type = "frame",
     name = "common_settings",

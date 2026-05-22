@@ -19,7 +19,11 @@ local DIALOG_NAME = "factory_solver_research_bonuses"
 
 local handlers = {}
 
----@param event EventDataTrait
+-- Handlers in this file are bound to both synthetic events (typed
+-- EventDataTrait) and concrete Factorio gui events (EventData.on_gui_*),
+-- which LuaLS keeps as nominally distinct classes. Accept anything that
+-- carries an `element` field so every call site type-checks.
+---@param event { element: LuaGuiElement }
 ---@return LuaGuiElement
 local function find_dialog(event)
     return assert(fs_util.find_upper(event.element, DIALOG_NAME))
@@ -253,7 +257,7 @@ fs_util.add_handlers(handlers)
 
 ---@param caption string
 ---@param bonus_key string
----@return flib.GuiElemDef
+---@return fs.GuiElemDef
 local function scalar_row(caption, bonus_key)
     return {
         type = "flow",
@@ -279,8 +283,7 @@ local function scalar_row(caption, bonus_key)
     }
 end
 
----@diagnostic disable: missing-fields
----@type flib.GuiElemDef
+---@type fs.GuiElemDef
 return {
     type = "frame",
     name = DIALOG_NAME,

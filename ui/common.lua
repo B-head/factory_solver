@@ -77,7 +77,7 @@ end
 
 ---comment
 ---@param data table
----@return flib.GuiElemDef
+---@return fs.GuiElemDef
 function M.create_decorated_sprite_button(data)
     local typed_name = assert(data.typed_name) --[[@as TypedName]]
     local is_hidden = data.is_hidden or false
@@ -168,7 +168,7 @@ end
 ---comment
 ---@param player_index integer
 ---@param is_dialog boolean
----@param gui_def flib.GuiElemDef
+---@param gui_def fs.GuiElemDef
 ---@param append_data table?
 ---@return table<string, LuaGuiElement>
 ---@return LuaGuiElement

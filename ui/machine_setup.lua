@@ -610,8 +610,7 @@ end
 
 fs_util.add_handlers(handlers)
 
----@diagnostic disable: missing-fields
----@type flib.GuiElemDef
+---@type fs.GuiElemDef
 return {
     type = "frame",
     name = "factory_solver_machine_setups",
