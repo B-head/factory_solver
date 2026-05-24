@@ -10,13 +10,6 @@ local bridge_prefix = "|bridge|"
 
 local M = {}
 
----comment
----@param value number
----@return number
-function M.make_recipe_cost(value)
-    return (value / (1 + math.abs(value)) - 1) / 2
-end
-
 ---@param line NormalizedProductionLine
 ---@return boolean
 local function is_bridge_line(line)
@@ -379,7 +372,6 @@ function M.create_problem(solution_name, constraints, production_lines)
         end
         local objective_name = tn.typed_name_to_variable_name(line.recipe_typed_name)
         local bridge = is_bridge_line(line)
-        local product_count, ingredient_count = 0, 0
 
         for _, value in ipairs(line.products) do
             local constraint_name = tn.typed_name_to_variable_name(value)
@@ -397,12 +389,6 @@ function M.create_problem(solution_name, constraints, production_lines)
             if bare_limit and not bridge then
                 problem:add_subject_term(objective_name, bare_limit, amount)
             end
-
-            if value.type == "item" then
-                product_count = product_count + amount
-            else
-                product_count = product_count + amount / 10
-            end
         end
 
         for _, value in each_ingredient(line) do
@@ -411,19 +397,12 @@ function M.create_problem(solution_name, constraints, production_lines)
 
             local amount = value.amount_per_second
             problem:add_subject_term(objective_name, constraint_name, -amount)
-
-            if value.type == "item" then
-                ingredient_count = ingredient_count + amount
-            else
-                ingredient_count = ingredient_count + amount / 10
-            end
         end
 
         if bridge then
             problem:add_objective(objective_name, slack_cost, false)
         else
-            local recipe_cost = M.make_recipe_cost(ingredient_count - product_count)
-            problem:add_objective(objective_name, recipe_cost, true)
+            problem:add_objective(objective_name, slack_cost, true)
             problem:add_subject_term(objective_name, "|limit|" .. objective_name, 1)
         end
         ::continue_line::

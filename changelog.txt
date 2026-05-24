@@ -2,6 +2,9 @@
 Version: 0.4.1
 Date: ????
   Changes:
+    - Drop the per-recipe negative cost contribution from the LP objective.
+      Reachability gating, elastic sinks, active-line pruning, and the long-step
+      IPM together cover the stabilisation role it was introduced for in 0.3.7.
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.0
 Date: 2026-05-23
