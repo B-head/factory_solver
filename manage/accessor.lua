@@ -312,8 +312,12 @@ function M.get_generator_power(machine, machine_quality, fuel, fuel_typed_name)
         return max_power
     end
 
-    local quality_multiplier = 1 + M.get_quality_level(machine_quality) * 0.3
-    local consumption = machine.fluid_usage_per_tick * M.second_per_tick * quality_multiplier
+    -- get_fluid_usage_per_tick(quality) returns the engine-resolved per-tick
+    -- consumption at the requested quality (Factorio 2.0.x runtime API). It
+    -- replaces the previous hardcoded `1 + level * 0.3` multiplier on
+    -- fluid_usage_per_tick, which assumed vanilla QualityPrototype constants;
+    -- the engine call now picks up any modded customisation transparently.
+    local consumption = machine.get_fluid_usage_per_tick(machine_quality) * M.second_per_tick
     local effectivity_value = machine.effectivity or 1
     local fuel_power = -consumption * energy_per_unit * effectivity_value
 
@@ -584,8 +588,10 @@ end
 ---@return number
 function M.get_fuel_amount_per_second(machine, machine_quality, fuel, fuel_quality, effectivity_consumption, fuel_typed_name)
     if machine.type == "generator" then
-        local multiplier = 1 + M.get_quality_level(machine_quality) * 0.3
-        return machine.fluid_usage_per_tick * M.second_per_tick * multiplier
+        -- See get_generator_power for the rationale: route through the
+        -- engine's quality-aware getter instead of hardcoding the vanilla
+        -- 30%/tier multiplier so modded QualityPrototype values flow through.
+        return machine.get_fluid_usage_per_tick(machine_quality) * M.second_per_tick
     end
 
     local energy = machine.fluid_energy_source_prototype
@@ -908,42 +914,6 @@ function M.get_crafting_speed_cap(recipe)
 end
 
 ---comment
----@param machine LuaEntityPrototype
----@param quality QualityID
----@param effectivity_speed number
----@param crafting_speed_cap number
----@return number
-function M.get_crafting_speed(machine, quality, effectivity_speed, crafting_speed_cap)
-    local ret
-    if machine.type == "lab" then
-        -- 1 craft of a <research>{pack} virtual recipe represents 1 unit of
-        -- research progress. researching_speed alone defines the rate; the
-        -- pack-consumption side of drain_rate is applied as an input-only
-        -- productivity-like factor in pre_solve, so output (research) and
-        -- input (pack) can scale independently.
-        ret = machine.get_researching_speed(quality)
-    elseif machine.type == "offshore-pump" then
-        -- get_pumping_speed returns per-tick units; offshore-pump virtual
-        -- recipes bake acc.second_per_tick into product.amount to compensate.
-        ret = machine.get_pumping_speed(quality)
-    elseif machine.type == "plant" then
-        -- A plant is its own "machine" for <grow>{plant}:{seed} virtual
-        -- recipes; 1 craft = 1 growth cycle of one plant slot. growth_ticks
-        -- is intrinsic to the plant prototype and is not scaled by tower
-        -- quality or any other factor exposed to runtime, so the rate must
-        -- stay at 1.0. The fallback quality multiplier below would otherwise
-        -- silently boost growth rate per quality level.
-        ret = 1
-    else
-        ret = machine.get_crafting_speed(quality) or machine.mining_speed
-    end
-    if not ret then
-        ret = 1 + M.get_quality_level(quality) * 0.3
-    end
-    return math.min(ret * effectivity_speed, crafting_speed_cap)
-end
-
----comment
 ---@param quality QualityID
 function M.get_quality_level(quality)
     local quality_prototype = (type(quality) == "string") and prototypes.quality[quality] or quality
@@ -1122,12 +1092,11 @@ function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_na
 
     ---@param effect number?
     ---@param count number
-    ---@param quality_level integer
+    ---@param multiplier number
     ---@param is_negative boolean
     ---@return number
-    local function modify(effect, count, quality_level, is_negative)
+    local function modify(effect, count, multiplier, is_negative)
         effect = effect or 0
-        local multiplier = (1 + quality_level * 0.3)
         if is_negative then
             if effect < 0 then
                 effect = effect * multiplier
@@ -1148,13 +1117,18 @@ function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_na
             end
 
             local effects = assert(module.module_effects)
-            local quality_level = M.get_quality_level(quality)
+            -- Quality scaling on module effects: default_multiplier is the
+            -- engine-side per-tier multiplier (vanilla: 1, 1.3, 1.6, 1.9, 2.5
+            -- for normal..legendary). Reading it through the QualityPrototype
+            -- replaces the previous hardcoded (1 + quality_level * 0.3) so
+            -- modded quality tiers are honored.
+            local multiplier = M.get_module_quality_multiplier(quality)
 
-            ret.speed = ret.speed + modify(effects.speed, count, quality_level, false)
-            ret.consumption = ret.consumption + modify(effects.consumption, count, quality_level, true)
-            ret.productivity = ret.productivity + modify(effects.productivity, count, quality_level, false)
-            ret.pollution = ret.pollution + modify(effects.pollution, count, quality_level, true)
-            ret.quality = ret.quality + modify(effects.quality, count, quality_level, false)
+            ret.speed = ret.speed + modify(effects.speed, count, multiplier, false)
+            ret.consumption = ret.consumption + modify(effects.consumption, count, multiplier, true)
+            ret.productivity = ret.productivity + modify(effects.productivity, count, multiplier, false)
+            ret.pollution = ret.pollution + modify(effects.pollution, count, multiplier, true)
+            ret.quality = ret.quality + modify(effects.quality, count, multiplier, false)
             ::continue::
         end
     end
