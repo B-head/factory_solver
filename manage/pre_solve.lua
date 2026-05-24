@@ -136,6 +136,16 @@ function M.quality_decomposition(normalized_amount, effectivity_quality, unlocke
         return { normalized_amount }
     end
 
+    local source_quality_proto = prototypes.quality[normalized_amount.quality]
+    local source_level = source_quality_proto and source_quality_proto.level or 0
+    -- utility_constants.maximum_quality_jump caps how many tier steps above the
+    -- input quality a single craft can produce. Vanilla default is 255 (i.e.
+    -- effectively unlimited), but mods may set it lower to model engines that
+    -- only allow a one-tier jump per craft. Reading it through
+    -- prototypes.utility_constants picks up any modded override without
+    -- assuming a fixed value here.
+    local max_jump = prototypes.utility_constants.maximum_quality_jump or 255
+
     local current_quality = normalized_amount.quality
     local current_probability = 1
     local ret = {}
@@ -144,14 +154,17 @@ function M.quality_decomposition(normalized_amount, effectivity_quality, unlocke
         local next_quality
         local next_probability
         local quality_prototype = prototypes.quality[current_quality]
-        -- Research-derived quality gate: when the user has not unlocked a
-        -- higher quality, stop the chain even if the prototype tree still
-        -- offers a next step. unlocked_qualities=nil means "no force snapshot"
-        -- and falls back to the prototype-level chain (legacy behavior).
-        local next_unlocked = quality_prototype.next
-            and (not unlocked_qualities or unlocked_qualities[quality_prototype.next.name])
-        if next_unlocked then
-            next_quality = quality_prototype.next.name
+        local next_proto = quality_prototype.next
+        -- Walk to the next tier if (a) it exists in the prototype tree,
+        -- (b) it's unlocked by the player's research snapshot, and
+        -- (c) it's still within maximum_quality_jump tiers of the source.
+        -- unlocked_qualities=nil means "no force snapshot" and falls back to
+        -- the prototype-level chain (legacy behavior).
+        local next_unlocked = next_proto
+            and (not unlocked_qualities or unlocked_qualities[next_proto.name])
+        local within_jump = next_proto and (next_proto.level - source_level) <= max_jump
+        if next_unlocked and within_jump then
+            next_quality = next_proto.name
             if quality_prototype.name == normalized_amount.quality then
                 next_probability = math.min(effectivity_quality * quality_prototype.next_probability, 1)
             else
