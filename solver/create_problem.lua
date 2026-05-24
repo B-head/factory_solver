@@ -3,6 +3,13 @@ local problem_generator = require "solver/problem_generator"
 local material_cycles = require "solver/material_cycles"
 
 local slack_cost = 0
+-- Small per-unit cost on |basic_source| (external material supply). It sits
+-- well below elastic_cost, so it never competes with the shortage/surplus
+-- penalties or changes reachability gating, but it breaks ties between
+-- recipes that produce the same product at different material efficiency:
+-- the LP now prefers the chain that draws less raw input. Without it those
+-- optima are degenerate and the IPM splits the flow arbitrarily.
+local source_cost = 1
 local elastic_cost = 2 ^ 10
 local target_cost = 2 ^ 20
 
@@ -423,16 +430,17 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_subject_term(elastic_name, constraint_name, -1)
         end
         -- Cycle entry points identified by find_deficit_materials get a
-        -- free |basic_source| at slack_cost: they are the natural external
+        -- |basic_source| at source_cost: they are the natural external
         -- inputs of the cycle (think cu/normal + ir/normal in a quality
         -- recycling chain with no copper / iron producer registered).
         -- Without this, an all-in-cycle chain has no way to start and the
         -- LP would have to lean on |shortage_source| at penalty cost,
         -- producing solutions that look "OK" numerically but hide the
-        -- external input behind the slack-vs-source distinction.
+        -- external input behind the slack-vs-source distinction. source_cost
+        -- is far below elastic_cost so the shortage gate is unaffected.
         if deficits[constraint_name] then
             local slack_name = "|basic_source|" .. constraint_name
-            problem:add_objective(slack_name, slack_cost)
+            problem:add_objective(slack_name, source_cost)
             problem:add_subject_term(slack_name, constraint_name, 1)
             problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
 
@@ -475,7 +483,7 @@ function M.create_problem(solution_name, constraints, production_lines)
         problem:add_equivalence_constraint(constraint_name, 0)
 
         local slack_name = "|basic_source|" .. constraint_name
-        problem:add_objective(slack_name, slack_cost)
+        problem:add_objective(slack_name, source_cost)
         problem:add_subject_term(slack_name, constraint_name, 1)
         problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
 

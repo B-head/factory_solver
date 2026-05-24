@@ -10,6 +10,9 @@ Date: ????
     - Drop the per-recipe negative cost contribution from the LP objective.
       Reachability gating, elastic sinks, active-line pruning, and the long-step
       IPM together cover the stabilisation role it was introduced for in 0.3.7.
+    - Charge a small cost on external material sources so that when several
+      recipes can produce the same product, the solver prefers the one that
+      draws less raw input instead of splitting the flow arbitrarily.
   Bugfixes:
     - Apply the beacon's quality tier to its distribution_effectivity, so
       higher-quality beacons now boost module effects by the engine-side
