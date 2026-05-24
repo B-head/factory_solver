@@ -1,29 +1,24 @@
 -- Tie-break fixtures: multiple recipes that produce the same product, where
--- the LP has more than one optimal solution. These exist to document what the
--- solver does when the objective is genuinely indifferent between recipes.
+-- the LP has more than one optimal solution. They pin down which ties the
+-- solver breaks and which it leaves degenerate.
 --
--- Background: until this branch the LP carried a small negative per-recipe
--- cost (make_recipe_cost, introduced in 8b31e76). It was removed once the
--- structural machinery -- reachability gating, elastic sinks, active-line
--- pruning, the long-step IPM -- made its stabilisation role redundant. Removing
--- it exposes the fact that the LP no longer breaks ties between equivalent
--- producers: with every recipe at cost 0, a set of recipes that can each
--- satisfy the constraint forms a degenerate optimum, and the interior-point
--- method converges to the analytic centre (flow split roughly evenly) rather
--- than committing to one recipe.
+-- Background: the LP carries no per-recipe cost (the historical
+-- make_recipe_cost, 8b31e76, was removed once reachability gating, elastic
+-- sinks, active-line pruning, and the long-step IPM made its stabilisation
+-- role redundant). With every recipe at cost 0, recipes that can each satisfy
+-- the constraint would form a degenerate optimum and the interior-point method
+-- would converge to the analytic centre (flow split evenly). A small
+-- source_cost on |basic_source| (external material supply) restores a
+-- meaningful tie-break along the one axis the project's cost-location
+-- principle sanctions: raw input drawn, not recipe identity.
 --
 -- The three scenarios separate the cases:
---   1. different conversion ratios   -- a tie-break is genuinely desirable
---      (prefer the material-efficient recipe), and is the one xfail here.
---   2. different craft times         -- legacy made the *wrong* choice (more
---      machines); degeneracy is recorded as the current behaviour.
---   3. identical copies              -- no information to break the tie;
---      symmetric split is the only sensible behaviour.
---
--- Where a tie-break is actually wanted (scenario 1), the right lever per the
--- project's cost-location principle is a cost on the *source* of the wasted
--- material, not a per-recipe term -- so scenario 1 is written as the spec we
--- would satisfy that way, and marked xfail until such a cost exists.
+--   1. different conversion ratios -- source_cost breaks the tie: the LP runs
+--      only the material-efficient recipe (the chain drawing less raw input).
+--   2. different craft times -- still degenerate: source_cost is blind to
+--      machine count (both draw the same raw input per unit of product) and
+--      there is no machine-count cost. Recorded as the current behaviour.
+--   3. identical copies -- no information to break the tie; symmetric split.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
@@ -61,17 +56,15 @@ end
 
 local cases = {}
 
--- Scenario 1 (xfail): two recipes make B from A at different ratios --
+-- Scenario 1: two recipes make B from A at different ratios --
 -- convert-efficient is 1 A -> 1 B, convert-wasteful is 2 A -> 1 B. A is an
--- ingredient with no producer, so create_problem supplies it through a free
--- |basic_source|. With the source free, wasting A costs the LP nothing, so
--- both recipes are optimal and the IPM splits the 10 B/s demand roughly
--- evenly (~4.97 / ~5.03). The behaviour we *want* is to run only the
--- efficient recipe; achieving it requires a cost on the A source, which the
--- LP does not have today. Marked xfail until that cost exists.
+-- ingredient with no producer, so create_problem supplies it through a
+-- |basic_source| at source_cost. The wasteful recipe draws twice the A and so
+-- costs twice as much at the source, so the LP runs only the efficient recipe.
+-- (Before source_cost this optimum was degenerate and the IPM split the 10 B/s
+-- demand roughly evenly, ~4.97 / ~5.03.)
 table.insert(cases, {
-    name = "different ratios: LP should prefer the material-efficient recipe",
-    xfail = true,
+    name = "different ratios: source_cost makes the LP prefer the efficient recipe",
     run = function()
         local state, vars = solve(
             {
