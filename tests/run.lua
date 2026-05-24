@@ -50,6 +50,7 @@ local case_files = {
     "lp_fluid_constraint",
     "isolated_line",
     "lp_scale_invariance",
+    "lp_tiebreak",
     "material_cycles",
 }
 
@@ -67,7 +68,29 @@ for _, file in ipairs(case_files) do
         harness.reset_log_capture()
 
         local ok, err = pcall(case.run)
-        if ok then
+        -- xfail cases document a behaviour the solver does *not* yet have
+        -- (e.g. preferring the material-efficient recipe among degenerate
+        -- optima). They are expected to fail today; an unexpected pass
+        -- (XPASS) means the spec is now satisfied and the case should be
+        -- promoted to a normal assertion -- so XPASS is treated as failure.
+        if case.xfail then
+            if ok then
+                failed = failed + 1
+                io.write(string.format("  XPASS[%s] %s (expected failure but passed -- promote to normal case)\n",
+                    file, case.name))
+                table.insert(failures, string.format("[%s] %s (XPASS)", file, case.name))
+            else
+                passed = passed + 1
+                io.write(string.format("  xfail[%s] %s\n", file, case.name))
+                if verbose then
+                    io.write("    (expected failure) ", tostring(err), "\n")
+                    local dump = harness.dump_captured()
+                    if dump ~= "" then
+                        io.write(dump, "\n")
+                    end
+                end
+            end
+        elseif ok then
             passed = passed + 1
             io.write(string.format("  ok   [%s] %s\n", file, case.name))
             if verbose then
