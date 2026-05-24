@@ -276,6 +276,49 @@ function handlers.on_module_changed(event)
     fs_util.dispatch_to_subtree(dialog, "on_module_changed")
 end
 
+---Show a warning while a quality module is set but the force has unlocked no
+---quality above normal. Without an unlocked tier the quality cascade cannot
+---advance, so the module produces nothing extra; the unlock is edited in the
+---Research bonuses dialog. Checks both machine and beacon module slots.
+---@param event EventDataTrait
+function handlers.on_quality_module_warning_update(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    ---@param module_typed_names table<string, TypedName>?
+    ---@return boolean
+    local function has_quality_module(module_typed_names)
+        for _, typed_name in pairs(module_typed_names or {}) do
+            if acc.is_quality_module(typed_name.name) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local found = has_quality_module(dialog.tags.module_typed_names --[[@as table<string, TypedName>]])
+    if not found then
+        local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
+        for _, affected_by_beacon in ipairs(affected_by_beacons) do
+            if has_quality_module(affected_by_beacon.module_typed_names) then
+                found = true
+                break
+            end
+        end
+    end
+
+    local has_unlocked_above_normal = false
+    local unlocked = save.get_research_bonuses(event.player_index).unlocked_qualities
+    for quality_name in pairs(unlocked) do
+        if quality_name ~= "normal" then
+            has_unlocked_above_normal = true
+            break
+        end
+    end
+
+    elem.visible = found and not has_unlocked_above_normal
+end
+
 ---@param event EventDataTrait
 function handlers.on_make_beacons_table(event)
     local elem = event.element
@@ -790,6 +833,29 @@ return {
                         on_beacon_changed = handlers.on_make_total_effectivity,
                         on_module_changed = handlers.on_make_total_effectivity,
                     },
+                },
+            },
+            -- Kept out of the Modules section on purpose: on_modules_visible
+            -- hides that section for machines with no module slots, but such a
+            -- machine can still take quality modules through beacons and the
+            -- warning must stay visible. single_line is a LuaStyle property, so
+            -- it must go in style_mods (not as an element field) to wrap.
+            {
+                type = "label",
+                visible = false,
+                style_mods = {
+                    single_line = false,
+                    font_color = { r = 1, g = 0.7, b = 0.2 },
+                    top_margin = 4,
+                    maximal_width = 280,
+                },
+                caption =
+                "Quality modules have no effect until a quality above normal is unlocked in the Research bonuses dialog.",
+                handler = {
+                    on_added = handlers.on_quality_module_warning_update,
+                    on_machine_setup_changed = handlers.on_quality_module_warning_update,
+                    on_module_changed = handlers.on_quality_module_warning_update,
+                    on_beacon_changed = handlers.on_quality_module_warning_update,
                 },
             },
         },

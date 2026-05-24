@@ -377,6 +377,21 @@ function M.get_module(name)
     end
 end
 
+---True for modules whose effect set includes a positive quality bonus
+---(e.g. the vanilla quality module). Used to warn in the machine dialog when
+---such a module is set while the force has unlocked no quality above normal,
+---so the cascade cannot advance and the module would have no visible effect.
+---@param name string?
+---@return boolean
+function M.is_quality_module(name)
+    local module = M.get_module(name)
+    if not module then
+        return false
+    end
+    local effects = module.module_effects
+    return effects ~= nil and (effects.quality or 0) > 0
+end
+
 ---comment
 ---@param name string?
 ---@return LuaEntityPrototype?
