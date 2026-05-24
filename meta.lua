@@ -161,6 +161,17 @@ __factory_solver__storage = {}
 ---@field source_entity_name string?
 ---@field source_fluid_name string?
 
+---Virtual recipes describe machine-driven conversions that have no LuaRecipePrototype
+---(boiler heating, generator fuel burn, mining, plant growth, lab research,
+---rocket launches, ...). Unlike real recipes, the per-second rate is not
+---encoded in `products[i].amount` / `ingredients[i].amount`; those fields
+---hold per-craft ratios (typically 1 for shape-only recipes, or a recipe-
+---specific stoichiometry like 1/heat_capacity for boilers). The per-second
+---throughput baseline is supplied at pre_solve time by
+---accessor.get_virtual_recipe_rates(machine, quality), which dispatches per
+---machine type to whichever quality-aware runtime API actually scales for
+---that entity. accessor.normalize_production_line then multiplies the ratio
+---by the rate to get per-second values for the LP.
 ---@class VirtualRecipe
 ---@field type "virtual_recipe"
 ---@field name string

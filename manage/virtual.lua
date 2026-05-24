@@ -423,7 +423,6 @@ function M.create_boiler_virtual(boiler_prototype)
     local input_filter = acc.get_fluidbox_filter_prototype(boiler_prototype, 1)
     local output_filter = acc.get_fluidbox_filter_prototype(boiler_prototype, 2)
     local boiler_mode = boiler_prototype.boiler_mode
-    local max_energy_usage = boiler_prototype.get_max_energy_usage()
 
     ---@type LuaFluidPrototype[]
     local candidates = {}
@@ -451,18 +450,24 @@ function M.create_boiler_virtual(boiler_prototype)
         end
         local delta_t = effective_target - input_fluid.default_temperature
 
+        -- Per-craft ratio relative to the boiler's per-second energy_usage:
+        -- fluid_per_second = energy_per_second / (delta_t * heat_capacity).
+        -- pre_solve multiplies these by acc.get_virtual_recipe_rates(boiler, q)
+        -- = get_max_energy_usage(q) * second_per_tick, which gives the
+        -- per-second flow at the requested quality. Quality scaling on the
+        -- boiler is therefore honored through the engine's quality-aware API
+        -- with no hardcoded multiplier.
         local in_amount, out_amount
-        if delta_t > 0 and max_energy_usage > 0
+        if delta_t > 0
             and input_fluid.heat_capacity > 0 and output_fluid.heat_capacity > 0
         then
-            local need_tick = delta_t / max_energy_usage
-            in_amount = acc.second_per_tick / (need_tick * input_fluid.heat_capacity)
-            out_amount = acc.second_per_tick / (need_tick * output_fluid.heat_capacity)
+            in_amount = 1 / (delta_t * input_fluid.heat_capacity)
+            out_amount = 1 / (delta_t * output_fluid.heat_capacity)
         else
-            -- Physically impossible to heat this fluid (input default >= target,
-            -- non-positive heat capacity, or zero-power boiler). Emit a placeholder
-            -- recipe so the picker still shows the entry, but with amount=0 so the
-            -- LP sees an all-zero column and cannot pick it up.
+            -- Physically impossible to heat this fluid (input default >= target
+            -- or non-positive heat capacity). Emit a placeholder recipe so the
+            -- picker still shows the entry, but with amount=0 so the LP sees
+            -- an all-zero column and cannot pick it up.
             in_amount = 0
             out_amount = 0
         end
@@ -564,9 +569,12 @@ function M.create_reactor_virtual(reactor_prototype)
         subgroup_name = reactor_prototype.subgroup.name,
         products = {
             {
+                -- Per-craft ratio of 1 against acc.get_virtual_recipe_rates(reactor, q)
+                -- = get_max_energy_usage(q) * second_per_tick. Quality scaling
+                -- on the reactor's heat output is honored through the engine.
                 type = "virtual_material",
                 name = "<heat>",
-                amount = reactor_prototype.get_max_energy_usage() * acc.second_per_tick,
+                amount = 1,
                 probability = 1,
             },
         },
@@ -583,9 +591,12 @@ end
 ---branch. Consumes a cold input fluid (e.g. fluoroketone-cold) plus burner
 ---fuel cells and emits a hot output fluid (e.g. fusion-plasma). Burner fuel
 ---is auto-injected by pre_solve via line.fuel_typed_name, so only the input
----fluid is listed here. Rate is the entity's get_fluid_usage_per_tick scaled
----to per-second; quality scaling is layered on by acc.get_crafting_speed at
----pre_solve time, matching the boiler / generator pattern. The output fluid
+---fluid is listed here. Per-craft amounts are unit ratios; the per-second
+---rate is acc.get_virtual_recipe_rates(fusion-reactor, q) =
+---get_fluid_usage_per_tick(q) * second_per_tick, so quality scaling is
+---honored through the engine (note: fusion-reactor's energy_usage is
+---quality-invariant in vanilla — only fluid throughput scales — so
+---get_fluid_usage_per_tick is the only correct proxy). The output fluid
 ---comes out at its prototype default_temperature because the output fluidbox
 ---carries no temperature filter.
 ---@param fusion_reactor_prototype LuaEntityPrototype
@@ -596,8 +607,6 @@ function M.create_fusion_reactor_virtual(fusion_reactor_prototype)
     if not input_filter or not output_filter then
         return {}
     end
-
-    local rate = fusion_reactor_prototype.get_fluid_usage_per_tick() * acc.second_per_tick
 
     ---@type VirtualRecipe
     local recipe = {
@@ -612,7 +621,7 @@ function M.create_fusion_reactor_virtual(fusion_reactor_prototype)
             {
                 type = "fluid",
                 name = output_filter.name,
-                amount = rate,
+                amount = 1,
                 probability = 1,
                 temperature = output_filter.default_temperature,
             },
@@ -621,7 +630,7 @@ function M.create_fusion_reactor_virtual(fusion_reactor_prototype)
             {
                 type = "fluid",
                 name = input_filter.name,
-                amount = rate,
+                amount = 1,
             },
         },
         fixed_crafting_machine = tn.craft_to_typed_name(fusion_reactor_prototype),
@@ -653,8 +662,9 @@ function M.create_fusion_generator_virtual(fusion_generator_prototype)
     local in_min_temp = input_box and input_box.minimum_temperature
     local in_max_temp = input_box and input_box.maximum_temperature
 
-    local rate = fusion_generator_prototype.get_fluid_usage_per_tick() * acc.second_per_tick
-
+    -- Per-craft ratio of 1 against acc.get_virtual_recipe_rates(fusion-generator, q)
+    -- = get_fluid_usage_per_tick(q) * second_per_tick. Quality scaling is
+    -- honored through the engine.
     ---@type VirtualRecipe
     local recipe = {
         type = "virtual_recipe",
@@ -668,7 +678,7 @@ function M.create_fusion_generator_virtual(fusion_generator_prototype)
             {
                 type = "fluid",
                 name = output_filter.name,
-                amount = rate,
+                amount = 1,
                 probability = 1,
                 temperature = output_filter.default_temperature,
             },
@@ -677,7 +687,7 @@ function M.create_fusion_generator_virtual(fusion_generator_prototype)
             {
                 type = "fluid",
                 name = input_filter.name,
-                amount = rate,
+                amount = 1,
                 minimum_temperature = in_min_temp,
                 maximum_temperature = in_max_temp,
             },
@@ -693,18 +703,14 @@ end
 ---Space Age thruster: consumes two input fluids (fuel + oxidizer) and produces
 ---no LP-modeled output. Thrust / effectivity is deliberately not modeled — the
 ---recipe only exists so the LP can size the fuel/oxidizer supply chain to
----sustain N thrusters at max_performance. Per-second consumption per fluidbox
----at the base (quality level 0) is max_performance.fluid_usage * second_per_tick
----(vanilla: 2 * 60 = 120/s each). LuaEntityPrototype.get_fluid_usage_per_tick is
----restricted to Generator / FusionGenerator / FusionReactor and is not available
----on thruster, so the rate is read from the max_performance struct directly.
----Quality scaling (vanilla: legendary consumes 300/s = 2.5×, matching the
----in-game tooltip) is layered on by acc.get_crafting_speed's default
----`1 + 0.3·quality_level` fallback — thruster exposes no get_crafting_speed /
----mining_speed, so it naturally takes that path with no special case. No
----crafting_speed_cap is set: thruster accepts no modules or beacons, so the
----only multiplier above 1 is the quality fallback itself, and capping at 1
----would silently undo it.
+---sustain N thrusters at max_performance. Per-craft ratio is 1 per fluidbox;
+---the per-second rate is acc.get_virtual_recipe_rates(thruster, q) =
+---max_performance.fluid_usage * default_multiplier(q) * second_per_tick
+---(vanilla: 120/s at normal, 300/s at legendary, matching the in-game tooltip).
+---No runtime quality-aware API exists on thruster, so default_multiplier is
+---applied manually inside get_virtual_recipe_rates. No crafting_speed_cap is
+---set: thruster accepts no modules or beacons, so the only multiplier above 1
+---is the quality scaling itself, and capping at 1 would silently undo it.
 ---@param thruster_prototype LuaEntityPrototype
 ---@return (VirtualRecipe|VirtualMaterial)[]
 function M.create_thruster_virtual(thruster_prototype)
@@ -714,8 +720,6 @@ function M.create_thruster_virtual(thruster_prototype)
     if not fuel_filter or not oxidizer_filter or not perf then
         return {}
     end
-
-    local rate = perf.fluid_usage * acc.second_per_tick
 
     ---@type VirtualRecipe
     local recipe = {
@@ -731,12 +735,12 @@ function M.create_thruster_virtual(thruster_prototype)
             {
                 type = "fluid",
                 name = fuel_filter.name,
-                amount = rate,
+                amount = 1,
             },
             {
                 type = "fluid",
                 name = oxidizer_filter.name,
-                amount = rate,
+                amount = 1,
             },
         },
         fixed_crafting_machine = tn.craft_to_typed_name(thruster_prototype),
@@ -994,10 +998,9 @@ end
 
 ---One virtual recipe per fluid-bearing tile. The picker dispatches by
 ---pumped_fluid_name to the set of offshore-pumps whose fluid_box filter
----matches (or is unset). Product amount is normalized to per-tick units of 1
----scaled by acc.second_per_tick, so multiplying by the picked pump's
----get_pumping_speed(quality) (per tick) inside acc.get_crafting_speed yields
----fluid/sec at the LP layer.
+---matches (or is unset). Product amount is a per-craft ratio of 1; the
+---per-second rate is acc.get_virtual_recipe_rates(pump, q) =
+---get_pumping_speed(q) * second_per_tick, giving fluid/sec at the LP layer.
 ---@param tile_prototype LuaTilePrototype
 ---@param planet_index PlanetIndex
 ---@return (VirtualRecipe|VirtualMaterial)[]
@@ -1017,7 +1020,7 @@ function M.create_offshore_tile_virtual(tile_prototype, planet_index)
             {
                 type = "fluid",
                 name = fluid_prototype.name,
-                amount = acc.second_per_tick,
+                amount = 1,
                 probability = 1,
                 temperature = fluid_prototype.default_temperature,
             }

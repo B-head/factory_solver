@@ -1219,7 +1219,26 @@ function M.normalize_production_line(line, bonuses)
         line.recipe_typed_name, machine, bonuses)
     local crafting_energy = M.get_crafting_energy(recipe)
     local crafting_speed_cap = M.get_crafting_speed_cap(recipe)
-    local crafting_speed = M.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
+    -- Dispatch by recipe object kind. Real recipes (LuaRecipePrototype) are
+    -- crafted at rate machine.get_crafting_speed(quality) / recipe.energy and
+    -- product/ingredient .amount values are per-craft quantities. Virtual
+    -- recipes carry per-craft ratios in .amount (default 1) and the per-second
+    -- baseline comes from get_virtual_recipe_rates, which dispatches per
+    -- machine type to whichever quality-aware runtime API actually scales for
+    -- that entity (boiler -> get_max_energy_usage, generator family ->
+    -- get_fluid_usage_per_tick, ...). crafting_energy stays 1 for virtual
+    -- recipes so the downstream raw_*_to_amount formula (amount * speed /
+    -- energy) collapses to ratio * rate.
+    local crafting_speed
+    ---@diagnostic disable-next-line: undefined-field
+    if recipe.object_name == "LuaRecipePrototype" then
+        crafting_speed = machine.get_crafting_speed(machine_quality)
+            or machine.mining_speed
+            or 0
+    else
+        crafting_speed = M.get_virtual_recipe_rates(machine, machine_quality)
+    end
+    crafting_speed = math.min(crafting_speed * effectivity.speed, crafting_speed_cap)
 
     ---@type NormalizedAmount[]
     local products = {}
