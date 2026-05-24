@@ -950,6 +950,95 @@ function M.get_quality_level(quality)
     return quality_prototype and quality_prototype.level or 0
 end
 
+---Return the base multiplier for a quality tier (normal=1, uncommon=1.3, ...).
+---LuaQualityPrototype::default_multiplier (Factorio 2.0.69+ runtime read)
+---reflects per-QualityPrototype customisation, so this is the single entry
+---point used to retire the hardcoded `1 + level * 0.3` everywhere.
+---Falls back to `1 + level * 0.3` on older Factorio versions or when
+---default_multiplier is not exposed.
+---@param quality QualityID
+---@return number
+function M.get_quality_default_multiplier(quality)
+    local quality_prototype = (type(quality) == "string") and prototypes.quality[quality] or quality
+    if quality_prototype then
+        local m = quality_prototype.default_multiplier
+        if m then
+            return m
+        end
+        return 1 + quality_prototype.level * 0.3
+    end
+    return 1
+end
+
+---Return the quality multiplier applied to module effects.
+---Uses the quality tier's default_multiplier (matches the engine's own
+---quality scaling of module effects). Used to replace the hardcoded
+---`(1 + quality_level * 0.3)` inside `get_total_effectivity`'s `modify()`.
+---@param quality QualityID
+---@return number
+function M.get_module_quality_multiplier(quality)
+    return M.get_quality_default_multiplier(quality)
+end
+
+---Return the per-second throughput rate of `machine` that drives a virtual
+---recipe. pre_solve multiplies each ingredient/product's per-craft ratio
+---(amount) by this base rate. The machine.type dispatch was pinned down
+---from a 2026-05-24 in-game dump:
+---  boiler / reactor              -> get_max_energy_usage(q) (heat amount proxy)
+---  generator / fusion-*          -> get_fluid_usage_per_tick(q)
+---                                   (fusion-reactor's energy_usage is
+---                                   quality-invariant; only the fluid
+---                                   side scales)
+---  thruster                      -> max_performance.fluid_usage × default_multiplier(q)
+---                                   (no runtime quality API; multiplier
+---                                   applied manually. Verified in-game
+---                                   that the engine itself also reads
+---                                   QualityPrototype::default_multiplier:
+---                                   overwriting default_multiplier shifts
+---                                   thruster consumption accordingly)
+---  mining-drill                  -> mining_speed (quality-independent)
+---                                   (vanilla mining-drill's mining speed
+---                                   itself does not scale with quality;
+---                                   quality acts on productivity / module
+---                                   slots / radius instead. Verified
+---                                   in-game on 2026-05-24)
+---  offshore-pump                 -> get_pumping_speed(q)
+---  lab                           -> get_researching_speed(q)
+---  plant / agricultural-tower    -> 1.0 (growth_ticks lives on the plant
+---                                   prototype; tower quality has no effect)
+---  default                       -> get_crafting_speed(q) (covers every
+---                                   CraftingMachine type)
+---All return values are normalised to "per second" (per-tick APIs are
+---multiplied by second_per_tick internally). effectivity must be applied
+---by the caller (this function is a pure helper depending only on machine
+---+ quality).
+---When the API returns nil (modded entity / placeholder), falls back to 0.
+---@param machine LuaEntityPrototype
+---@param quality QualityID
+---@return number
+function M.get_virtual_recipe_rates(machine, quality)
+    local t = machine.type
+    if t == "boiler" or t == "reactor" then
+        return (machine.get_max_energy_usage(quality) or 0) * M.second_per_tick
+    elseif t == "generator" or t == "fusion-reactor" or t == "fusion-generator" then
+        return (machine.get_fluid_usage_per_tick(quality) or 0) * M.second_per_tick
+    elseif t == "thruster" then
+        local perf = machine.max_performance
+        if not perf then return 0 end
+        return perf.fluid_usage * M.get_quality_default_multiplier(quality) * M.second_per_tick
+    elseif t == "mining-drill" then
+        return machine.mining_speed or 0
+    elseif t == "offshore-pump" then
+        return (machine.get_pumping_speed(quality) or 0) * M.second_per_tick
+    elseif t == "lab" then
+        return machine.get_researching_speed(quality) or 0
+    elseif t == "plant" or t == "agricultural-tower" then
+        return 1.0
+    else
+        return machine.get_crafting_speed(quality) or 1
+    end
+end
+
 ---comment
 ---@param module_typed_names table<string, TypedName>
 ---@param module_inventory_size integer
