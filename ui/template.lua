@@ -29,7 +29,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = "Template",
+            caption = { "factory-solver-template" },
             ignored_by_interaction = true,
         },
         {

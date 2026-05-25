@@ -143,7 +143,7 @@ function handlers.update_total_power_label(event)
     local solution = save.get_selected_solution(event.player_index)
 
     if not solution then
-        elem.caption = "0J"
+        elem.caption = common.format_power(0)
         return
     end
 
@@ -158,7 +158,7 @@ function handlers.update_total_pollution_label(event)
     local solution = save.get_selected_solution(event.player_index)
 
     if not solution then
-        elem.caption = "0"
+        elem.caption = flib_format.number(0, true, 5)
         return
     end
 
@@ -177,7 +177,7 @@ return {
     {
         type = "label",
         style = "caption_label",
-        caption = "Final products",
+        caption = { "factory-solver-final-products" },
     },
     {
         type = "frame",
@@ -198,7 +198,7 @@ return {
     {
         type = "label",
         style = "caption_label",
-        caption = "Basic ingredients",
+        caption = { "factory-solver-basic-ingredients" },
     },
     {
         type = "frame",
@@ -230,7 +230,7 @@ return {
             {
                 type = "label",
                 style = "caption_label",
-                caption = "Total power",
+                caption = { "factory-solver-total-power" },
             },
             {
                 type = "label",
@@ -245,7 +245,7 @@ return {
             {
                 type = "label",
                 style = "caption_label",
-                caption = "Total pollution",
+                caption = { "factory-solver-total-pollution" },
             },
             {
                 type = "label",

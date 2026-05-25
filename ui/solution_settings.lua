@@ -73,9 +73,9 @@ function handlers.on_make_constraints_table(event)
                 style = "factory_solver_limit_type_dropdown",
                 selected_index = limit_index,
                 items = {
-                    "Upper limit",
-                    "Lower limit",
-                    "Equal",
+                    { "factory-solver-upper-limit" },
+                    { "factory-solver-lower-limit" },
+                    { "factory-solver-equal" },
                 },
                 tags = data,
                 handler = {
@@ -208,7 +208,7 @@ return {
     {
         type = "label",
         style = "caption_label",
-        caption = "Constraints",
+        caption = { "factory-solver-constraints" },
     },
     {
         type = "table",
@@ -224,7 +224,7 @@ return {
     },
     {
         type = "button",
-        caption = "Add constraint",
+        caption = { "factory-solver-add-constraint" },
         handler = {
             [defines.events.on_gui_click] = handlers.on_add_constraint_click,
             on_added = handlers.on_add_constraint_button_enabled,

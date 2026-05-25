@@ -62,7 +62,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = "Rename solution",
+            caption = { "factory-solver-rename-solution" },
             ignored_by_interaction = true,
         },
         {

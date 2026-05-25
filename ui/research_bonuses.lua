@@ -226,7 +226,7 @@ function handlers.on_recipe_table_added(event)
     if #elem.children == 0 then
         fs_util.add_gui(elem.parent, {
             type = "label",
-            caption = "(No per-recipe productivity research available.)",
+            caption = { "factory-solver-no-recipe-productivity-research" },
         })
     end
 end
@@ -262,7 +262,7 @@ end
 
 fs_util.add_handlers(handlers)
 
----@param caption string
+---@param caption LocalisedString
 ---@param bonus_key string
 ---@return fs.GuiElemDef
 local function scalar_row(caption, bonus_key)
@@ -311,7 +311,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = "Research bonuses",
+            caption = { "factory-solver-research-bonuses" },
             ignored_by_interaction = true,
         },
         {
@@ -337,12 +337,12 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Global bonuses",
+                    caption = { "factory-solver-global-bonuses" },
                 },
-                scalar_row("Mining drill productivity", "mining_drill_productivity"),
-                scalar_row("Laboratory productivity", "laboratory_productivity"),
-                scalar_row("Laboratory speed", "laboratory_speed"),
-                scalar_row("Beacon distribution", "beacon_distribution"),
+                scalar_row({ "factory-solver-mining-drill-productivity" }, "mining_drill_productivity"),
+                scalar_row({ "factory-solver-laboratory-productivity" }, "laboratory_productivity"),
+                scalar_row({ "factory-solver-laboratory-speed" }, "laboratory_speed"),
+                scalar_row({ "factory-solver-beacon-distribution" }, "beacon_distribution"),
             },
             {
                 type = "frame",
@@ -351,7 +351,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Unlocked qualities",
+                    caption = { "factory-solver-unlocked-qualities" },
                 },
                 {
                     type = "flow",
@@ -368,7 +368,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Recipe productivity",
+                    caption = { "factory-solver-recipe-productivity" },
                 },
                 {
                     type = "table",
@@ -385,14 +385,14 @@ return {
         name = "dialog_buttons",
         {
             type = "button",
-            caption = "Sync with current research",
+            caption = { "factory-solver-sync-with-current-research" },
             handler = {
                 [defines.events.on_gui_click] = handlers.on_sync_click,
             },
         },
         {
             type = "button",
-            caption = "Reset all to 0",
+            caption = { "factory-solver-reset-all-to-zero" },
             handler = {
                 [defines.events.on_gui_click] = handlers.on_reset_click,
             },

@@ -188,7 +188,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = "Machine presets",
+            caption = { "factory-solver-machine-presets" },
             ignored_by_interaction = true,
         },
         {
@@ -213,7 +213,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Fuels",
+                    caption = { "factory-solver-fuels" },
                 },
                 {
                     type = "table",
@@ -245,7 +245,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Minings",
+                    caption = { "factory-solver-minings" },
                 },
                 {
                     type = "table",
@@ -266,7 +266,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Machines",
+                    caption = { "factory-solver-machines" },
                 },
                 {
                     type = "table",

@@ -230,7 +230,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = "Add production line",
+            caption = { "factory-solver-add-production-line" },
             ignored_by_interaction = true,
         },
         {
@@ -278,7 +278,7 @@ return {
                     {
                         type = "label",
                         style = "caption_label",
-                        caption = "Recipe for product",
+                        caption = { "factory-solver-recipe-for-product" },
                     },
                     {
                         type = "table",
@@ -315,7 +315,7 @@ return {
                     {
                         type = "label",
                         style = "caption_label",
-                        caption = "Recipe for ingredient",
+                        caption = { "factory-solver-recipe-for-ingredient" },
                     },
                     {
                         type = "table",
@@ -352,7 +352,7 @@ return {
                     {
                         type = "label",
                         style = "caption_label",
-                        caption = "Recipe for fuel",
+                        caption = { "factory-solver-recipe-for-fuel" },
                     },
                     {
                         type = "table",
@@ -377,7 +377,7 @@ return {
             visible = script.feature_flags.quality,
             {
                 type = "label",
-                caption = "Quality",
+                caption = { "factory-solver-quality" },
             },
             {
                 type = "drop-down",
@@ -397,14 +397,14 @@ return {
                 column_count = 2,
                 {
                     type = "label",
-                    caption = "Unresearched",
+                    caption = { "factory-solver-unresearched" },
                 },
                 {
                     type = "switch",
                     name = "craft_visible_unresearched_switch",
                     switch_state = "right",
-                    left_label_caption = "Show",
-                    right_label_caption = "Hide",
+                    left_label_caption = { "factory-solver-show" },
+                    right_label_caption = { "factory-solver-hide" },
                     tags = {
                         root_gui = "factory_solver_production_line_adder",
                         state_name = "unresearched_craft_visible",
@@ -417,14 +417,14 @@ return {
                 },
                 {
                     type = "label",
-                    caption = "Hidden",
+                    caption = { "factory-solver-hidden" },
                 },
                 {
                     type = "switch",
                     name = "craft_visible_hidden_switch",
                     switch_state = "right",
-                    left_label_caption = "Show",
-                    right_label_caption = "Hide",
+                    left_label_caption = { "factory-solver-show" },
+                    right_label_caption = { "factory-solver-hide" },
                     tags = {
                         root_gui = "factory_solver_production_line_adder",
                         state_name = "hidden_craft_visible",

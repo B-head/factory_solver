@@ -61,7 +61,7 @@ return {
     {
         type = "label",
         style = "caption_label",
-        caption = "Time scale",
+        caption = { "factory-solver-time-scale" },
     },
     {
         type = "drop-down",
@@ -87,14 +87,14 @@ return {
     },
     {
         type = "button",
-        caption = "Machine presets",
+        caption = { "factory-solver-machine-presets" },
         handler = {
             [defines.events.on_gui_click] = handlers.on_open_machine_preset_dialog_button_click,
         },
     },
     {
         type = "button",
-        caption = "Research bonuses",
+        caption = { "factory-solver-research-bonuses" },
         handler = {
             [defines.events.on_gui_click] = handlers.on_open_research_bonuses_dialog_button_click,
         },

@@ -11,13 +11,13 @@ local production_line_adder = require "ui/production_line_adder"
 
 local headers = {
     "",
-    "Recipe",
-    "Required",
-    "Machine",
-    "Products",
-    "Ingredients",
-    "Power",
-    "Pollution",
+    { "factory-solver-header-recipe" },
+    { "factory-solver-header-required" },
+    { "factory-solver-header-machine" },
+    { "factory-solver-header-products" },
+    { "factory-solver-header-ingredients" },
+    { "factory-solver-header-power" },
+    { "factory-solver-header-pollution" },
     "",
 }
 

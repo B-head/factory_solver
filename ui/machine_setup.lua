@@ -44,11 +44,9 @@ function handlers.on_make_machine_table(event)
     if #machines == 0 then
         local category = recipe.category or recipe.resource_category or recipe.pumped_fluid_name
         if category then
-            no_machine_label.caption = string.format(
-                "No machine in any loaded mod can craft this recipe (category: %s).",
-                category)
+            no_machine_label.caption = { "factory-solver-no-machine-for-recipe-with-category", category }
         else
-            no_machine_label.caption = "No machine in any loaded mod can craft this recipe."
+            no_machine_label.caption = { "factory-solver-no-machine-for-recipe" }
         end
     end
 
@@ -699,7 +697,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = "Machine settings",
+            caption = { "factory-solver-machine-settings" },
             ignored_by_interaction = true,
         },
         {
@@ -715,7 +713,7 @@ return {
         {
             type = "label",
             style = "caption_label",
-            caption = "Machine",
+            caption = { "factory-solver-machine" },
             handler = {
                 on_added = handlers.on_hide_for_plant,
             },
@@ -751,7 +749,7 @@ return {
             },
             {
                 type = "label",
-                caption = "Quality",
+                caption = { "factory-solver-quality" },
             },
             {
                 type = "drop-down",
@@ -782,7 +780,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Substrate",
+                    caption = { "factory-solver-substrate" },
                 },
                 {
                     type = "frame",
@@ -807,7 +805,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Modules",
+                    caption = { "factory-solver-modules" },
                 },
                 {
                     type = "flow",
@@ -827,7 +825,7 @@ return {
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = "Beacons",
+                    caption = { "factory-solver-beacons" },
                 },
                 {
                     type = "table",
@@ -841,7 +839,7 @@ return {
                 },
                 {
                     type = "button",
-                    caption = "Add beacon",
+                    caption = { "factory-solver-add-beacon" },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_add_beacon_click,
                     },
@@ -850,7 +848,7 @@ return {
             {
                 type = "label",
                 style = "caption_label",
-                caption = "Total effectivity",
+                caption = { "factory-solver-total-effectivity" },
             },
             {
                 type = "frame",
@@ -880,8 +878,7 @@ return {
                     top_margin = 4,
                     maximal_width = 280,
                 },
-                caption =
-                "Quality modules have no effect until a quality above normal is unlocked in the Research bonuses dialog.",
+                caption = { "factory-solver-quality-module-warning" },
                 handler = {
                     on_added = handlers.on_quality_module_warning_update,
                     on_machine_setup_changed = handlers.on_quality_module_warning_update,
@@ -904,7 +901,7 @@ return {
             {
                 type = "label",
                 style = "caption_label",
-                caption = "Fuel",
+                caption = { "factory-solver-fuel" },
             },
             {
                 type = "frame",
