@@ -976,6 +976,24 @@ function M.get_quality_level(quality)
     return quality_prototype and quality_prototype.level or 0
 end
 
+---Return the quality-scaled distribution_effectivity of a beacon.
+---Factorio 2.0 beacons have no `get_distribution_effectivity(quality)`
+---runtime method, so the value is composed from two prototype reads:
+---  effective = distribution_effectivity
+---            + quality_level * distribution_effectivity_bonus_per_quality_level
+---bonus_per_quality_level is optional on the prototype; treat a missing
+---value as 0 so vanilla beacons (which do define it) and modded beacons
+---that opt out both behave correctly.
+---@param beacon LuaEntityPrototype
+---@param quality QualityID
+---@return number
+function M.get_beacon_distribution_effectivity(beacon, quality)
+    local base = assert(beacon.distribution_effectivity)
+    local bonus = beacon.distribution_effectivity_bonus_per_quality_level or 0
+    local level = M.get_quality_level(quality)
+    return base + level * bonus
+end
+
 ---comment
 ---@param module_typed_names table<string, TypedName>
 ---@param module_inventory_size integer
@@ -1027,8 +1045,8 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
         for _, affected_by_beacon in ipairs(affected_by_beacons) do
             local beacon_typed_name = affected_by_beacon.beacon_typed_name
             local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
-            if beacon then
-                local effectivity = assert(beacon.distribution_effectivity)
+            if beacon and beacon_typed_name then
+                local effectivity = M.get_beacon_distribution_effectivity(beacon, beacon_typed_name.quality)
                     * affected_by_beacon.beacon_quantity
                     * beacon_multiplier
                 local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,

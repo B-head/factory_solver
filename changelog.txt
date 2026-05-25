@@ -1,7 +1,11 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.2
 Date: ????
-  Changes:
+  Bugfixes:
+    - Apply the beacon's quality tier to its distribution_effectivity, so
+      higher-quality beacons now boost module effects by the engine-side
+      amount (vanilla: base + 0.2 per quality level) instead of being treated
+      as identical to normal-quality beacons.
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.1
 Date: 2026-05-25
