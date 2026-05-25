@@ -762,93 +762,90 @@ return {
             },
         },
         {
-            type = "line",
-            style = "factory_solver_line",
-            handler = {
-                on_added = handlers.on_hide_for_plant,
-            },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
-            handler = {
-                on_added = handlers.on_substrate_visible,
-            },
-            {
-                type = "label",
-                style = "caption_label",
-                caption = "Substrate",
-            },
-            {
-                type = "frame",
-                style = "factory_solver_slot_background_frame",
-                {
-                    type = "table",
-                    style = "filter_slot_table",
-                    column_count = 6,
-                    handler = {
-                        on_added = handlers.on_make_substrate_table,
-                    },
-                },
-            },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
-            handler = {
-                on_machine_setup_changed = handlers.on_modules_visible,
-            },
-            {
-                type = "label",
-                style = "caption_label",
-                caption = "Modules",
-            },
-            {
-                type = "flow",
-                direction = "horizontal",
-                handler = {
-                    on_machine_setup_changed = handlers.on_make_machine_modules,
-                },
-            },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
-            handler = {
-                on_machine_setup_changed = handlers.on_beacons_visible,
-            },
-            {
-                type = "label",
-                style = "caption_label",
-                caption = "Beacons",
-            },
-            {
-                type = "table",
-                style = "factory_solver_beacons_table",
-                column_count = 4,
-                draw_horizontal_lines = true,
-                handler = {
-                    on_added = handlers.on_make_beacons_table,
-                    on_beacon_changed = handlers.on_make_beacons_table,
-                },
-            },
-            {
-                type = "button",
-                caption = "Add beacon",
-                handler = {
-                    [defines.events.on_gui_click] = handlers.on_add_beacon_click,
-                },
-            },
-        },
-        {
             type = "flow",
             style = "factory_solver_no_spacing_vertical_flow_style",
             direction = "vertical",
             handler = {
                 on_machine_setup_changed = handlers.on_total_effectivity_visible,
+            },
+            {
+                type = "line",
+                style = "factory_solver_line",
+            },
+            {
+                type = "flow",
+                style = "factory_solver_no_spacing_vertical_flow_style",
+                direction = "vertical",
+                handler = {
+                    on_added = handlers.on_substrate_visible,
+                },
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = "Substrate",
+                },
+                {
+                    type = "frame",
+                    style = "factory_solver_slot_background_frame",
+                    {
+                        type = "table",
+                        style = "filter_slot_table",
+                        column_count = 6,
+                        handler = {
+                            on_added = handlers.on_make_substrate_table,
+                        },
+                    },
+                },
+            },
+            {
+                type = "flow",
+                style = "factory_solver_no_spacing_vertical_flow_style",
+                direction = "vertical",
+                handler = {
+                    on_machine_setup_changed = handlers.on_modules_visible,
+                },
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = "Modules",
+                },
+                {
+                    type = "flow",
+                    direction = "horizontal",
+                    handler = {
+                        on_machine_setup_changed = handlers.on_make_machine_modules,
+                    },
+                },
+            },
+            {
+                type = "flow",
+                style = "factory_solver_no_spacing_vertical_flow_style",
+                direction = "vertical",
+                handler = {
+                    on_machine_setup_changed = handlers.on_beacons_visible,
+                },
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = "Beacons",
+                },
+                {
+                    type = "table",
+                    style = "factory_solver_beacons_table",
+                    column_count = 4,
+                    draw_horizontal_lines = true,
+                    handler = {
+                        on_added = handlers.on_make_beacons_table,
+                        on_beacon_changed = handlers.on_make_beacons_table,
+                    },
+                },
+                {
+                    type = "button",
+                    caption = "Add beacon",
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_add_beacon_click,
+                    },
+                },
             },
             {
                 type = "label",
