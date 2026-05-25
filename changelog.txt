@@ -18,6 +18,10 @@ Date: ????
       higher-quality beacons now boost module effects by the engine-side
       amount (vanilla: base + 0.2 per quality level) instead of being treated
       as identical to normal-quality beacons.
+    - Fix lower and equal constraints being silently violated when the
+      producer chain emits many unclearable by-products. The bound now uses
+      the same cost tier as the upper constraint, so it dominates the
+      surplus-sink ledger.
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.1
 Date: 2026-05-25
