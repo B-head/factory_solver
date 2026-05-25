@@ -1,6 +1,7 @@
 local fs_util = require "fs_util"
 local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
+local factoryplanner_codec = require "manage/factoryplanner_codec"
 local common = require "ui/common"
 
 local handlers = {}
@@ -20,14 +21,46 @@ function handlers.on_import_textbox_changed(event)
     end
 end
 
+---Try factory_solver's native codec first (cheap signature check). On
+---failure, decode the string again and probe for FP's `export_modset` /
+---`factories` shape. Returns a list of payloads to import (1 for native,
+---N for FP factories), an aggregated warning list, or an error.
+---@param s string
+---@return table[]?
+---@return LocalisedString[]
+---@return LocalisedString?
+local function decode_any(s)
+    local payload, err = solution_codec.decode(s)
+    if payload then
+        return { payload }, {}, nil
+    end
+
+    local export_table, fp_err = factoryplanner_codec.decode(s)
+    if export_table then
+        local payloads = {}
+        local warnings = {}
+        for _, packed_factory in ipairs(export_table.factories) do
+            local fp_payload, fp_warnings = factoryplanner_codec.factory_to_payload(packed_factory)
+            payloads[#payloads + 1] = fp_payload
+            for _, w in ipairs(fp_warnings) do warnings[#warnings + 1] = w end
+        end
+        if #payloads == 0 then
+            return nil, {}, { "factory-solver-import-error-structure" }
+        end
+        return payloads, warnings, nil
+    end
+
+    return nil, {}, err or fp_err
+end
+
 ---@param event EventDataTrait
 function handlers.on_import_confirm(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_solution_import"))
     local textbox = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_textbox"))
     local error_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_error"))
 
-    local payload, err = solution_codec.decode(textbox.text)
-    if not payload then
+    local payloads, warnings, err = decode_any(textbox.text)
+    if not payloads then
         error_label.caption = err or ""
         error_label.visible = true
         return
@@ -35,8 +68,15 @@ function handlers.on_import_confirm(event)
 
     local player_data = save.get_player_data(event.player_index)
     local solutions = save.get_solutions(event.player_index)
-    local imported_name = save.import_solution(solutions, payload)
-    player_data.selected_solution = imported_name
+    local imported_name = save.import_solutions(solutions, payloads)
+    if imported_name then
+        player_data.selected_solution = imported_name
+    end
+
+    local player = game.players[event.player_index]
+    if player then
+        for _, w in ipairs(warnings) do player.print(w) end
+    end
 
     local window = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
     fs_util.dispatch_to_subtree(window, "on_files_changed")

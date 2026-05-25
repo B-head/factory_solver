@@ -463,6 +463,19 @@ function M.import_solution(solutions, payload)
     return new_solution_name
 end
 
+---Import a list of payloads (one per FP Factory) as separate Solutions and
+---return the name of the last one. The caller selects which to focus.
+---@param solutions table<string, Solution>
+---@param payloads table[]
+---@return string?
+function M.import_solutions(solutions, payloads)
+    local last_name = nil
+    for _, payload in ipairs(payloads) do
+        last_name = M.import_solution(solutions, payload)
+    end
+    return last_name
+end
+
 ---comment
 ---@param solutions table<string, Solution>
 ---@param solution_name string
