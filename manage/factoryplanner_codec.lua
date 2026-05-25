@@ -503,17 +503,25 @@ function M.decode(s)
     return decoded, nil
 end
 
----Encode one Solution as an FP shared string. FP imports a list of
----factories, but a factory_solver Solution maps to exactly one Factory, so
----we emit a 1-element factories array. The export_modset["factoryplanner"]
----value is pinned (see FP_EXPORT_VERSION above).
----@param solution Solution
+---Encode a list of Solutions as an FP shared string. Each Solution maps to
+---one FP Factory; the export_modset["factoryplanner"] value is pinned (see
+---FP_EXPORT_VERSION above). Per-solution warnings are concatenated in input
+---order so the caller can surface them to the player without grouping logic.
+---@param solutions Solution[]
 ---@return string, LocalisedString[]
-function M.encode(solution)
-    local packed_factory, warnings = solution_to_packed_factory(solution)
+function M.encode(solutions)
+    local factories = {}
+    local warnings = {}
+    for i, solution in ipairs(solutions) do
+        local packed_factory, factory_warnings = solution_to_packed_factory(solution)
+        factories[i] = packed_factory
+        for _, w in ipairs(factory_warnings) do
+            warnings[#warnings + 1] = w
+        end
+    end
     local export_table = {
         export_modset = { ["factoryplanner"] = FP_EXPORT_VERSION },
-        factories = { packed_factory },
+        factories = factories,
     }
     return assert(helpers.encode_string(helpers.table_to_json(export_table))), warnings
 end

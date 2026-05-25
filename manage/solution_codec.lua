@@ -8,12 +8,12 @@ local M = {}
 local SIGNATURE = "factory_solver"
 local CURRENT_VERSION = 1
 
----Walk every TypedName field inside a decoded payload and run the standard
----migration, matching the per-Solution walk in save.reinit_force_data. Kept in
----this module (not save.lua) so the codec's decode contract stays self-contained;
----reinit_force_data's walk handles legacy field-name transitions (module_names →
----module_typed_names etc.) that imports never need because the payload always
----ships the current field shape.
+---Walk every TypedName field inside a decoded solution payload and run the
+---standard migration, matching the per-Solution walk in save.reinit_force_data.
+---Kept in this module (not save.lua) so the codec's decode contract stays
+---self-contained; reinit_force_data's walk handles legacy field-name
+---transitions (module_names → module_typed_names etc.) that imports never need
+---because the payload always ships the current field shape.
 ---@param payload table
 local function migrate_typed_names(payload)
     for _, line in ipairs(payload.production_lines) do
@@ -41,28 +41,34 @@ local function migrate_typed_names(payload)
     end
 end
 
----Encode a Solution into a shareable string.
+---Encode a list of Solutions into a shareable string.
 ---Only user-input fields (name, constraints, production_lines) are serialized;
 ---solver-derived data (quantity_of_machines_required, problem, raw_variables,
 ---solver_state) is reconstructed on import via the on_tick solve pump.
----@param solution Solution
+---@param solutions Solution[]
 ---@return string
-function M.encode(solution)
-    local payload = {
+function M.encode(solutions)
+    local payloads = {}
+    for i, solution in ipairs(solutions) do
+        payloads[i] = {
+            name = solution.name,
+            constraints = solution.constraints,
+            production_lines = solution.production_lines,
+        }
+    end
+    local envelope = {
         signature = SIGNATURE,
         version = CURRENT_VERSION,
-        name = solution.name,
-        constraints = solution.constraints,
-        production_lines = solution.production_lines,
+        solutions = payloads,
     }
-    return assert(helpers.encode_string(helpers.table_to_json(payload)))
+    return assert(helpers.encode_string(helpers.table_to_json(envelope)))
 end
 
----Decode a shared string into a payload table. Returns (payload, nil) on
----success or (nil, localised_error) on any failure. The payload's TypedNames
----are migrated to current field shapes before return.
+---Decode a shared string into a list of solution payloads. Returns
+---(payloads, nil) on success or (nil, localised_error) on any failure. Each
+---payload's TypedNames are migrated to current field shapes before return.
 ---@param s string
----@return table?
+---@return table[]?
 ---@return LocalisedString?
 function M.decode(s)
     if type(s) ~= "string" or s == "" then
@@ -74,24 +80,30 @@ function M.decode(s)
         return nil, { "factory-solver-import-error-prefix" }
     end
 
-    local payload = helpers.json_to_table(json)
-    if type(payload) ~= "table" or payload.signature ~= SIGNATURE then
+    local envelope = helpers.json_to_table(json)
+    if type(envelope) ~= "table" or envelope.signature ~= SIGNATURE then
         return nil, { "factory-solver-import-error-prefix" }
     end
 
-    if payload.version ~= CURRENT_VERSION then
-        return nil, { "factory-solver-import-error-version", tostring(payload.version) }
+    if envelope.version ~= CURRENT_VERSION then
+        return nil, { "factory-solver-import-error-version", tostring(envelope.version) }
     end
 
-    if type(payload.name) ~= "string"
-        or type(payload.constraints) ~= "table"
-        or type(payload.production_lines) ~= "table"
-    then
+    if type(envelope.solutions) ~= "table" then
         return nil, { "factory-solver-import-error-structure" }
     end
 
-    migrate_typed_names(payload)
-    return payload, nil
+    for _, payload in ipairs(envelope.solutions) do
+        if type(payload.name) ~= "string"
+            or type(payload.constraints) ~= "table"
+            or type(payload.production_lines) ~= "table"
+        then
+            return nil, { "factory-solver-import-error-structure" }
+        end
+        migrate_typed_names(payload)
+    end
+
+    return envelope.solutions, nil
 end
 
 return M

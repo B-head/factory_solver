@@ -17,11 +17,19 @@ function handlers.on_selector_tool_enabled(event)
     elem.enabled = solution ~= nil
 end
 
+---@param event EventDataTrait
+function handlers.on_export_tool_enabled(event)
+    local elem = event.element
+    local solutions = save.get_solutions(event.player_index)
+
+    elem.enabled = next(solutions) ~= nil
+end
+
 ---@param event EventData.on_gui_click
 function handlers.on_new_solution(event)
     local player_data = save.get_player_data(event.player_index)
     local solutions = save.get_solutions(event.player_index)
-    
+
     player_data.selected_solution = save.new_solution(solutions)
 
     local root = assert(fs_util.find_upper(event.element, "solution_selector"))
@@ -124,8 +132,8 @@ return {
             sprite = "utility/export_slot",
             handler = {
                 [defines.events.on_gui_click] = handlers.on_export_solution,
-                on_added = handlers.on_selector_tool_enabled,
-                on_selected_solution_changed = handlers.on_selector_tool_enabled,
+                on_added = handlers.on_export_tool_enabled,
+                on_files_changed = handlers.on_export_tool_enabled,
             },
         },
         {

@@ -4,6 +4,8 @@ local solution_codec = require "manage/solution_codec"
 local factoryplanner_codec = require "manage/factoryplanner_codec"
 local common = require "ui/common"
 
+local DIALOG_NAME = "factory_solver_solution_import"
+
 local handlers = {}
 
 ---@param event EventDataTrait
@@ -11,64 +13,230 @@ function handlers.on_init_import_textbox(event)
     event.element.focus()
 end
 
----@param event EventData.on_gui_text_changed
-function handlers.on_import_textbox_changed(event)
-    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_solution_import"))
-    local error_label = fs_util.find_lower(dialog, "factory_solver_solution_import_error")
-    if error_label then
-        error_label.visible = false
-        error_label.caption = ""
-    end
-end
-
 ---Try factory_solver's native codec first (cheap signature check). On
 ---failure, decode the string again and probe for FP's `export_modset` /
----`factories` shape. Returns a list of payloads to import (1 for native,
----N for FP factories), an aggregated warning list, or an error.
+---`factories` shape. Returns a list of payloads (one per native solution or
+---one per FP factory), an aggregated warning list, or an error.
 ---@param s string
 ---@return table[]?
 ---@return LocalisedString[]
 ---@return LocalisedString?
 local function decode_any(s)
-    local payload, err = solution_codec.decode(s)
-    if payload then
-        return { payload }, {}, nil
+    local payloads, err = solution_codec.decode(s)
+    if payloads then
+        return payloads, {}, nil
     end
 
     local export_table, fp_err = factoryplanner_codec.decode(s)
     if export_table then
-        local payloads = {}
+        local fp_payloads = {}
         local warnings = {}
         for _, packed_factory in ipairs(export_table.factories) do
             local fp_payload, fp_warnings = factoryplanner_codec.factory_to_payload(packed_factory)
-            payloads[#payloads + 1] = fp_payload
+            fp_payloads[#fp_payloads + 1] = fp_payload
             for _, w in ipairs(fp_warnings) do warnings[#warnings + 1] = w end
         end
-        if #payloads == 0 then
+        if #fp_payloads == 0 then
             return nil, {}, { "factory-solver-import-error-structure" }
         end
-        return payloads, warnings, nil
+        return fp_payloads, warnings, nil
     end
 
     return nil, {}, err or fp_err
 end
 
+---Compute the rename a given payload name would get if imported on top of
+---the supplied `taken` set, matching `save.import_solution`'s collision
+---rule. Marks the chosen name as taken before returning so sequential calls
+---see the running effect (i.e. two payloads named "X" become "X" / "X 1").
+---@param base string
+---@param taken table<string, boolean>
+---@return string
+local function resolve_rename(base, taken)
+    local name = base
+    local i = 1
+    while taken[name] do
+        name = string.format("%s %i", base, i)
+        i = i + 1
+    end
+    taken[name] = true
+    return name
+end
+
+---Sync the "select all" master checkbox to reflect whether every row is
+---checked. Programmatic state writes do not fire the checked event, so this
+---is safe to call from inside a row-change handler.
+---@param dialog LuaGuiElement
+local function sync_select_all(dialog)
+    local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_list"))
+    local master = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_select_all"))
+    local all_checked = true
+    local any = false
+    for _, child in ipairs(list.children) do
+        if child.type == "checkbox" then
+            any = true
+            if not child.state then
+                all_checked = false
+                break
+            end
+        end
+    end
+    master.state = any and all_checked
+end
+
+---Redraw each row's caption so the rename suffix reflects the current set of
+---checked payloads. Walks in list order: an unchecked row reserves nothing,
+---a checked row claims either its native name or the next free suffix.
+---@param dialog LuaGuiElement
+---@param player_index integer
+local function refresh_list_captions(dialog, player_index)
+    local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_list"))
+    local payloads = dialog.tags.payloads --[[@as table[]?]]
+    if not payloads then return end
+
+    local taken = {}
+    for name in pairs(save.get_solutions(player_index)) do
+        taken[name] = true
+    end
+
+    for _, child in ipairs(list.children) do
+        if child.type == "checkbox" then
+            local index = child.tags.payload_index --[[@as integer]]
+            local payload = payloads[index]
+            local base = payload.name
+            if child.state then
+                local resolved = resolve_rename(base, taken)
+                if resolved == base then
+                    child.caption = base
+                else
+                    child.caption = { "", base, " → ", resolved }
+                end
+            else
+                child.caption = base
+            end
+        end
+    end
+end
+
+---Wipe and rebuild the list with one checkbox per decoded payload, all
+---checked by default. Stores the payload list on dialog.tags so the confirm
+---handler can pull the originals back without re-decoding.
+---@param dialog LuaGuiElement
+---@param payloads table[]
+local function populate_list(dialog, payloads)
+    local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_list"))
+    list.clear()
+
+    local tags = dialog.tags
+    tags.payloads = payloads
+    dialog.tags = tags
+
+    for i, payload in ipairs(payloads) do
+        fs_util.add_gui(list, {
+            type = "checkbox",
+            state = true,
+            caption = payload.name,
+            tags = { payload_index = i },
+            handler = {
+                [defines.events.on_gui_checked_state_changed] = handlers.on_payload_checked,
+            },
+        })
+    end
+
+    refresh_list_captions(dialog, dialog.player_index)
+    sync_select_all(dialog)
+end
+
+---@param dialog LuaGuiElement
+local function clear_list(dialog)
+    local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_list"))
+    list.clear()
+    local tags = dialog.tags
+    tags.payloads = nil
+    dialog.tags = tags
+    sync_select_all(dialog)
+end
+
+---@param event EventData.on_gui_text_changed
+function handlers.on_import_textbox_changed(event)
+    local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
+    local error_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_error"))
+    local empty_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_empty"))
+
+    error_label.visible = false
+    error_label.caption = ""
+
+    local text = event.element.text
+    if text == "" then
+        clear_list(dialog)
+        empty_label.visible = true
+        return
+    end
+
+    local payloads, _warnings, err = decode_any(text)
+    if not payloads then
+        clear_list(dialog)
+        empty_label.visible = false
+        error_label.caption = err or { "factory-solver-import-error-structure" }
+        error_label.visible = true
+        return
+    end
+
+    empty_label.visible = false
+    populate_list(dialog, payloads)
+end
+
+---@param event EventData.on_gui_checked_state_changed
+function handlers.on_payload_checked(event)
+    local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
+    refresh_list_captions(dialog, event.player_index)
+    sync_select_all(dialog)
+end
+
+---@param event EventData.on_gui_checked_state_changed
+function handlers.on_select_all_import(event)
+    local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
+    local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_list"))
+    local new_state = event.element.state
+    for _, child in ipairs(list.children) do
+        if child.type == "checkbox" then
+            child.state = new_state
+        end
+    end
+    refresh_list_captions(dialog, event.player_index)
+end
+
 ---@param event EventDataTrait
 function handlers.on_import_confirm(event)
-    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_solution_import"))
+    local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
     local textbox = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_textbox"))
     local error_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_error"))
+    local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_list"))
 
     local payloads, warnings, err = decode_any(textbox.text)
     if not payloads then
-        error_label.caption = err or ""
+        error_label.caption = err or { "factory-solver-import-error-structure" }
+        error_label.visible = true
+        return
+    end
+
+    local filtered = {}
+    for _, child in ipairs(list.children) do
+        if child.type == "checkbox" and child.state then
+            local index = child.tags.payload_index --[[@as integer]]
+            filtered[#filtered + 1] = payloads[index]
+        end
+    end
+
+    if #filtered == 0 then
+        error_label.caption = { "factory-solver-import-no-selection" }
         error_label.visible = true
         return
     end
 
     local player_data = save.get_player_data(event.player_index)
     local solutions = save.get_solutions(event.player_index)
-    local imported_name = save.import_solutions(solutions, payloads)
+    local imported_name = save.import_solutions(solutions, filtered)
     if imported_name then
         player_data.selected_solution = imported_name
     end
@@ -91,14 +259,14 @@ fs_util.add_handlers(handlers)
 ---@type fs.GuiElemDef
 return {
     type = "frame",
-    name = "factory_solver_solution_import",
+    name = DIALOG_NAME,
     direction = "vertical",
     {
         type = "flow",
         name = "title_bar",
         style = "flib_titlebar_flow",
         tags = {
-            drag_target = "factory_solver_solution_import",
+            drag_target = DIALOG_NAME,
         },
         handler = {
             on_added = common.on_init_drag_target
@@ -135,6 +303,33 @@ return {
             },
         },
         {
+            type = "checkbox",
+            name = "factory_solver_solution_import_select_all",
+            state = false,
+            caption = { "factory-solver-import-choose-factories" },
+            handler = {
+                [defines.events.on_gui_checked_state_changed] = handlers.on_select_all_import,
+            },
+        },
+        {
+            type = "scroll-pane",
+            style_mods = {
+                width = 480,
+                maximal_height = 200,
+            },
+            {
+                type = "flow",
+                name = "factory_solver_solution_import_list",
+                direction = "vertical",
+            },
+        },
+        {
+            type = "label",
+            name = "factory_solver_solution_import_empty",
+            caption = { "factory-solver-import-empty-hint" },
+            visible = true,
+        },
+        {
             type = "label",
             name = "factory_solver_solution_import_error",
             style = "bold_red_label",
@@ -150,7 +345,7 @@ return {
             style = "back_button",
             caption = { "gui.cancel" },
             tags = {
-                close_target = "factory_solver_solution_import",
+                close_target = DIALOG_NAME,
             },
             handler = {
                 [defines.events.on_gui_click] = common.on_close_target
