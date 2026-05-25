@@ -342,7 +342,7 @@ return {
                 scalar_row({ "factory-solver-mining-drill-productivity" }, "mining_drill_productivity"),
                 scalar_row({ "factory-solver-laboratory-productivity" }, "laboratory_productivity"),
                 scalar_row({ "factory-solver-laboratory-speed" }, "laboratory_speed"),
-                scalar_row({ "factory-solver-beacon-distribution" }, "beacon_distribution"),
+                scalar_row({ "factory-solver-beacon-distribution-efficiency" }, "beacon_distribution"),
             },
             {
                 type = "frame",

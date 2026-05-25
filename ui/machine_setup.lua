@@ -848,7 +848,7 @@ return {
             {
                 type = "label",
                 style = "caption_label",
-                caption = { "factory-solver-total-effectivity" },
+                caption = { "factory-solver-effective-modules" },
             },
             {
                 type = "frame",

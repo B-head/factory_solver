@@ -198,7 +198,7 @@ return {
     {
         type = "label",
         style = "caption_label",
-        caption = { "factory-solver-basic-ingredients" },
+        caption = { "factory-solver-initial-ingredients" },
     },
     {
         type = "frame",
