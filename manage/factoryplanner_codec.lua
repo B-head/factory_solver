@@ -1,4 +1,5 @@
 local acc = require "manage/accessor"
+local preset = require "manage/preset"
 
 local M = {}
 
@@ -152,11 +153,287 @@ local function collect_leaf_lines(lines, out)
     end
 end
 
+---Pick a deterministic rocket-part recipe for a rocket-silo. FP's
+---impostor-launch / impostor-{silo}-rocket recipes drop the rocket_part
+---identifier, so reverse mapping needs to reconstruct one. We mirror FP's
+---own filtering in generator.lua: prefer `fixed_recipe`, otherwise the first
+---recipe sharing one of the silo's `crafting_categories`. Sorted by name so
+---two clients running this on the same prototype set agree.
+---@param silo_proto LuaEntityPrototype?
+---@return string?
+local function best_effort_rocket_part(silo_proto)
+    if not silo_proto then return nil end
+    if silo_proto.fixed_recipe then return silo_proto.fixed_recipe end
+    local cats = silo_proto.crafting_categories
+    if not cats then return nil end
+    local filters = {}
+    for cat, _ in pairs(cats) do
+        filters[#filters + 1] = { filter = "category", category = cat }
+    end
+    if #filters == 0 then return nil end
+    local recipes = prototypes.get_recipe_filtered(filters)
+    local sorted = {}
+    for name, _ in pairs(recipes) do sorted[#sorted + 1] = name end
+    table.sort(sorted)
+    return sorted[1]
+end
+
+---@param plant_name string
+---@return string?
+local function best_effort_seed_for_plant(plant_name)
+    local seeds = prototypes.get_item_filtered({
+        { filter = "plant-result", elem_filters = { { filter = "name", name = plant_name } } },
+    })
+    local sorted = {}
+    for name, _ in pairs(seeds) do sorted[#sorted + 1] = name end
+    table.sort(sorted)
+    return sorted[1]
+end
+
+---Replicate FP's generator_util.get_boiler_data category synthesis so the
+---string we emit matches what FP itself would have generated. Without this
+---FP rejects the impostor recipe at validate_prototype_object time and the
+---whole imported factory ends up invalid.
+---@param boiler_proto LuaEntityPrototype?
+---@return string?
+local function derive_fp_boiler_category(boiler_proto)
+    if not boiler_proto or boiler_proto.type ~= "boiler" then return nil end
+    local input, output = nil, nil
+    for _, fluid_box in pairs(boiler_proto.fluidbox_prototypes) do
+        if fluid_box.production_type == "input-output" or fluid_box.production_type == "input" then
+            input = fluid_box
+        elseif fluid_box.production_type == "output" then
+            output = fluid_box
+        end
+    end
+    if not input then return nil end
+
+    local category = "boiler"
+    if boiler_proto.boiler_mode == "output-to-separate-pipe" then
+        category = category .. "-target-" .. boiler_proto.target_temperature
+    end
+    if output and output.filter then
+        category = category .. "-output-" .. output.filter.name
+    end
+    if input.filter then
+        category = category .. "-filter-" .. input.filter.name
+    end
+    return category
+end
+
+---Map a factory_solver virtual recipe name to its FP impostor- equivalent.
+---Returns nil if no FP equivalent exists (caller drops the line + warning).
+---machine_name is currently unused but kept symmetric with the reverse
+---direction so future variants that need it have a place to plug in.
+---@param fs_name string
+---@param machine_name string?
+---@return string?
+local function fs_virtual_to_fp_name(fs_name, machine_name)
+    local s = fs_name:match("^<spoil>(.+)$")
+    if s then return "impostor-spoiling-" .. s end
+
+    s = fs_name:match("^<mine>(.+)$")
+    if s then return "impostor-" .. s end
+
+    s = fs_name:match("^<grow>([^:]+):")
+    if s then return "impostor-" .. s end
+
+    s = fs_name:match("^<pump>(.+)$")
+    if s then
+        local tile = prototypes.tile[s]
+        if tile and tile.fluid then
+            return "impostor-" .. tile.fluid.name .. "-" .. s
+        end
+        return nil
+    end
+
+    s = fs_name:match("^<run>(.+)$")
+    if s then
+        -- rocket-silo three-part: <run>{S}:{R}:{I} (cargo) or <run>{S}:{R}:space-age (platform)
+        local silo, _part, third = s:match("^([^:]+):([^:]+):(.+)$")
+        if silo and third then
+            local silo_proto = prototypes.entity[silo]
+            if silo_proto and silo_proto.type == "rocket-silo" then
+                if third == "space-age" then
+                    return "impostor-" .. silo .. "-rocket"
+                end
+                return "impostor-launch-" .. third .. "-from-" .. silo
+            end
+            return nil
+        end
+        -- boiler two-part: <run>{B}:{Fluid}
+        local boiler, fluid = s:match("^([^:]+):([^:]+)$")
+        if boiler and fluid then
+            local boiler_proto = prototypes.entity[boiler]
+            if boiler_proto and boiler_proto.type == "boiler" then
+                local cat = derive_fp_boiler_category(boiler_proto)
+                if cat then return "impostor-" .. cat .. "-fluid-" .. fluid end
+            end
+            return nil
+        end
+        -- single-token <run>{entity} — generator/burner-generator/reactor/
+        -- fusion-*/thruster: no FP line concept, drop + warning.
+        return nil
+    end
+
+    -- <research>X / <launch>X / unknown prefix: no FP equivalent
+    return nil
+end
+
+---Map an FP impostor- recipe name back to a factory_solver virtual recipe
+---name. machine_name is consulted for boiler reverse mapping: FP encodes
+---boiler category (not entity) in the recipe name but the actual entity
+---lives on Line.machine, so the machine name is the cleanest source of
+---truth for recovering FS's entity-grained naming.
+---@param fp_name string
+---@param machine_name string?
+---@return string?
+local function fp_name_to_fs_virtual(fp_name, machine_name)
+    local body = fp_name:match("^impostor%-(.+)$")
+    if not body then return nil end
+
+    -- impostor-spoiling-X → <spoil>X
+    local s = body:match("^spoiling%-(.+)$")
+    if s then return "<spoil>" .. s end
+
+    -- impostor-launch-{I}-from-{S} → <run>S:R:I
+    local item, silo = body:match("^launch%-(.+)%-from%-(.+)$")
+    if item and silo then
+        local silo_proto = prototypes.entity[silo]
+        if silo_proto and silo_proto.type == "rocket-silo" then
+            local part = best_effort_rocket_part(silo_proto)
+            if part then
+                return "<run>" .. silo .. ":" .. part .. ":" .. item
+            end
+        end
+        return nil
+    end
+
+    -- impostor-{S}-rocket → <run>S:R:space-age — only if S resolves to a silo,
+    -- otherwise fall through (a resource happening to end in "-rocket" should
+    -- still take the mining branch).
+    local silo_only = body:match("^(.+)%-rocket$")
+    if silo_only then
+        local silo_proto = prototypes.entity[silo_only]
+        if silo_proto and silo_proto.type == "rocket-silo" then
+            local part = best_effort_rocket_part(silo_proto)
+            if part then
+                return "<run>" .. silo_only .. ":" .. part .. ":space-age"
+            end
+        end
+    end
+
+    -- impostor-{cat}-fluid-{Fluid} → <run>{machine}:{Fluid}
+    -- FP's derive_fp_boiler_category never embeds "-fluid-" inside the
+    -- category portion (the separator is unique), so greedy "%.+%-fluid%-"
+    -- isolates the trailing fluid name even when the category itself
+    -- contains hyphens (e.g. boiler-output-steam-filter-water-fluid-water).
+    if body:find("%-fluid%-") then
+        local fluid = body:match("^.+%-fluid%-(.+)$")
+        if fluid and machine_name then
+            local mp = prototypes.entity[machine_name]
+            if mp and mp.type == "boiler" then
+                return "<run>" .. machine_name .. ":" .. fluid
+            end
+        end
+        return nil
+    end
+
+    -- impostor-{F}-{T} (offshore pump from a tile) — enumerate tiles whose
+    -- fluid name concatenated with the tile name reproduces the body. We
+    -- avoid string splitting because both fluid and tile names may contain
+    -- hyphens (e.g. crude-oil), making naive splits ambiguous.
+    for tile_name, tile_proto in pairs(prototypes.tile) do
+        if tile_proto.fluid then
+            local candidate = tile_proto.fluid.name .. "-" .. tile_name
+            if body == candidate then
+                return "<pump>" .. tile_name
+            end
+        end
+    end
+
+    -- impostor-X (mining or planting) — disambiguate by entity type.
+    local proto = prototypes.entity[body]
+    if proto then
+        if proto.type == "resource" then
+            return "<mine>" .. body
+        elseif proto.type == "plant" then
+            local seed = best_effort_seed_for_plant(body)
+            if seed then return "<grow>" .. body .. ":" .. seed end
+        end
+    end
+
+    return nil
+end
+
+---For FS→FP export, substitute the machine name for virtual recipes whose
+---FS-side machine identity is not what FP would have generated:
+---  * `<spoil>X`: FS uses the sentinel "entity-unknown" because spoilage
+---    has no real machine in the engine; FP pins it to the biggest
+---    container ([generator.lua:890-905] picks max chest inventory).
+---  * `<grow>P:S`: FS uses the plant entity itself as the "machine" because
+---    the plant is what occupies one slot; FP uses the agricultural-tower
+---    that processes the slot ([generator.lua:882-888]).
+---Other virtual recipes already use the same machine entity FP would
+---(boiler/mining drill/offshore pump/silo), so they pass through unchanged.
+---@param fs_recipe_name string
+---@param fs_machine_name string
+---@return string
+local function substitute_machine_for_fp(fs_recipe_name, fs_machine_name)
+    if fs_recipe_name:sub(1, 7) == "<spoil>" then
+        local biggest, biggest_size = nil, -1
+        for _, proto in pairs(prototypes.entity) do
+            if proto.type == "container" then
+                local size = proto.get_inventory_size(defines.inventory.chest) or 0
+                if size > biggest_size then
+                    biggest, biggest_size = proto.name, size
+                end
+            end
+        end
+        if biggest then return biggest end
+    elseif fs_recipe_name:sub(1, 6) == "<grow>" then
+        local sorted = {}
+        for _, proto in pairs(prototypes.entity) do
+            if proto.type == "agricultural-tower" then
+                sorted[#sorted + 1] = proto.name
+            end
+        end
+        table.sort(sorted)
+        if sorted[1] then return sorted[1] end
+    end
+    return fs_machine_name
+end
+
+---For FP→FS import, restore the machine identity FS's pre_solve expects:
+---spoilage uses the "entity-unknown" sentinel, plant uses the plant entity
+---(parsed back out of the `<grow>{plant}:{seed}` recipe name). Without
+---this restoration, a re-imported factory carries the FP machine name
+---through and breaks pre_solve assumptions like is_spoilage detection or
+---the plant slot count.
+---@param fs_recipe_name string
+---@param fp_machine_name string
+---@return string
+local function substitute_machine_for_fs(fs_recipe_name, fp_machine_name)
+    if fs_recipe_name:sub(1, 7) == "<spoil>" then
+        return "entity-unknown"
+    end
+    local plant = fs_recipe_name:match("^<grow>([^:]+):")
+    if plant then return plant end
+    return fp_machine_name
+end
+
 ---@param packed_line any
----@return TypedName?
-local function unpack_recipe_typed_name(packed_line)
+---@param machine_typed_name TypedName?
+---@return { type: "recipe"|"virtual_recipe", name: string, quality: string }?
+local function unpack_recipe_typed_name(packed_line, machine_typed_name)
     local name = proto_name(packed_line.recipe and packed_line.recipe.proto)
     if not name then return nil end
+    if name:sub(1, 9) == "impostor-" then
+        local fs_name = fp_name_to_fs_virtual(name,
+            machine_typed_name and machine_typed_name.name)
+        if not fs_name then return nil end
+        return { type = "virtual_recipe", name = fs_name, quality = "normal" }
+    end
     return { type = "recipe", name = name, quality = "normal" }
 end
 
@@ -211,15 +488,16 @@ end
 ---to multiply by crafting_speed.
 ---@param packed_line any
 ---@param recipe_name string
+---@param recipe_type "recipe"|"virtual_recipe"
 ---@return Constraint?
-local function unpack_machine_limit_constraint(packed_line, recipe_name)
+local function unpack_machine_limit_constraint(packed_line, recipe_name, recipe_type)
     local m = packed_line.machine
     if type(m) ~= "table" then return nil end
     local limit = tonumber(m.limit)
     if not limit then return nil end
 
     return {
-        type = "recipe",
+        type = recipe_type,
         name = recipe_name,
         quality = "normal",
         limit_type = m.force_limit and "equal" or "upper",
@@ -272,10 +550,14 @@ end
 ---Convert one FP PackedFactory into a factory_solver Solution payload (the
 ---same shape import_solution() expects: name/constraints/production_lines).
 ---Returns the payload plus a list of localised warning strings describing
----features we could not preserve.
+---features we could not preserve. player_index is consulted to pick the
+---user's preset fuel for fuel-using machines whose FP payload carries no
+---fuel (FP doesn't serialize fuel for heat machines, and even burner lines
+---can land here without one).
 ---@param packed_factory any
+---@param player_index integer
 ---@return table, LocalisedString[]
-function M.factory_to_payload(packed_factory)
+function M.factory_to_payload(packed_factory, player_index)
     local warnings = {}
     local constraints = {}
     local production_lines = {}
@@ -294,9 +576,21 @@ function M.factory_to_payload(packed_factory)
     end
 
     for _, packed_line in ipairs(leaf_lines) do
-        local recipe_typed_name = unpack_recipe_typed_name(packed_line)
+        -- Unpack the machine first so the recipe unpacker can consult
+        -- machine_typed_name when reversing FP impostor- recipes whose name
+        -- alone is ambiguous (notably boilers, where FP encodes a category
+        -- and the actual entity only survives on Line.machine).
         local machine_typed_name = unpack_machine_typed_name(packed_line)
+        local recipe_typed_name = unpack_recipe_typed_name(packed_line, machine_typed_name)
         if recipe_typed_name and machine_typed_name then
+            -- For virtual recipes whose FS machine identity diverges from
+            -- FP's (spoilage sentinel; plant entity), rewrite the machine
+            -- name to what FS's pre_solve expects. Boiler/mining/silo/pump
+            -- already share machine identity with FP so they pass through.
+            if recipe_typed_name.type == "virtual_recipe" then
+                machine_typed_name.name = substitute_machine_for_fs(
+                    recipe_typed_name.name, machine_typed_name.name)
+            end
             if seen_recipes[recipe_typed_name.name] then
                 warnings[#warnings + 1] = {
                     "factory-solver-fp-import-warning-duplicate-recipe",
@@ -305,15 +599,29 @@ function M.factory_to_payload(packed_factory)
             else
                 seen_recipes[recipe_typed_name.name] = true
                 local m = packed_line.machine or {}
+                local fuel_typed_name = unpack_fuel_typed_name(packed_line)
+                -- accessor.normalize_production_line asserts that any
+                -- fuel-using machine carries a fuel_typed_name. FP omits
+                -- fuel for heat machines (heat-exchanger) and may export
+                -- burner lines without one if FP itself never resolved a
+                -- default. Backfill from the user's FS preset so the
+                -- imported line round-trips cleanly through pre_solve.
+                if not fuel_typed_name then
+                    local machine_proto = prototypes.entity[machine_typed_name.name]
+                    if machine_proto and acc.is_use_fuel(machine_proto) then
+                        fuel_typed_name = preset.get_fuel_preset(
+                            player_index, machine_typed_name)
+                    end
+                end
                 production_lines[#production_lines + 1] = {
                     recipe_typed_name = recipe_typed_name,
                     machine_typed_name = machine_typed_name,
                     module_typed_names = unpack_module_set(m.module_set),
                     affected_by_beacons = unpack_beacons(packed_line),
-                    fuel_typed_name = unpack_fuel_typed_name(packed_line),
+                    fuel_typed_name = fuel_typed_name,
                 }
                 local limit_constraint = unpack_machine_limit_constraint(
-                    packed_line, recipe_typed_name.name)
+                    packed_line, recipe_typed_name.name, recipe_typed_name.type)
                 if limit_constraint then
                     constraints[#constraints + 1] = limit_constraint
                 end
@@ -354,7 +662,10 @@ local function solution_to_packed_factory(solution)
                 defined_by = "amount",
                 required_amount = c.limit_amount_per_second,
             }
-        elseif c.type == "recipe" then
+        elseif c.type == "recipe" or c.type == "virtual_recipe" then
+            -- Key by FS-side recipe name so virtual_recipe constraints
+            -- (e.g. "<spoil>egg") match by the same key the line lookup
+            -- uses below — see the recipe_constraints[recipe_tn.name] read.
             recipe_constraints[c.name] = c
             if c.limit_type == "lower" then
                 warnings[#warnings + 1] = {
@@ -375,18 +686,34 @@ local function solution_to_packed_factory(solution)
         local machine = pl.machine_typed_name
         -- factory_solver wraps engine-side conversions (boiler heating, mining,
         -- lab research, thruster propulsion, ...) as virtual_recipe entries.
-        -- FP has no notion of virtual recipes, so the line would resolve to a
-        -- missing prototype and the entire factory ends up invalid. Drop the
-        -- whole line with a warning instead.
-        local is_real_recipe = recipe_tn and recipe_tn.type == "recipe"
-        if recipe_tn and not is_real_recipe then
+        -- FP has its own runtime-synthesized impostor- recipes for the
+        -- physical-extraction subset (mining/pumping/planting/spoiling) plus
+        -- boilers and rocket launches, so we map those by name. Power/heat/
+        -- research virtual recipes have no FP line equivalent and still
+        -- drop + warning.
+        local recipe_name = nil
+        if recipe_tn and recipe_tn.type == "recipe" then
+            recipe_name = recipe_tn.name
+        elseif recipe_tn and recipe_tn.type == "virtual_recipe" then
+            local mapped = fs_virtual_to_fp_name(recipe_tn.name,
+                machine and machine.name)
+            if mapped then
+                recipe_name = mapped
+            else
+                warnings[#warnings + 1] = {
+                    "factory-solver-fp-export-warning-virtual-recipe", recipe_tn.name,
+                }
+            end
+        elseif recipe_tn then
             warnings[#warnings + 1] = {
                 "factory-solver-fp-export-warning-virtual-recipe", recipe_tn.name or "?",
             }
         end
-        local recipe_name = is_real_recipe and recipe_tn.name or nil
         if recipe_name and machine then
-            local limit_constraint = recipe_constraints[recipe_name]
+            -- Lookup uses the FS-side name (recipe_tn.name) which equals
+            -- recipe_name for real recipes and stays "<verb>..." for virtual
+            -- ones — matches the key recipe_constraints was populated with.
+            local limit_constraint = recipe_constraints[recipe_tn.name]
             local limit = nil
             local force_limit = false
             if limit_constraint and limit_constraint.limit_type ~= "lower" then
@@ -394,9 +721,17 @@ local function solution_to_packed_factory(solution)
                 force_limit = (limit_constraint.limit_type == "equal")
             end
 
+            -- Substitute FS-only machine identities (spoilage sentinel,
+            -- plant entity) with FP's expected machine entity before packing
+            -- so FP's Machine:validate finds the prototype in its bucket.
+            local fp_machine_name = machine.name
+            if recipe_tn and recipe_tn.type == "virtual_recipe" then
+                fp_machine_name = substitute_machine_for_fp(recipe_tn.name, machine.name)
+            end
+
             local machine_packed = {
                 class = "Machine",
-                proto = pack_proto(machine.name, "machines"),
+                proto = pack_proto(fp_machine_name, "machines"),
                 quality_proto = pack_quality(machine.quality or "normal"),
                 limit = limit,
                 force_limit = force_limit,
@@ -407,12 +742,47 @@ local function solution_to_packed_factory(solution)
             -- machines (chemical-plant, etc.); FP rejects fuel on a non-burner
             -- and marks the whole factory invalid. Filter at the prototype
             -- level so the exported shape stays consistent with FP's model.
-            if pl.fuel_typed_name then
+            -- Pack fuel only for machines FP itself treats as fuel-using:
+            -- solid burner (burner_prototype) or fluid-burning energy source
+            -- (fluid_energy_source.burns_fluid). FS additionally calls heat
+            -- energy "fuel-using" because pre_solve injects `<heat>` as a
+            -- virtual_material fuel, but FP doesn't model heat as a Fuel
+            -- prototype — sending `<heat>` would land on a missing-prototype
+            -- lookup and fail Fuel:validate → machine.valid=false → repair.
+            -- We also defensively require the FS fuel to be a real item/fluid.
+            if pl.fuel_typed_name
+                and (pl.fuel_typed_name.type == "item" or pl.fuel_typed_name.type == "fluid") then
                 local machine_proto = prototypes.entity[machine.name]
-                if machine_proto and acc.is_use_fuel(machine_proto) then
+                local fp_fuel_compatible = machine_proto and (
+                    machine_proto.burner_prototype
+                    or (machine_proto.fluid_energy_source_prototype
+                        and machine_proto.fluid_energy_source_prototype.burns_fluid)
+                )
+                if fp_fuel_compatible then
+                    -- FP's Fuel:validate calls validate_prototype_object with
+                    -- category_designation="combined_category"; without a
+                    -- category on the packed proto the find() call is skipped
+                    -- and the fuel stays simplified → fuel.valid=false →
+                    -- machine.valid=false → line marked "repair needed". So we
+                    -- replicate FP's own pack: include the burner's combined
+                    -- fuel-category (sorted keys joined by "|") as the category
+                    -- field. acc.try_get_fuel_categories returns the burner's
+                    -- fuel_categories set; acc.join_categories canonicalizes.
+                    -- Fluid-burning machines (no burner_prototype, but
+                    -- fluid_energy_source_prototype.burns_fluid) get
+                    -- "fluid-fuel" — FP's gen registers them under that
+                    -- single-key bucket (generator.lua:740).
+                    local fuel_proto = pack_proto(pl.fuel_typed_name.name, "fuels")
+                    local cats = acc.try_get_fuel_categories(machine_proto)
+                    if cats then
+                        fuel_proto.category = acc.join_categories(cats)
+                    elseif machine_proto.fluid_energy_source_prototype
+                        and machine_proto.fluid_energy_source_prototype.burns_fluid then
+                        fuel_proto.category = "fluid-fuel"
+                    end
                     machine_packed.fuel = {
                         class = "Fuel",
-                        proto = pack_proto(pl.fuel_typed_name.name, "fuels"),
+                        proto = fuel_proto,
                         quality_proto = pack_quality(pl.fuel_typed_name.quality or "normal"),
                     }
                 end

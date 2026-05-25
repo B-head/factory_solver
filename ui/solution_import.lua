@@ -20,10 +20,11 @@ end
 ---of payloads (one per native solution, FP factory, or — at most — one
 ---Helmod model), an aggregated warning list, or an error.
 ---@param s string
+---@param player_index integer
 ---@return table[]?
 ---@return LocalisedString[]
 ---@return LocalisedString?
-local function decode_any(s)
+local function decode_any(s, player_index)
     local payloads, err = solution_codec.decode(s)
     if payloads then
         return payloads, {}, nil
@@ -34,7 +35,8 @@ local function decode_any(s)
         local fp_payloads = {}
         local warnings = {}
         for _, packed_factory in ipairs(export_table.factories) do
-            local fp_payload, fp_warnings = factoryplanner_codec.factory_to_payload(packed_factory)
+            local fp_payload, fp_warnings = factoryplanner_codec.factory_to_payload(
+                packed_factory, player_index)
             fp_payloads[#fp_payloads + 1] = fp_payload
             for _, w in ipairs(fp_warnings) do warnings[#warnings + 1] = w end
         end
@@ -181,7 +183,7 @@ function handlers.on_import_textbox_changed(event)
         return
     end
 
-    local payloads, _warnings, err = decode_any(text)
+    local payloads, _warnings, err = decode_any(text, event.player_index)
     if not payloads then
         clear_list(dialog)
         empty_label.visible = false
@@ -221,7 +223,7 @@ function handlers.on_import_confirm(event)
     local error_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_error"))
     local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_list"))
 
-    local payloads, warnings, err = decode_any(textbox.text)
+    local payloads, warnings, err = decode_any(textbox.text, event.player_index)
     if not payloads then
         error_label.caption = err or { "factory-solver-import-error-structure" }
         error_label.visible = true
