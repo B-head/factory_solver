@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.1
-Date: ????
+Date: 2026-05-25
   Gui:
     - Warn in the machine settings dialog when a quality module is set while no
       quality above normal is unlocked, since the cascade cannot advance and the
