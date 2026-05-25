@@ -182,6 +182,21 @@ function M.find_upper(start_element, name)
     return nil
 end
 
+---Returns the first descendant (or `start_element` itself) with matching name,
+---searched in depth-first order. `LuaGuiElement[name]` indexing only looks at
+---direct children, so reach grandchildren and deeper through this helper.
+---@param start_element LuaGuiElement
+---@param name string
+---@return LuaGuiElement?
+function M.find_lower(start_element, name)
+    for element in M.dfs_lower(start_element) do
+        if element.name == name then
+            return element
+        end
+    end
+    return nil
+end
+
 ---Iterate over all lower elements of the starting element in depth-first search.
 ---Note that if elements are added or deleted in progress of iteration, they will not be iterated correctly.
 ---@param start_element LuaGuiElement

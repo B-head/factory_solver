@@ -4,6 +4,8 @@ local save = require "manage/save"
 local common = require "ui/common"
 local constraint_adder = require "ui/constraint_adder"
 local rename_solution = require "ui/rename_solution"
+local solution_export = require "ui/solution_export"
+local solution_import = require "ui/solution_import"
 
 local handlers = {}
 
@@ -34,6 +36,16 @@ end
 ---@param event EventData.on_gui_click
 function handlers.on_rename_solution(event)
     common.open_gui(event.player_index, true, rename_solution)
+end
+
+---@param event EventData.on_gui_click
+function handlers.on_export_solution(event)
+    common.open_gui(event.player_index, true, solution_export)
+end
+
+---@param event EventData.on_gui_click
+function handlers.on_import_solution(event)
+    common.open_gui(event.player_index, true, solution_import)
 end
 
 ---@param event EventData.on_gui_click
@@ -107,8 +119,26 @@ return {
             },
         },
         {
+            type = "sprite-button",
+            style = "tool_button",
+            sprite = "utility/export_slot",
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_export_solution,
+                on_added = handlers.on_selector_tool_enabled,
+                on_selected_solution_changed = handlers.on_selector_tool_enabled,
+            },
+        },
+        {
             type = "empty-widget",
             style = "flib_horizontal_pusher",
+        },
+        {
+            type = "sprite-button",
+            style = "tool_button",
+            sprite = "utility/import_slot",
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_import_solution,
+            },
         },
         {
             type = "sprite-button",

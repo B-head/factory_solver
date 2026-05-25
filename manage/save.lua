@@ -433,6 +433,36 @@ function M.delete_solution(solutions, solution_name)
     solutions[solution_name] = nil
 end
 
+---Materialize a decoded payload (from manage/solution_codec) as a new
+---Solution. Tries the payload's name as-is, falling back to "<name> N" only
+---when the slot is taken so an import into an empty save preserves the
+---original name. Derived state (solver caches, machine counts) is left at
+---defaults and solver_state="ready" lets the on_tick pump fill it in.
+---@param solutions table<string, Solution>
+---@param payload table
+---@return string
+function M.import_solution(solutions, payload)
+    local base_name = payload.name
+    local new_solution_name = base_name
+    local postfix_number = 1
+    while solutions[new_solution_name] do
+        new_solution_name = string.format("%s %i", base_name, postfix_number)
+        postfix_number = postfix_number + 1
+    end
+
+    ---@type Solution
+    local solution = {
+        name = new_solution_name,
+        constraints = payload.constraints,
+        production_lines = payload.production_lines,
+        quantity_of_machines_required = {},
+        solver_state = "ready",
+    }
+    solutions[new_solution_name] = solution
+
+    return new_solution_name
+end
+
 ---comment
 ---@param solutions table<string, Solution>
 ---@param solution_name string
