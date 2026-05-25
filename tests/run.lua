@@ -72,6 +72,7 @@ local case_files = {
     "typed_name_format",
     "lp_fluid_bridge",
     "lp_fluid_constraint",
+    "lp_lower_limit",
     "isolated_line",
     "lp_scale_invariance",
     "lp_tiebreak",

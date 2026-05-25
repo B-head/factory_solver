@@ -503,14 +503,22 @@ function M.create_problem(solution_name, constraints, production_lines)
         elseif constraint.limit_type == "lower" then
             problem:add_lower_limit_constraint(constraint_name, limit)
 
+            -- target_cost (not elastic_cost) so the bound dominates the
+            -- surplus_sink ledger: a producer chain that emits many
+            -- unclearable by-products costs O(N) * elastic_cost per unit
+            -- of target, which used to outweigh elastic_cost paid once on
+            -- the bound itself. The LP would then satisfy the user's
+            -- `lower` by activating the elastic and parking every recipe
+            -- at zero (observed on Fulgora with electromagnetic-science-
+            -- pack lower=0.5). Mirrors the target_cost slack on `upper`.
             local elastic_name = "|elastic|" .. constraint_name
-            problem:add_objective(elastic_name, elastic_cost)
+            problem:add_objective(elastic_name, target_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
         elseif constraint.limit_type == "equal" then
             problem:add_equivalence_constraint(constraint_name, limit)
 
             local elastic_name = "|elastic|" .. constraint_name
-            problem:add_objective(elastic_name, elastic_cost)
+            problem:add_objective(elastic_name, target_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
         else
             assert()
