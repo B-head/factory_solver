@@ -1,6 +1,10 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.2
 Date: ????
+  Gui:
+    - Replace the machine settings body with a "No configurable items." placeholder
+      for spoilage virtual recipes, since their machine, quality, modules and fuel
+      cells have no meaningful choice to offer.
   Changes:
     - Keep beacon configuration in storage even when the chosen machine
       cannot receive beacon effects, instead of dropping it on confirm.

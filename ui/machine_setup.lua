@@ -149,6 +149,12 @@ end
 ---but its UI is redundant noise — Substrate carries all the meaningful
 ---per-line choice. Sets visible=false only; leaves non-plant defaults alone
 ---so e.g. Quality's `visible = script.feature_flags.quality` still applies.
+---
+---Spoilage virtual recipes share the same "no real machine" property —
+---machine_typed_name is the entity-unknown sentinel and there is nothing
+---to configure (no quality, no modules, no fuel). Hide the Machine /
+---Quality sections for them too; the "No configurable items" label below
+---takes their place.
 ---@param event EventDataTrait
 function handlers.on_hide_for_plant(event)
     local elem = event.element
@@ -156,9 +162,32 @@ function handlers.on_hide_for_plant(event)
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = tn.typed_name_to_machine(machine_typed_name)
-    if machine.type == "plant" then
+    local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    -- Guard with `object_name == nil`: real LuaRecipePrototype userdata
+    -- raises on access to unknown keys, so probing `recipe.is_spoilage`
+    -- on a non-virtual recipe would crash.
+    local is_spoilage = recipe.object_name == nil
+        and (recipe --[[@as VirtualRecipe]]).is_spoilage == true
+    if machine.type == "plant" or is_spoilage then
         elem.visible = false
     end
+end
+
+---Spoilage virtual recipes have no configurable settings (no machine, no
+---quality, no modules, no fuel). The regular sections are hidden via
+---on_hide_for_plant; this handler reveals a single placeholder label so the
+---dialog body isn't empty.
+---@param event EventDataTrait
+function handlers.on_no_configurable_items_visible(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    local is_spoilage = recipe.object_name == nil
+        and (recipe --[[@as VirtualRecipe]]).is_spoilage == true
+    elem.visible = is_spoilage
 end
 
 ---One sprite-button per tile in plant.autoplace_specification.tile_restriction.
@@ -708,6 +737,14 @@ return {
         direction = "vertical",
         {
             type = "label",
+            caption = "No configurable items.",
+            visible = false,
+            handler = {
+                on_added = handlers.on_no_configurable_items_visible,
+            },
+        },
+        {
+            type = "label",
             style = "caption_label",
             caption = "Machine",
             handler = {
@@ -734,6 +771,36 @@ return {
             name = "no_machine_label",
             single_line = false,
             visible = false,
+        },
+        -- Plant-only counterpart to the Machine label+frame above: plant lines
+        -- replace the machine identity with a substrate tile pick, so this sits
+        -- at the same vertical position as Machine. on_hide_for_plant hides
+        -- the Machine block iff the line is a plant; on_substrate_visible
+        -- makes this block visible only then, so exactly one of the two shows.
+        {
+            type = "flow",
+            style = "factory_solver_no_spacing_vertical_flow_style",
+            direction = "vertical",
+            handler = {
+                on_added = handlers.on_substrate_visible,
+            },
+            {
+                type = "label",
+                style = "caption_label",
+                caption = "Substrate",
+            },
+            {
+                type = "frame",
+                style = "factory_solver_slot_background_frame",
+                {
+                    type = "table",
+                    style = "filter_slot_table",
+                    column_count = 6,
+                    handler = {
+                        on_added = handlers.on_make_substrate_table,
+                    },
+                },
+            },
         },
         {
             type = "flow",
@@ -765,31 +832,6 @@ return {
             {
                 type = "line",
                 style = "factory_solver_line",
-            },
-            {
-                type = "flow",
-                style = "factory_solver_no_spacing_vertical_flow_style",
-                direction = "vertical",
-                handler = {
-                    on_added = handlers.on_substrate_visible,
-                },
-                {
-                    type = "label",
-                    style = "caption_label",
-                    caption = "Substrate",
-                },
-                {
-                    type = "frame",
-                    style = "factory_solver_slot_background_frame",
-                    {
-                        type = "table",
-                        style = "filter_slot_table",
-                        column_count = 6,
-                        handler = {
-                            on_added = handlers.on_make_substrate_table,
-                        },
-                    },
-                },
             },
             {
                 type = "flow",
