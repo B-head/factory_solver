@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.2
-Date: ????
+Date: 2026-05-26
   Gui:
     - Show a "No configurable items." placeholder in the machine settings
       dialog for spoilage virtual recipes, which have nothing to configure.
