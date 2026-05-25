@@ -108,6 +108,28 @@ function handlers.on_modules_visible(event)
     elem.visible = 0 < machine.module_inventory_size
 end
 
+---@param event EventDataTrait
+function handlers.on_beacons_visible(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    elem.visible = acc.is_use_beacon(machine)
+end
+
+---Total effectivity can only be non-empty when the machine takes modules or
+---beacons; hide the whole section when it supports neither.
+---@param event EventDataTrait
+function handlers.on_total_effectivity_visible(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    elem.visible = 0 < (machine.module_inventory_size or 0) or acc.is_use_beacon(machine)
+end
+
 ---Substrate section is plant-only. The whole flow is hidden for any other
 ---machine type so non-plant production lines see no extra UI.
 ---@param event EventDataTrait
@@ -642,6 +664,12 @@ function handlers.on_machine_setups_confirm(event)
     local line_index = data.line_index --[[@as integer]]
     data.line_index = nil ---@diagnostic disable-line: inject-field
 
+    -- Drop beacon data the machine cannot use so it never lingers in storage.
+    local machine = tn.typed_name_to_machine(data.machine_typed_name)
+    if not acc.is_use_beacon(machine) then
+        data.affected_by_beacons = {}
+    end
+
     save.update_production_line(solution, line_index, data)
 
     local re_event = fs_util.create_gui_event(dialog)
@@ -789,6 +817,9 @@ return {
             type = "flow",
             style = "factory_solver_no_spacing_vertical_flow_style",
             direction = "vertical",
+            handler = {
+                on_machine_setup_changed = handlers.on_beacons_visible,
+            },
             {
                 type = "label",
                 style = "caption_label",
@@ -816,6 +847,9 @@ return {
             type = "flow",
             style = "factory_solver_no_spacing_vertical_flow_style",
             direction = "vertical",
+            handler = {
+                on_machine_setup_changed = handlers.on_total_effectivity_visible,
+            },
             {
                 type = "label",
                 style = "caption_label",

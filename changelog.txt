@@ -5,6 +5,10 @@ Date: ????
     - Warn in the machine settings dialog when a quality module is set while no
       quality above normal is unlocked, since the cascade cannot advance and the
       module would have no effect.
+  Bugfixes:
+    - Hide the Beacons section and ignore beacon effects for machines that do
+      not support beacon effects, so beacons can no longer be added to or
+      affect such machines.
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.0
 Date: 2026-05-23
