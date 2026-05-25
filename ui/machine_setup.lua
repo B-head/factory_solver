@@ -108,6 +108,28 @@ function handlers.on_modules_visible(event)
     elem.visible = 0 < machine.module_inventory_size
 end
 
+---@param event EventDataTrait
+function handlers.on_beacons_visible(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    elem.visible = acc.is_use_beacon(machine)
+end
+
+---Total effectivity can only be non-empty when the machine takes modules or
+---beacons; hide the whole section when it supports neither.
+---@param event EventDataTrait
+function handlers.on_total_effectivity_visible(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+    elem.visible = 0 < (machine.module_inventory_size or 0) or acc.is_use_beacon(machine)
+end
+
 ---Substrate section is plant-only. The whole flow is hidden for any other
 ---machine type so non-plant production lines see no extra UI.
 ---@param event EventDataTrait
@@ -274,6 +296,49 @@ function handlers.on_module_changed(event)
 
     dialog.tags = dialog_tags
     fs_util.dispatch_to_subtree(dialog, "on_module_changed")
+end
+
+---Show a warning while a quality module is set but the force has unlocked no
+---quality above normal. Without an unlocked tier the quality cascade cannot
+---advance, so the module produces nothing extra; the unlock is edited in the
+---Research bonuses dialog. Checks both machine and beacon module slots.
+---@param event EventDataTrait
+function handlers.on_quality_module_warning_update(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    ---@param module_typed_names table<string, TypedName>?
+    ---@return boolean
+    local function has_quality_module(module_typed_names)
+        for _, typed_name in pairs(module_typed_names or {}) do
+            if acc.is_quality_module(typed_name.name) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local found = has_quality_module(dialog.tags.module_typed_names --[[@as table<string, TypedName>]])
+    if not found then
+        local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
+        for _, affected_by_beacon in ipairs(affected_by_beacons) do
+            if has_quality_module(affected_by_beacon.module_typed_names) then
+                found = true
+                break
+            end
+        end
+    end
+
+    local has_unlocked_above_normal = false
+    local unlocked = save.get_research_bonuses(event.player_index).unlocked_qualities
+    for quality_name in pairs(unlocked) do
+        if quality_name ~= "normal" then
+            has_unlocked_above_normal = true
+            break
+        end
+    end
+
+    elem.visible = found and not has_unlocked_above_normal
 end
 
 ---@param event EventDataTrait
@@ -599,6 +664,12 @@ function handlers.on_machine_setups_confirm(event)
     local line_index = data.line_index --[[@as integer]]
     data.line_index = nil ---@diagnostic disable-line: inject-field
 
+    -- Drop beacon data the machine cannot use so it never lingers in storage.
+    local machine = tn.typed_name_to_machine(data.machine_typed_name)
+    if not acc.is_use_beacon(machine) then
+        data.affected_by_beacons = {}
+    end
+
     save.update_production_line(solution, line_index, data)
 
     local re_event = fs_util.create_gui_event(dialog)
@@ -691,88 +762,91 @@ return {
             },
         },
         {
-            type = "line",
-            style = "factory_solver_line",
-            handler = {
-                on_added = handlers.on_hide_for_plant,
-            },
-        },
-        {
             type = "flow",
             style = "factory_solver_no_spacing_vertical_flow_style",
             direction = "vertical",
             handler = {
-                on_added = handlers.on_substrate_visible,
+                on_machine_setup_changed = handlers.on_total_effectivity_visible,
             },
             {
-                type = "label",
-                style = "caption_label",
-                caption = "Substrate",
-            },
-            {
-                type = "frame",
-                style = "factory_solver_slot_background_frame",
-                {
-                    type = "table",
-                    style = "filter_slot_table",
-                    column_count = 6,
-                    handler = {
-                        on_added = handlers.on_make_substrate_table,
-                    },
-                },
-            },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
-            handler = {
-                on_machine_setup_changed = handlers.on_modules_visible,
-            },
-            {
-                type = "label",
-                style = "caption_label",
-                caption = "Modules",
+                type = "line",
+                style = "factory_solver_line",
             },
             {
                 type = "flow",
-                direction = "horizontal",
+                style = "factory_solver_no_spacing_vertical_flow_style",
+                direction = "vertical",
                 handler = {
-                    on_machine_setup_changed = handlers.on_make_machine_modules,
+                    on_added = handlers.on_substrate_visible,
                 },
-            },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
-            {
-                type = "label",
-                style = "caption_label",
-                caption = "Beacons",
-            },
-            {
-                type = "table",
-                style = "factory_solver_beacons_table",
-                column_count = 4,
-                draw_horizontal_lines = true,
-                handler = {
-                    on_added = handlers.on_make_beacons_table,
-                    on_beacon_changed = handlers.on_make_beacons_table,
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = "Substrate",
+                },
+                {
+                    type = "frame",
+                    style = "factory_solver_slot_background_frame",
+                    {
+                        type = "table",
+                        style = "filter_slot_table",
+                        column_count = 6,
+                        handler = {
+                            on_added = handlers.on_make_substrate_table,
+                        },
+                    },
                 },
             },
             {
-                type = "button",
-                caption = "Add beacon",
+                type = "flow",
+                style = "factory_solver_no_spacing_vertical_flow_style",
+                direction = "vertical",
                 handler = {
-                    [defines.events.on_gui_click] = handlers.on_add_beacon_click,
+                    on_machine_setup_changed = handlers.on_modules_visible,
+                },
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = "Modules",
+                },
+                {
+                    type = "flow",
+                    direction = "horizontal",
+                    handler = {
+                        on_machine_setup_changed = handlers.on_make_machine_modules,
+                    },
                 },
             },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
+            {
+                type = "flow",
+                style = "factory_solver_no_spacing_vertical_flow_style",
+                direction = "vertical",
+                handler = {
+                    on_machine_setup_changed = handlers.on_beacons_visible,
+                },
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = "Beacons",
+                },
+                {
+                    type = "table",
+                    style = "factory_solver_beacons_table",
+                    column_count = 4,
+                    draw_horizontal_lines = true,
+                    handler = {
+                        on_added = handlers.on_make_beacons_table,
+                        on_beacon_changed = handlers.on_make_beacons_table,
+                    },
+                },
+                {
+                    type = "button",
+                    caption = "Add beacon",
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_add_beacon_click,
+                    },
+                },
+            },
             {
                 type = "label",
                 style = "caption_label",
@@ -790,6 +864,29 @@ return {
                         on_beacon_changed = handlers.on_make_total_effectivity,
                         on_module_changed = handlers.on_make_total_effectivity,
                     },
+                },
+            },
+            -- Kept out of the Modules section on purpose: on_modules_visible
+            -- hides that section for machines with no module slots, but such a
+            -- machine can still take quality modules through beacons and the
+            -- warning must stay visible. single_line is a LuaStyle property, so
+            -- it must go in style_mods (not as an element field) to wrap.
+            {
+                type = "label",
+                visible = false,
+                style_mods = {
+                    single_line = false,
+                    font_color = { r = 1, g = 0.7, b = 0.2 },
+                    top_margin = 4,
+                    maximal_width = 280,
+                },
+                caption =
+                "Quality modules have no effect until a quality above normal is unlocked in the Research bonuses dialog.",
+                handler = {
+                    on_added = handlers.on_quality_module_warning_update,
+                    on_machine_setup_changed = handlers.on_quality_module_warning_update,
+                    on_module_changed = handlers.on_quality_module_warning_update,
+                    on_beacon_changed = handlers.on_quality_module_warning_update,
                 },
             },
         },

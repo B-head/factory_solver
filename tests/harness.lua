@@ -104,7 +104,10 @@ function M.assert_matrix_near(actual, expected, tol, msg)
     end
 end
 
----Drive `linear_programming.M.solve` from "ready" until a terminal state.
+---Drive `linear_programming.M.solve` from "ready" through the IPM iteration
+---loop to a terminal state ("finished" / "unfinished" / "unbounded" /
+---"unfeasible"). Matches the state machine that control.lua's on_tick pumps
+---in production, but folds it into one synchronous loop instead of per-tick.
 ---@param lp table The required `solver/linear_programming` module.
 ---@param problem Problem
 ---@param opts { tolerance?: number, iterate_limit?: number }?

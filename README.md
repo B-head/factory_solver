@@ -30,6 +30,16 @@ The number in "Required" column is the quantity of machines required for each re
 
 Note: Constraints can be added by right-click on material or recipe buttons.
 
+## Enabling quality modules
+
+Qualities above normal start locked, so quality modules have no effect on the calculation until you unlock them in the solver:
+
+1. Click the "Research bonuses" button to open its dialog.
+2. Under "Unlocked qualities", check each quality you have researched.
+3. Click confirm to apply.
+
+The solver then expands recipes into the quality cascade, and quality modules shift production toward the higher tiers.
+
 ## Why does the UI look like Factory Planner?
 
 I originally developed the solver for linear problems as an [additional feature of Factory Planner](https://github.com/ClaudeMetz/FactoryPlanner/pull/25). However, that solver was not merged, so I decided to develop another mod from scratch specifically for that solver.

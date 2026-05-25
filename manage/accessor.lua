@@ -381,6 +381,21 @@ function M.get_module(name)
     end
 end
 
+---True for modules whose effect set includes a positive quality bonus
+---(e.g. the vanilla quality module). Used to warn in the machine dialog when
+---such a module is set while the force has unlocked no quality above normal,
+---so the cascade cannot advance and the module would have no visible effect.
+---@param name string?
+---@return boolean
+function M.is_quality_module(name)
+    local module = M.get_module(name)
+    if not module then
+        return false
+    end
+    local effects = module.module_effects
+    return effects ~= nil and (effects.quality or 0) > 0
+end
+
 ---comment
 ---@param name string?
 ---@return LuaEntityPrototype?
@@ -759,6 +774,17 @@ function M.is_use_any_fluid_fuel(machine)
     return false
 end
 
+---True for machines that can receive beacon effects. effect_receiver is nil
+---for entities that take neither modules nor beacons (boilers, generators, ...),
+---and uses_beacon_effects may be false even when modules are accepted, so both
+---are checked.
+---@param machine LuaEntityPrototype
+---@return boolean
+function M.is_use_beacon(machine)
+    local effect_receiver = machine.effect_receiver
+    return effect_receiver ~= nil and effect_receiver.uses_beacon_effects == true
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@return boolean
@@ -1054,18 +1080,22 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
     -- unaffected.
     local beacon_multiplier = 1 + ((bonuses and bonuses.beacon_distribution) or 0)
 
-    for _, affected_by_beacon in ipairs(affected_by_beacons) do
-        local beacon_typed_name = affected_by_beacon.beacon_typed_name
-        local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
-        if beacon then
-            local effectivity = assert(beacon.distribution_effectivity)
-                * affected_by_beacon.beacon_quantity
-                * beacon_multiplier
-            local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
-                beacon.module_inventory_size)
+    -- Machines that cannot receive beacon effects ignore any beacons attached
+    -- to the line, so stale data on such a line never reaches the LP.
+    if M.is_use_beacon(machine) then
+        for _, affected_by_beacon in ipairs(affected_by_beacons) do
+            local beacon_typed_name = affected_by_beacon.beacon_typed_name
+            local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
+            if beacon then
+                local effectivity = assert(beacon.distribution_effectivity)
+                    * affected_by_beacon.beacon_quantity
+                    * beacon_multiplier
+                local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
+                    beacon.module_inventory_size)
 
-            for _, typed_name in pairs(beacon_module_names) do
-                count(typed_name, effectivity)
+                for _, typed_name in pairs(beacon_module_names) do
+                    count(typed_name, effectivity)
+                end
             end
         end
     end

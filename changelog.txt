@@ -21,6 +21,17 @@ Date: ????
       recipes can produce the same product, the solver prefers the one that
       draws less raw input instead of splitting the flow arbitrarily.
 ---------------------------------------------------------------------------------------------------
+Version: 0.4.1
+Date: 2026-05-25
+  Gui:
+    - Warn in the machine settings dialog when a quality module is set while no
+      quality above normal is unlocked, since the cascade cannot advance and the
+      module would have no effect.
+  Bugfixes:
+    - Hide the Beacons section and ignore beacon effects for machines that do
+      not support beacon effects, so beacons can no longer be added to or
+      affect such machines.
+---------------------------------------------------------------------------------------------------
 Version: 0.4.0
 Date: 2026-05-23
   Features:
@@ -31,7 +42,9 @@ Date: 2026-05-23
     - Add a fluid temperature dimension: boilers, heat exchangers, generators,
       and fusion reactors are split per (fluid, temperature) and bridged automatically.
     - Add a Research Bonus snapshot dialog that folds force productivity bonuses
-      into the solver.
+      into the solver and unlocks qualities. Qualities above normal start locked,
+      so their checkboxes must be enabled here before quality modules have any
+      effect on the quality cascade.
     - Add virtual recipes for fusion reactors, fusion generators, thrusters,
       agricultural towers, labs (dispatched per consumed pack), per-fluid boilers,
       and item spoilage.

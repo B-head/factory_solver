@@ -4,6 +4,12 @@
 
 -- Headless test entry point for the pure-Lua solver pipeline.
 --
+-- Why headless: solver/* has no Factorio runtime dependencies (no game,
+-- script, storage, prototypes), so it can be driven directly. The in-game
+-- alternative requires building a UI scenario and watching on_tick, which is
+-- slow and hard to assert on. Use this suite as the inner loop for changes to
+-- LP math, CSR primitives, or create_problem's reachability / cost-tier logic.
+--
 -- Usage (run from the repo root so the require paths resolve):
 --   lua tests/run.lua             -- run every case, terse output
 --   lua tests/run.lua -v          -- also print captured solver dumps
@@ -13,6 +19,24 @@
 -- shared by Factorio's vendored Lua 5.2.1, so any modern standalone Lua works.
 -- Install on Windows via `winget install DEVCOM.Lua`, `scoop install lua`, or
 -- the binaries at https://luabinaries.sourceforge.net/.
+--
+-- Scope of tests/cases/: regressions for the solver, CSR primitives, and
+-- translation logic that operates on plain NormalizedProductionLine[] /
+-- Constraint[] fixtures. Anything that needs prototypes, storage.virtuals,
+-- machine-speed / module / quality folding, or UI behaviour is out of scope
+-- and stays in Factorio.
+--
+-- Bootstrap rule for loop fixtures: any fixture with a recycler or self-loop
+-- includes at least one recipe with empty ingredients (a mining / pumping
+-- analogue). solver/create_problem.lua's compute_reachable_materials seeds
+-- reachability from "materials with no producer"; a fixture made entirely of
+-- cyclic recipes leaves the seed empty, the shortage-source gate fires on
+-- every loop material, and the LP "cheats" by paying shortage cost instead of
+-- running the producer chain. Real Factorio always has mining-drill /
+-- pumpjack / asteroid-collector providing seeds; headless fixtures don't.
+-- See `iron-mining` in tests/cases/lp_quality_recycling_loop.lua for the
+-- minimal shape, and assert the upstream producer's primal is > epsilon to
+-- catch the cheat-by-shortage regression.
 
 -- Make `require "solver/foo"` and `require "manage/foo"` resolve against the
 -- repo root. The trailing semicolons keep the standard search path as a
