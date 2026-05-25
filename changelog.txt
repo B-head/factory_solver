@@ -1,6 +1,12 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.2
 Date: ????
+  Changes:
+    - Keep beacon configuration in storage even when the chosen machine
+      cannot receive beacon effects, instead of dropping it on confirm.
+      The solver and UI already ignore beacons on unsupported machines via
+      a read-time filter, so the data is preserved non-destructively and
+      reappears intact if a beacon-capable machine is selected later.
   Bugfixes:
     - Apply the beacon's quality tier to its distribution_effectivity, so
       higher-quality beacons now boost module effects by the engine-side

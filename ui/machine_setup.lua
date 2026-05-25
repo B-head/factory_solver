@@ -664,12 +664,6 @@ function handlers.on_machine_setups_confirm(event)
     local line_index = data.line_index --[[@as integer]]
     data.line_index = nil ---@diagnostic disable-line: inject-field
 
-    -- Drop beacon data the machine cannot use so it never lingers in storage.
-    local machine = tn.typed_name_to_machine(data.machine_typed_name)
-    if not acc.is_use_beacon(machine) then
-        data.affected_by_beacons = {}
-    end
-
     save.update_production_line(solution, line_index, data)
 
     local re_event = fs_util.create_gui_event(dialog)
