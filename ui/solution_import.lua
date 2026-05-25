@@ -2,6 +2,7 @@ local fs_util = require "fs_util"
 local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
 local factoryplanner_codec = require "manage/factoryplanner_codec"
+local helmod_codec = require "manage/helmod_codec"
 local common = require "ui/common"
 
 local DIALOG_NAME = "factory_solver_solution_import"
@@ -15,8 +16,9 @@ end
 
 ---Try factory_solver's native codec first (cheap signature check). On
 ---failure, decode the string again and probe for FP's `export_modset` /
----`factories` shape. Returns a list of payloads (one per native solution or
----one per FP factory), an aggregated warning list, or an error.
+---`factories` shape, then Helmod's `class="Model"` shape. Returns a list
+---of payloads (one per native solution, FP factory, or — at most — one
+---Helmod model), an aggregated warning list, or an error.
 ---@param s string
 ---@return table[]?
 ---@return LocalisedString[]
@@ -42,7 +44,13 @@ local function decode_any(s)
         return fp_payloads, warnings, nil
     end
 
-    return nil, {}, err or fp_err
+    local helmod_model, helmod_err = helmod_codec.decode(s)
+    if helmod_model then
+        local helmod_payload, helmod_warnings = helmod_codec.model_to_payload(helmod_model)
+        return { helmod_payload }, helmod_warnings, nil
+    end
+
+    return nil, {}, err or fp_err or helmod_err
 end
 
 ---Compute the rename a given payload name would get if imported on top of

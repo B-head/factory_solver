@@ -3,6 +3,7 @@ local fs_util = require "fs_util"
 local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
 local factoryplanner_codec = require "manage/factoryplanner_codec"
+local helmod_codec = require "manage/helmod_codec"
 local common = require "ui/common"
 
 local DIALOG_NAME = "factory_solver_solution_export"
@@ -61,14 +62,26 @@ local function sync_select_all(dialog)
     master.state = any and all_checked
 end
 
+---Resolve which format radio is currently selected. Returns one of
+---"native" / "fp" / "helmod". Falls back to "native" when none can be
+---found (defensive; the dialog always has the radios).
+---@param dialog LuaGuiElement
+---@return "native"|"fp"|"helmod"
+local function selected_format(dialog)
+    local fp_radio = fs_util.find_lower(dialog, "factory_solver_solution_export_format_fp")
+    if fp_radio and fp_radio.state then return "fp" end
+    local helmod_radio = fs_util.find_lower(dialog, "factory_solver_solution_export_format_helmod")
+    if helmod_radio and helmod_radio.state then return "helmod" end
+    return "native"
+end
+
 ---Regenerate the export textbox from the currently checked solutions.
----Native factory_solver string is the default; FP form is opt-in.
+---Dispatches to the codec matching the active format radio.
 ---@param dialog LuaGuiElement
 ---@param player_index integer
 local function refresh_export_textbox(dialog, player_index)
     local textbox = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_textbox"))
     local empty_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_empty"))
-    local fp_radio = fs_util.find_lower(dialog, "factory_solver_solution_export_format_fp")
 
     local selected = gather_selected_solutions(dialog, player_index)
     if #selected == 0 then
@@ -78,8 +91,16 @@ local function refresh_export_textbox(dialog, player_index)
     end
     empty_label.visible = false
 
-    if fp_radio and fp_radio.state then
+    local format = selected_format(dialog)
+    if format == "fp" then
         local s, warnings = factoryplanner_codec.encode(selected)
+        textbox.text = s
+        local player = game.players[player_index]
+        if player then
+            for _, w in ipairs(warnings) do player.print(w) end
+        end
+    elseif format == "helmod" then
+        local s, warnings = helmod_codec.encode(selected)
         textbox.text = s
         local player = game.players[player_index]
         if player then
@@ -90,6 +111,26 @@ local function refresh_export_textbox(dialog, player_index)
     end
     textbox.focus()
     textbox.select_all()
+end
+
+---Helmod's shared-string format only carries a single Model, so when
+---Helmod is the active format we collapse the selection to the first
+---checked row. The user can still un-check it and pick a different one;
+---we don't disable the boxes outright because that hides the choice.
+---@param dialog LuaGuiElement
+local function enforce_single_selection_for_helmod(dialog)
+    if selected_format(dialog) ~= "helmod" then return end
+    local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_list"))
+    local seen_first = false
+    for _, child in ipairs(list.children) do
+        if child.type == "checkbox" and child.state then
+            if seen_first then
+                child.state = false
+            else
+                seen_first = true
+            end
+        end
+    end
 end
 
 ---@param event EventDataTrait
@@ -117,6 +158,18 @@ end
 ---@param event EventData.on_gui_checked_state_changed
 function handlers.on_solution_checked(event)
     local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
+    -- When Helmod is active, a freshly-checked row must displace any
+    -- previously-checked one (single-Model wire format). The new row stays
+    -- checked because the event already wrote its `state = true`; we walk
+    -- the list and clear earlier hits.
+    if event.element.state and selected_format(dialog) == "helmod" then
+        local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_list"))
+        for _, child in ipairs(list.children) do
+            if child ~= event.element and child.type == "checkbox" then
+                child.state = false
+            end
+        end
+    end
     sync_select_all(dialog)
     refresh_export_textbox(dialog, event.player_index)
 end
@@ -126,9 +179,24 @@ function handlers.on_select_all_export(event)
     local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
     local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_list"))
     local new_state = event.element.state
+    -- Helmod can only ship one Model per string, so "select all" must not
+    -- check more than one box; instead, treat it as "check the first" (or
+    -- "clear all" when toggling off). For native / FP we keep the normal
+    -- multi-select semantics.
+    local helmod_active = selected_format(dialog) == "helmod"
+    local seen_first = false
     for _, child in ipairs(list.children) do
         if child.type == "checkbox" then
-            child.state = new_state
+            if helmod_active then
+                if new_state and not seen_first then
+                    child.state = true
+                    seen_first = true
+                else
+                    child.state = false
+                end
+            else
+                child.state = new_state
+            end
         end
     end
     refresh_export_textbox(dialog, event.player_index)
@@ -140,21 +208,47 @@ function handlers.on_init_export_textbox(event)
     refresh_export_textbox(dialog, event.player_index)
 end
 
+---Mark `event.element` (one of the format radios) as the selected one and
+---clear the others. Bundles the post-selection refresh so each radio
+---handler stays a one-liner.
+---@param dialog LuaGuiElement
+---@param chosen LuaGuiElement
+local function select_format_radio(dialog, chosen)
+    local names = {
+        "factory_solver_solution_export_format_native",
+        "factory_solver_solution_export_format_fp",
+        "factory_solver_solution_export_format_helmod",
+    }
+    for _, name in ipairs(names) do
+        local radio = fs_util.find_lower(dialog, name)
+        if radio then radio.state = (radio == chosen) end
+    end
+end
+
 ---@param event EventData.on_gui_checked_state_changed
 function handlers.on_format_selected_native(event)
     local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
-    local fp_radio = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_format_fp"))
-    event.element.state = true
-    fp_radio.state = false
+    select_format_radio(dialog, event.element)
     refresh_export_textbox(dialog, event.player_index)
 end
 
 ---@param event EventData.on_gui_checked_state_changed
 function handlers.on_format_selected_fp(event)
     local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
-    local native_radio = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_format_native"))
-    event.element.state = true
-    native_radio.state = false
+    select_format_radio(dialog, event.element)
+    refresh_export_textbox(dialog, event.player_index)
+end
+
+---@param event EventData.on_gui_checked_state_changed
+function handlers.on_format_selected_helmod(event)
+    local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
+    select_format_radio(dialog, event.element)
+    -- Switching INTO Helmod collapses any multi-selection down to one
+    -- (otherwise the textbox would silently drop everything past the
+    -- first checked row). Refresh comes after so the textbox reflects
+    -- exactly what's still checked.
+    enforce_single_selection_for_helmod(dialog)
+    sync_select_all(dialog)
     refresh_export_textbox(dialog, event.player_index)
 end
 
@@ -210,6 +304,15 @@ return {
                 state = false,
                 handler = {
                     [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_fp,
+                },
+            },
+            {
+                type = "radiobutton",
+                name = "factory_solver_solution_export_format_helmod",
+                caption = { "factory-solver-export-format-helmod" },
+                state = false,
+                handler = {
+                    [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_helmod,
                 },
             },
         },
