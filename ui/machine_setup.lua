@@ -559,7 +559,7 @@ function handlers.on_make_total_effectivity(event)
     local total_modules = acc.get_total_modules(machine, module_typed_names, affected_by_beacons)
 
     elem.clear()
-    for name, inner in pairs(total_modules) do
+    for name, inner in pairs(acc.flatten_total_modules(total_modules)) do
         for quality, count in pairs(inner) do
             local module_typed_name = tn.create_typed_name("item", name, quality)
 

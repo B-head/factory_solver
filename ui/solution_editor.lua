@@ -172,7 +172,7 @@ function handlers.make_production_line_table(event)
 
             local total_modules = acc.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
 
-            for name, inner in pairs(total_modules) do
+            for name, inner in pairs(acc.flatten_total_modules(total_modules)) do
                 for quality, count in pairs(inner) do
                     local module_typed_name = tn.create_typed_name("item", name, quality)
 
