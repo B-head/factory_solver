@@ -48,13 +48,19 @@ Date: ????
       round-trip it verbatim and corrupted later imports with an unknown-
       item fuel slot. Defensive `<`-prefix detection on the import side
       keeps older exports recoverable.
-    - Helmod codec: fall back to `accessor.try_get_fixed_fuel` when import
-      can't resolve `factory.fuel` for a fuel-using machine. Helmod itself
-      doesn't store factory.fuel for heat-energy machines (heat enters via
-      the recipe's steam-heat ingredient), and pseudo-item fuels are
-      filtered above; without this fallback the imported line entered
-      storage with a nil fuel_typed_name and tripped
-      `normalize_production_line`'s assert.
+    - Helmod codec: fall back to `accessor.try_get_fixed_fuel` and then to
+      the user's FS fuel preset when import can't resolve `factory.fuel`
+      for a fuel-using machine. Heat-energy machines (which Helmod stores
+      without factory.fuel) take the fixed-fuel branch; generic burners
+      (stone-furnace, pY's burner family, ...) take the preset branch.
+      Without these fallbacks the imported line entered storage with a
+      nil fuel_typed_name and tripped `normalize_production_line`'s
+      assert during the first solve.
+    - Helmod codec: dedupe import production lines that resolve to the
+      same (type, name, quality) tuple. Helmod's hierarchical model can
+      hold the same recipe in multiple blocks and our flattening turned
+      that into duplicate LP variables, tripping `add_objective`'s "same
+      name" assert. Subsequent occurrences are dropped with a warning.
     - Route quality multiplier calculations through Factorio 2.0's per-prototype
       quality runtime APIs (LuaQualityPrototype::default_multiplier,
       LuaEntityPrototype::get_max_energy_usage / get_fluid_usage_per_tick /

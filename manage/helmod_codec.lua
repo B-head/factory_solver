@@ -1,4 +1,5 @@
 local acc = require "manage/accessor"
+local preset = require "manage/preset"
 
 local M = {}
 
@@ -693,8 +694,9 @@ end
 ---Returns the payload plus a list of localised warning strings describing
 ---features that could not be preserved.
 ---@param model any
+---@param player_index integer
 ---@return table, LocalisedString[]
-function M.model_to_payload(model)
+function M.model_to_payload(model, player_index)
     local warnings = {}
     local constraints = {}
     local production_lines = {}
@@ -750,6 +752,13 @@ function M.model_to_payload(model)
         warnings[#warnings + 1] = { "factory-solver-helmod-import-warning-flattened-blocks" }
     end
 
+    -- Helmod's hierarchical model can hold the same recipe in multiple blocks
+    -- (and walk_blocks flattens them into a single leaf list), but the LP keys
+    -- one variable per (type, name, quality) tuple — feeding two ProductionLines
+    -- with the same key trips an assert in problem_generator.add_objective.
+    -- Dedupe on the same composite key the variable name uses so quality
+    -- variants of the same recipe are kept distinct.
+    local seen_recipes = {}
     for _, recipe_data in ipairs(leaf_recipes) do
         local recipe_typed_name, recipe_warning = unpack_recipe_typed_name(recipe_data)
         local machine_typed_name = unpack_machine_typed_name(recipe_data.factory,
@@ -758,6 +767,18 @@ function M.model_to_payload(model)
             warnings[#warnings + 1] = { recipe_warning, recipe_data.name or "?" }
         end
         if recipe_typed_name and machine_typed_name then
+            local dedup_key = string.format("%s/%s/%s",
+                recipe_typed_name.type,
+                recipe_typed_name.name,
+                recipe_typed_name.quality or "normal")
+            if seen_recipes[dedup_key] then
+                warnings[#warnings + 1] = {
+                    "factory-solver-helmod-import-warning-duplicate-recipe",
+                    recipe_typed_name.name,
+                }
+                goto continue_leaf
+            end
+            seen_recipes[dedup_key] = true
             -- Helmod's stored `.production` accumulates float noise from its
             -- own LP / Gauss solver (e.g. 0.99999999999999982 in a recycling
             -- loop). A strict `~= 1` check flags every loop participant, so
@@ -803,13 +824,16 @@ function M.model_to_payload(model)
             -- steam-heat ingredient, not factory.fuel), and our import side
             -- nil's out pseudo-item / virtual-material names. Fall back to
             -- the entity's fixed fuel (heat → `<heat>` virtual_material,
-            -- filtered fluid energy → that fluid's TypedName) so the line
-            -- arrives in storage in the same shape pre_solve expects.
+            -- filtered fluid energy → that fluid's TypedName), then for
+            -- generic burners (stone-furnace, pY's burner family, ...) to
+            -- the user's FS preset the same way the FP codec does, so the
+            -- line arrives in storage in the shape pre_solve expects.
             local fuel_typed_name = unpack_fuel_typed_name(factory)
             if not fuel_typed_name then
                 local machine_proto = prototypes.entity[machine_typed_name.name]
                 if machine_proto and acc.is_use_fuel(machine_proto) then
                     fuel_typed_name = acc.try_get_fixed_fuel(machine_proto)
+                        or preset.get_fuel_preset(player_index, machine_typed_name)
                 end
             end
 
@@ -827,6 +851,7 @@ function M.model_to_payload(model)
                 constraints[#constraints + 1] = limit_constraint
             end
         end
+        ::continue_leaf::
     end
 
     local name = (model.infos and model.infos.title)

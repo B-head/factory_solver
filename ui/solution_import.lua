@@ -48,7 +48,7 @@ local function decode_any(s, player_index)
 
     local helmod_model, helmod_err = helmod_codec.decode(s)
     if helmod_model then
-        local helmod_payload, helmod_warnings = helmod_codec.model_to_payload(helmod_model)
+        local helmod_payload, helmod_warnings = helmod_codec.model_to_payload(helmod_model, player_index)
         return { helmod_payload }, helmod_warnings, nil
     end
 
