@@ -35,6 +35,21 @@ __factory_solver__storage = {}
 ---@field amount_unit AmountUnit
 ---@field presets Presets
 ---@field opened_gui string[]
+---@field machine_clipboard MachineClipboard?
+
+---Per-player clipboard for the Shift+Click copy/paste flow over production
+---line rows in solution_editor. A copy snapshots the whole machine-side
+---configuration of the source line; the `mode` flag selects which subset
+---paste applies to the target line. Storing both halves regardless of mode
+---keeps the data structure mode-independent and lets the user copy once and
+---decide later — at click time — which subset to paste where.
+---@class MachineClipboard
+---@field mode "machine_fuel"|"module_beacon"
+---@field machine_typed_name TypedName
+---@field fuel_typed_name TypedName?
+---@field substrate_tile_name string?
+---@field module_typed_names table<string, TypedName>
+---@field affected_by_beacons AffectedByBeacon[]
 
 ---@class Presets
 ---@field fuel table<string, TypedName>

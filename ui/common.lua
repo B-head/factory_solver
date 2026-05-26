@@ -10,17 +10,20 @@ local M = {}
 ---@param is_hidden boolean
 ---@param is_unresearched boolean
 ---@param filter_type FilterType?
+---@param silent boolean? When true, return the silent variant defined in data.lua so the
+---button's inherited click sound doesn't overlap a custom play_sound from the handler.
 ---@return string
-function M.get_style(is_hidden, is_unresearched, filter_type)
+function M.get_style(is_hidden, is_unresearched, filter_type, silent)
+    local prefix = silent and "factory_solver_silent_slot_button_" or "flib_slot_button_"
     if is_hidden then
-        return "flib_slot_button_grey"
+        return prefix .. "grey"
     elseif is_unresearched then
-        return "flib_slot_button_orange"
+        return prefix .. "orange"
     else
         if filter_type == "recipe" or filter_type == "virtual_recipe" then
-            return "flib_slot_button_blue"
+            return prefix .. "blue"
         else
-            return "flib_slot_button_default"
+            return prefix .. "default"
         end
     end
 end
@@ -124,7 +127,7 @@ function M.create_decorated_sprite_button(data)
 
     return {
         type = "sprite-button",
-        style = M.get_style(is_hidden, is_unresearched, typed_name.type),
+        style = M.get_style(is_hidden, is_unresearched, typed_name.type, data.silent_click),
         sprite = tn.get_sprite_path(typed_name),
         quality = typed_name.quality,
         tooltip = tn.typed_name_to_tooltip(typed_name),

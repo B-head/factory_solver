@@ -75,7 +75,7 @@ function handlers.make_production_line_table(event)
                 direction = "vertical",
                 {
                     type = "sprite-button",
-                    style = "mini_button",
+                    style = "factory_solver_silent_mini_button",
                     sprite = "utility/speed_up",
                     tags = {
                         line_index = line_index,
@@ -87,7 +87,7 @@ function handlers.make_production_line_table(event)
                 },
                 {
                     type = "sprite-button",
-                    style = "mini_button",
+                    style = "factory_solver_silent_mini_button",
                     sprite = "utility/speed_down",
                     tags = {
                         line_index = line_index,
@@ -106,10 +106,17 @@ function handlers.make_production_line_table(event)
             local is_hidden = acc.is_hidden(recipe)
             local is_unresearched = acc.is_unresearched(recipe, relation_to_recipes)
 
+            -- Recipe button intentionally has no paste_target tag: Shift+
+            -- Click flows past the early-return below and falls into the
+            -- existing left/right handling (open machine_setup / add
+            -- constraint). Copying machine settings off the recipe icon
+            -- would be ambiguous (which mode?), so the entry points are
+            -- restricted to the machine / substrate / module icons.
             local def = common.create_decorated_sprite_button {
                 typed_name = typed_name,
                 is_hidden = is_hidden,
                 is_unresearched = is_unresearched,
+                silent_click = true,
                 tags = recipe_tags,
                 handler = {
                     [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
@@ -162,7 +169,8 @@ function handlers.make_production_line_table(event)
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
-                    tags = recipe_tags,
+                    silent_click = true,
+                    tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                     },
@@ -179,7 +187,8 @@ function handlers.make_production_line_table(event)
                     local def = common.create_decorated_sprite_button {
                         typed_name = module_typed_name,
                         number = count,
-                        tags = recipe_tags,
+                        silent_click = true,
+                        tags = flib_table.deep_merge { recipe_tags, { paste_target = "module_beacon" } },
                         handler = {
                             [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                         },
@@ -196,10 +205,10 @@ function handlers.make_production_line_table(event)
                 -- opens, where Substrate section lets the user switch.
                 local def = {
                     type = "sprite-button",
-                    style = "flib_slot_button_default",
+                    style = "factory_solver_silent_slot_button_default",
                     sprite = "tile/" .. line.substrate_tile_name,
                     elem_tooltip = { type = "tile", name = line.substrate_tile_name },
-                    tags = recipe_tags,
+                    tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                     },
@@ -216,7 +225,7 @@ function handlers.make_production_line_table(event)
                 -- substrate button above for consistency.
                 local def = {
                     type = "sprite-button",
-                    style = "flib_slot_button_default",
+                    style = "factory_solver_silent_slot_button_default",
                     sprite = "utility/clock",
                     tags = recipe_tags,
                     handler = {
@@ -254,6 +263,7 @@ function handlers.make_production_line_table(event)
                         typed_name = typed_name,
                         is_hidden = is_hidden,
                         is_unresearched = is_unresearched,
+                        silent_click = true,
                         tags = {
                             line_index = line_index,
                             typed_name = typed_name,
@@ -294,6 +304,7 @@ function handlers.make_production_line_table(event)
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
+                    silent_click = true,
                     tags = {
                         line_index = line_index,
                         typed_name = typed_name,
@@ -348,6 +359,7 @@ function handlers.make_production_line_table(event)
                     typed_name = ftn,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
+                    silent_click = true,
                     tags = {
                         line_index = line_index,
                         typed_name = ftn,
@@ -394,7 +406,7 @@ function handlers.make_production_line_table(event)
         do
             local def = {
                 type = "sprite-button",
-                style = "mini_tool_button_red",
+                style = "factory_solver_silent_mini_tool_button_red",
                 sprite = "utility/close",
                 hovered_sprite = "utility/close_black",
                 clicked_sprite = "utility/close_black",
@@ -474,10 +486,47 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_production_line_recipe_click(event)
-    if common.try_open_factoriopedia(event) then return end
+    -- Shift+Click is the Factorio copy/paste vocabulary (Shift+Right=copy,
+    -- Shift+Left=paste) and we route those before anything else — including
+    -- the Factoriopedia / open-dialog / add-constraint paths — so the
+    -- modifier is unambiguous. Buttons that carry a paste_target tag
+    -- (machine / substrate / aggregated module icons) dispatch to the
+    -- copy/paste handler; the recipe and clock icons land on the
+    -- disabled-feedback path so Shift+Click doesn't silently fall through
+    -- to "open dialog" / "add constraint", which feels misleading on an
+    -- icon that visually resembles the copy/paste-capable ones.
+    if event.shift then
+        if event.element.tags.paste_target then
+            handlers.on_clipboard_shift_click(event)
+        else
+            handlers.on_clipboard_disabled_click(event)
+        end
+        return
+    end
+
+    -- Alt+Right has no defined meaning here (Alt+Left is Factoriopedia),
+    -- but the normal right-click branch below would otherwise add a
+    -- constraint — surprising when the user clearly held a modifier to
+    -- signal a different intent. Swallow the click with cannot_build audio
+    -- so the action is acknowledged but rejected.
+    if event.alt and event.button == defines.mouse_button_type.right then
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
+        return
+    end
+
+    -- Factoriopedia opens its own dialog with its own audio, so we leave
+    -- that path silent here. All non-shift / non-alt branches play a single
+    -- utility/gui_click — the row's sprite-button styles are the silent
+    -- variants, so the click sound has to be emitted from the handler.
+    if common.try_open_factoriopedia(event) then
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
+        return
+    end
+
     local tags = event.element.tags
     if event.button == defines.mouse_button_type.left then
         common.open_gui(event.player_index, true, machine_setup, tags)
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
     elseif event.button == defines.mouse_button_type.right then
         local solution = assert(save.get_selected_solution(event.player_index))
 
@@ -486,12 +535,117 @@ function handlers.on_production_line_recipe_click(event)
 
         local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
         fs_util.dispatch_to_subtree(root, "on_constraint_changed", data)
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
+    end
+end
+
+---Feedback path for Shift+Click on a sprite-button that doesn't participate
+---in the copy/paste flow (recipe / clock / products / ingredients / fuel).
+---The icons share the slot-button look with the copy/paste-capable ones,
+---so silently falling through to "open dialog" / "add constraint" reads as
+---a bug. This handler matches the cannot-build audio cue and surfaces a
+---short flying text so the user understands the action was intentionally
+---rejected, not just ignored.
+---@param event EventData.on_gui_click
+function handlers.on_clipboard_disabled_click(event)
+    local player = game.players[event.player_index]
+    player.create_local_flying_text {
+        text = { "factory-solver-clipboard-not-applicable" },
+        create_at_cursor = true,
+    }
+    player.play_sound { path = "utility/cannot_build" }
+end
+
+---Shift+Right copies machine settings off the clicked button's row, with
+---the mode pinned by which icon was clicked (machine/substrate → machine
+---and fuel; module → modules and beacons). Shift+Left pastes the previously
+---copied clipboard onto the clicked row, applying only the subset the
+---clipboard's mode designates. Click target at paste time does *not*
+---influence the applied subset — the clipboard remembers what was copied.
+---Feedback runs through create_local_flying_text (Factorio 2.0 replacement
+---for the removed flying-text entity); the call is per-player local and
+---safe to invoke unconditionally on every client.
+---@param event EventData.on_gui_click
+function handlers.on_clipboard_shift_click(event)
+    local tags = event.element.tags
+    local line_index = tags.line_index --[[@as integer]]
+    local paste_target = tags.paste_target --[[@as "machine_fuel"|"module_beacon"]]
+    local solution = assert(save.get_selected_solution(event.player_index))
+    local line = solution.production_lines[line_index]
+    if not line then return end
+    local player = game.players[event.player_index]
+
+    if event.button == defines.mouse_button_type.right then
+        save.set_machine_clipboard(event.player_index, line, paste_target)
+        local message_key = paste_target == "machine_fuel"
+            and "factory-solver-clipboard-copied-machine-fuel"
+            or "factory-solver-clipboard-copied-module-beacon"
+        player.create_local_flying_text {
+            text = { message_key },
+            create_at_cursor = true,
+        }
+        -- Mirror vanilla's audio feedback so copy/paste in factory_solver
+        -- feels consistent with the engine's own entity-settings clipboard.
+        player.play_sound { path = "utility/entity_settings_copied" }
+    elseif event.button == defines.mouse_button_type.left then
+        local result = save.apply_machine_clipboard(event.player_index, solution, line_index)
+        local message_key
+        if result == "ok" then
+            local clipboard = assert(save.get_machine_clipboard(event.player_index))
+            message_key = clipboard.mode == "machine_fuel"
+                and "factory-solver-clipboard-pasted-machine-fuel"
+                or "factory-solver-clipboard-pasted-module-beacon"
+        elseif result == "empty" then
+            message_key = "factory-solver-clipboard-empty"
+        elseif result == "incompatible_machine" then
+            message_key = "factory-solver-clipboard-incompatible-machine"
+        elseif result == "no_module_or_beacon_slot" then
+            message_key = "factory-solver-clipboard-no-module-or-beacon-slot"
+        else
+            message_key = "factory-solver-clipboard-empty"
+        end
+        player.create_local_flying_text {
+            text = { message_key },
+            create_at_cursor = true,
+        }
+        player.play_sound {
+            path = result == "ok"
+                and "utility/entity_settings_pasted"
+                or "utility/cannot_build",
+        }
+        if result == "ok" then
+            local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
+            fs_util.dispatch_to_subtree(root, "on_production_line_changed")
+        end
     end
 end
 
 ---@param event EventData.on_gui_click
 function handlers.on_production_line_inout_click(event)
-    if common.try_open_factoriopedia(event) then return end
+    -- Same disabled-feedback gate as on_production_line_recipe_click:
+    -- product / ingredient / fuel icons sit in the row alongside the
+    -- copy/paste-eligible icons and look indistinguishable from them,
+    -- so Shift+Click intercepts here too and emits the "not applicable"
+    -- feedback instead of falling through to open production_line_adder
+    -- or add a constraint.
+    if event.shift then
+        handlers.on_clipboard_disabled_click(event)
+        return
+    end
+
+    -- See on_production_line_recipe_click: Alt+Right has no defined action
+    -- here either, so reject it audibly instead of falling through to the
+    -- right-click branch and adding a constraint.
+    if event.alt and event.button == defines.mouse_button_type.right then
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
+        return
+    end
+
+    if common.try_open_factoriopedia(event) then
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
+        return
+    end
+    
     local tags = event.element.tags
     local typed_name = tags.typed_name --[[@as TypedName]]
     local is_product = tags.is_product --[[@as boolean]]
@@ -509,6 +663,7 @@ function handlers.on_production_line_inout_click(event)
             line_index = line_index,
         }
         common.open_gui(event.player_index, true, production_line_adder, data)
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
     elseif event.button == defines.mouse_button_type.right then
         local solution = assert(save.get_selected_solution(event.player_index))
 
@@ -516,6 +671,7 @@ function handlers.on_production_line_inout_click(event)
 
         local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
         fs_util.dispatch_to_subtree(root, "on_constraint_changed", data)
+        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
     end
 end
 
@@ -552,6 +708,7 @@ function handlers.on_move_production_line_click(event)
 
     local root = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
     fs_util.dispatch_to_subtree(root, "on_production_line_changed")
+    game.players[event.player_index].play_sound { path = "factory_solver_mini_button_click" }
 end
 
 ---@param event EventData.on_gui_click
@@ -563,6 +720,7 @@ function handlers.on_remove_production_line(event)
 
     local root = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
     fs_util.dispatch_to_subtree(root, "on_production_line_changed")
+    game.players[event.player_index].play_sound { path = "factory_solver_mini_tool_button_click" }
 end
 
 fs_util.add_handlers(handlers)

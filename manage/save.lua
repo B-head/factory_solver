@@ -76,6 +76,26 @@ function M.reinit_player_data(player_index)
             player_data.resource_presets = nil
             player_data.machine_presets = nil
         end
+
+        -- Older saves predate the Shift+Click clipboard. Leave it nil so the
+        -- next paste shows "Nothing to paste" rather than reviving stale data.
+        -- When a clipboard does exist, re-run typed_name_migration over every
+        -- TypedName so quality renames (etc.) don't ghost-survive in saved
+        -- player state.
+        local clipboard = player_data.machine_clipboard
+        if clipboard then
+            tn.typed_name_migration(clipboard.machine_typed_name)
+            tn.typed_name_migration(clipboard.fuel_typed_name)
+            for _, typed_name in pairs(clipboard.module_typed_names) do
+                tn.typed_name_migration(typed_name)
+            end
+            for _, affected in ipairs(clipboard.affected_by_beacons) do
+                tn.typed_name_migration(affected.beacon_typed_name)
+                for _, typed_name in pairs(affected.module_typed_names) do
+                    tn.typed_name_migration(typed_name)
+                end
+            end
+        end
     else
         M.init_player_data(player_index)
     end
@@ -634,6 +654,148 @@ function M.update_production_line(solution, line_index, data)
     line.substrate_tile_name = data.substrate_tile_name
 
     solution.solver_state = "ready"
+end
+
+---Snapshot the machine-side configuration of a production line into the
+---per-player clipboard. The whole snapshot (machine + fuel + substrate +
+---modules + beacons) is always taken; the caller-supplied `mode` decides
+---which subset paste will later apply. deep_copy detaches the snapshot
+---from the live line so subsequent edits on the source row don't bleed
+---into the clipboard.
+---@param player_index integer
+---@param line ProductionLine
+---@param mode "machine_fuel"|"module_beacon"
+function M.set_machine_clipboard(player_index, line, mode)
+    storage.players[player_index].machine_clipboard = {
+        mode = mode,
+        machine_typed_name = flib_table.deep_copy(line.machine_typed_name),
+        fuel_typed_name = line.fuel_typed_name and flib_table.deep_copy(line.fuel_typed_name) or nil,
+        substrate_tile_name = line.substrate_tile_name,
+        module_typed_names = flib_table.deep_copy(line.module_typed_names),
+        affected_by_beacons = flib_table.deep_copy(line.affected_by_beacons),
+    }
+end
+
+---@param player_index integer
+---@return MachineClipboard?
+function M.get_machine_clipboard(player_index)
+    return storage.players[player_index].machine_clipboard
+end
+
+---@alias PasteResult "ok"|"empty"|"incompatible_machine"|"no_module_or_beacon_slot"
+
+---Apply the clipboard to a production line. Mode-driven: machine_fuel
+---rewrites machine + fuel + substrate, module_beacon rewrites modules +
+---beacons. Sanitization in priority order:
+---  * empty clipboard → reject "empty"
+---  * machine_fuel mode + clipboard machine cannot run target recipe
+---    → reject "incompatible_machine" (no partial application, to avoid
+---    leaving fuel/substrate from one machine paired with another)
+---  * module_beacon mode + target machine takes neither modules nor beacons
+---    → reject "no_module_or_beacon_slot"
+---  * machine_fuel: substrate dropped if target machine isn't a plant or
+---    the tile isn't in tile_restriction. fuel dropped if not in target
+---    machine's fuel categories, falling back to preset.
+---  * module_beacon: oversized module slots are trimmed; allowed_effects
+---    mismatch is left to the LP mask (UI warning label already handles it).
+---On success, marks the solution dirty.
+---@param player_index integer
+---@param solution Solution
+---@param line_index integer
+---@return PasteResult
+function M.apply_machine_clipboard(player_index, solution, line_index)
+    local clipboard = storage.players[player_index].machine_clipboard
+    if not clipboard then
+        return "empty"
+    end
+
+    local line = solution.production_lines[line_index]
+    if not line then
+        return "empty"
+    end
+
+    if clipboard.mode == "machine_fuel" then
+        local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
+        local candidates = acc.get_machines_for_recipe(recipe)
+        local clipboard_machine_name = clipboard.machine_typed_name.name
+        local compatible = false
+        for _, candidate in ipairs(candidates) do
+            if candidate.name == clipboard_machine_name then
+                compatible = true
+                break
+            end
+        end
+        if not compatible then
+            return "incompatible_machine"
+        end
+
+        local new_machine_typed_name = flib_table.deep_copy(clipboard.machine_typed_name)
+        local new_machine = tn.typed_name_to_machine(new_machine_typed_name)
+
+        local new_fuel_typed_name = nil
+        if clipboard.fuel_typed_name and acc.is_use_fuel(new_machine) then
+            local fuel_categories = acc.try_get_fuel_categories(new_machine)
+            local fuel_ok = false
+            if fuel_categories then
+                local fuels = acc.get_fuels_in_categories(fuel_categories)
+                for _, fuel in ipairs(fuels) do
+                    if fuel.name == clipboard.fuel_typed_name.name then
+                        fuel_ok = true
+                        break
+                    end
+                end
+            elseif acc.is_use_any_fluid_fuel(new_machine) then
+                fuel_ok = clipboard.fuel_typed_name.type == "fluid"
+            end
+            if fuel_ok then
+                new_fuel_typed_name = flib_table.deep_copy(clipboard.fuel_typed_name)
+            else
+                new_fuel_typed_name = preset.get_fuel_preset(player_index, new_machine_typed_name)
+            end
+        elseif acc.is_use_fuel(new_machine) then
+            new_fuel_typed_name = preset.get_fuel_preset(player_index, new_machine_typed_name)
+        end
+
+        local new_substrate = nil
+        if new_machine.type == "plant" then
+            local tiles = acc.get_plant_substrate_tiles(new_machine)
+            if clipboard.substrate_tile_name
+                and flib_table.find(tiles, clipboard.substrate_tile_name)
+            then
+                new_substrate = clipboard.substrate_tile_name
+            else
+                new_substrate = tiles[1]
+            end
+        end
+
+        line.machine_typed_name = new_machine_typed_name
+        line.fuel_typed_name = new_fuel_typed_name
+        line.substrate_tile_name = new_substrate
+    else
+        local target_machine = tn.typed_name_to_machine(line.machine_typed_name)
+        local takes_modules = (target_machine.module_inventory_size or 0) > 0
+        local takes_beacons = acc.is_use_beacon(target_machine)
+        if not takes_modules and not takes_beacons then
+            return "no_module_or_beacon_slot"
+        end
+
+        if takes_modules then
+            line.module_typed_names = acc.trim_modules(
+                flib_table.deep_copy(clipboard.module_typed_names),
+                target_machine.module_inventory_size)
+        else
+            line.module_typed_names = {}
+        end
+
+        if takes_beacons then
+            line.affected_by_beacons = flib_table.deep_copy(clipboard.affected_by_beacons)
+        else
+            line.affected_by_beacons = {}
+        end
+    end
+
+    solution.solver_state = "ready"
+    return "ok"
 end
 
 ---comment
