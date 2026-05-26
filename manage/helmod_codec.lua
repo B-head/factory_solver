@@ -701,6 +701,19 @@ function M.model_to_payload(model, player_index)
     local constraints = {}
     local production_lines = {}
 
+    -- Some Helmod features (per-recipe beacon multipliers, module priority
+    -- ordering, mod-specific constraint rules) drop on import because
+    -- factory_solver has no equivalent — but they fire on every recipe
+    -- that uses the feature, drowning out the rare per-line warnings
+    -- (duplicate recipe, production multiplier ≠ 1, unmappable virtual
+    -- recipe). Accumulate counts and emit one aggregated warning per
+    -- kind at the end; the recipe identity isn't actionable for these.
+    local aggregated_warning_counts = {}
+    local function add_aggregated_warning(locale_key)
+        aggregated_warning_counts[locale_key] =
+            (aggregated_warning_counts[locale_key] or 0) + 1
+    end
+
     local time = tonumber(model.time) or DEFAULT_TIME
     local root = model.block_root
     if type(root) ~= "table" then
@@ -793,29 +806,23 @@ function M.model_to_payload(model, player_index)
             end
             local factory = recipe_data.factory or {}
             if factory.module_priority then
-                warnings[#warnings + 1] = {
-                    "factory-solver-helmod-import-warning-module-priority",
-                    recipe_typed_name.name,
-                }
+                add_aggregated_warning(
+                    "factory-solver-helmod-import-warning-module-priority")
             end
             if type(recipe_data.beacons) == "table" then
                 for _, b in ipairs(recipe_data.beacons) do
                     if (tonumber(b.per_factory) or 0) ~= 0
                         or (tonumber(b.per_factory_constant) or 0) ~= 0
                     then
-                        warnings[#warnings + 1] = {
-                            "factory-solver-helmod-import-warning-beacon-extras",
-                            recipe_typed_name.name,
-                        }
+                        add_aggregated_warning(
+                            "factory-solver-helmod-import-warning-beacon-extras")
                         break
                     end
                 end
             end
             if recipe_data.contraints then
-                warnings[#warnings + 1] = {
-                    "factory-solver-helmod-import-warning-unsupported-constraints",
-                    recipe_typed_name.name,
-                }
+                add_aggregated_warning(
+                    "factory-solver-helmod-import-warning-unsupported-constraints")
             end
 
             -- `accessor.normalize_production_line` asserts that fuel-using
@@ -852,6 +859,18 @@ function M.model_to_payload(model, player_index)
             end
         end
         ::continue_leaf::
+    end
+
+    -- Flush aggregated counters into the warning list. Sort keys so the
+    -- output is deterministic across loads (pairs() iteration order is
+    -- not stable, and warnings surface in the import dialog).
+    local sorted_keys = {}
+    for key in pairs(aggregated_warning_counts) do
+        sorted_keys[#sorted_keys + 1] = key
+    end
+    table.sort(sorted_keys)
+    for _, key in ipairs(sorted_keys) do
+        warnings[#warnings + 1] = { key, tostring(aggregated_warning_counts[key]) }
     end
 
     local name = (model.infos and model.infos.title)

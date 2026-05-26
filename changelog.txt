@@ -61,6 +61,11 @@ Date: ????
       hold the same recipe in multiple blocks and our flattening turned
       that into duplicate LP variables, tripping `add_objective`'s "same
       name" assert. Subsequent occurrences are dropped with a warning.
+    - Helmod codec: aggregate the per-recipe `beacon per_factory`, module-
+      priority, and Helmod-specific-constraints import warnings into one
+      counted line each. These fire on every recipe that uses the feature
+      and otherwise drown out the rare per-line warnings (duplicate
+      recipe, production multiplier ≠ 1, unmappable virtual recipe).
     - Route quality multiplier calculations through Factorio 2.0's per-prototype
       quality runtime APIs (LuaQualityPrototype::default_multiplier,
       LuaEntityPrototype::get_max_energy_usage / get_fluid_usage_per_tick /
