@@ -36,6 +36,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_filter_group_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local elem = event.element
     local player_data = save.get_player_data(event.player_index)
     local filter_type = elem.tags.filter_type --[[@as FilterType]]
@@ -251,6 +252,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_constraint_picker_button_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local tags = event.element.tags
     local solution = assert(save.get_selected_solution(event.player_index))
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_constraint_adder"))

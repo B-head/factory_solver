@@ -106,6 +106,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_constraint_button_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local tags = event.element.tags
     local solution = assert(save.get_selected_solution(event.player_index))
 

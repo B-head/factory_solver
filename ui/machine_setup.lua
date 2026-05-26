@@ -55,6 +55,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_machine_button_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
@@ -241,6 +242,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_substrate_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
@@ -662,6 +664,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_fuel_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 

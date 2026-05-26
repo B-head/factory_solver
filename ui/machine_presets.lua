@@ -107,6 +107,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_preset_button_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local elem = event.element
     local typed_name = elem.tags.typed_name --[[@as TypedName]]
     local category_name = elem.tags.category_name

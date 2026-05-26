@@ -474,6 +474,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_production_line_recipe_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local tags = event.element.tags
     if event.button == defines.mouse_button_type.left then
         common.open_gui(event.player_index, true, machine_setup, tags)
@@ -490,6 +491,7 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_production_line_inout_click(event)
+    if common.try_open_factoriopedia(event) then return end
     local tags = event.element.tags
     local typed_name = tags.typed_name --[[@as TypedName]]
     local is_product = tags.is_product --[[@as boolean]]

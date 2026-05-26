@@ -136,6 +136,58 @@ function M.create_decorated_sprite_button(data)
     }
 end
 
+---Resolve an ElemID to the prototype that LuaPlayer.open_factoriopedia_gui
+---accepts and open Factoriopedia. Quality is intentionally dropped: the
+---Factoriopedia surface is per-prototype, not per-quality variant. Returns
+---true on a successful open so callers can decide whether to suppress the
+---button's normal click action. Branches here cover the ElemID types that
+---factory_solver actually emits into elem_tooltip (item / fluid / entity /
+---recipe / tile + their *-with-quality variants). item-group elem_tooltips
+---exist on constraint_adder filter buttons but open_factoriopedia_gui does
+---not accept LuaGroup; those return false so the normal filter switch still
+---fires when the user holds Alt.
+---@param player LuaPlayer
+---@param elem_id ElemID
+---@return boolean opened
+function M.open_factoriopedia_from_elem_id(player, elem_id)
+    local t = elem_id.type
+    local name = elem_id.name
+    local proto
+    if t == "item" or t == "item-with-quality" then
+        proto = prototypes.item[name]
+    elseif t == "entity" or t == "entity-with-quality" then
+        proto = prototypes.entity[name]
+    elseif t == "fluid" then
+        proto = prototypes.fluid[name]
+    elseif t == "recipe" or t == "recipe-with-quality" then
+        proto = prototypes.recipe[name]
+    elseif t == "tile" then
+        proto = prototypes.tile[name]
+    end
+    if proto then
+        player.open_factoriopedia_gui(proto)
+        return true
+    end
+    return false
+end
+
+---If the click is Alt+left on a sprite-button whose elem_tooltip resolves to
+---a Factoriopedia-accepted prototype, open Factoriopedia and return true so
+---the caller can short-circuit its normal click flow. When the elem_tooltip
+---is missing or its type cannot be opened (e.g. item-group), returns false
+---and the caller's regular click action proceeds.
+---@param event EventData.on_gui_click
+---@return boolean handled
+function M.try_open_factoriopedia(event)
+    if not event.alt then return false end
+    if event.button ~= defines.mouse_button_type.left then return false end
+    local elem = event.element
+    if not (elem and elem.valid) then return false end
+    local elem_id = elem.elem_tooltip
+    if not elem_id then return false end
+    return M.open_factoriopedia_from_elem_id(game.players[event.player_index], elem_id)
+end
+
 ---@param elem LuaGuiElement
 ---@param initial_value string
 function M.make_quality_dropdown(elem, initial_value)
