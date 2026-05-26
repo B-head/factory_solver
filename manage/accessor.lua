@@ -933,6 +933,26 @@ function M.get_crafting_speed_cap(recipe)
     end
 end
 
+---Productivity bonus ceiling for the given recipe. Mirrors get_crafting_speed_cap:
+---LuaRecipePrototype carries a vanilla-default 3.0 with smaller values on a few
+---Space Age recipes; VirtualRecipe leaves the field unset and the cap collapses
+---to math.huge until a future virtual recipe needs one. Consumed by
+---get_total_effectivity to clamp the final productivity sum.
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@return number
+function M.get_maximum_productivity(recipe)
+    ---@diagnostic disable-next-line: param-type-mismatch
+    if recipe.object_name == "LuaRecipePrototype" then
+        -- maximum_productivity landed in Factorio 2.0.77; the LuaCATS bundle
+        -- shipped with the build hasn't picked it up yet, so the read is real
+        -- but flagged as undefined here.
+        ---@diagnostic disable-next-line: undefined-field
+        return recipe.maximum_productivity
+    else
+        return recipe.maximum_productivity or math.huge
+    end
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@param quality QualityID
@@ -1068,8 +1088,9 @@ end
 ---@param recipe_typed_name TypedName?
 ---@param machine LuaEntityPrototype?
 ---@param bonuses ResearchBonuses?
+---@param maximum_productivity number?
 ---@return ModuleEffects
-function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_name, machine, bonuses)
+function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_name, machine, bonuses, maximum_productivity)
     ---@type ModuleEffects
     local ret = {
         speed = 1,
@@ -1148,6 +1169,9 @@ function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_na
     ret.speed = math.max(ret.speed, 0.2)
     ret.consumption = math.max(ret.consumption, 0.2)
     ret.productivity = math.max(ret.productivity, 0)
+    if maximum_productivity then
+        ret.productivity = math.min(ret.productivity, maximum_productivity)
+    end
     ret.pollution = math.max(ret.pollution, 0.2)
     ret.quality = math.max(ret.quality, 0)
 
@@ -1174,8 +1198,9 @@ function M.normalize_production_line(line, bonuses)
     local machine_quality = line.machine_typed_name.quality
     local module_counts = M.get_total_modules(machine, line.module_typed_names,
         line.affected_by_beacons, bonuses)
+    local maximum_productivity = M.get_maximum_productivity(recipe)
     local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver,
-        line.recipe_typed_name, machine, bonuses)
+        line.recipe_typed_name, machine, bonuses, maximum_productivity)
     local crafting_energy = M.get_crafting_energy(recipe)
     local crafting_speed_cap = M.get_crafting_speed_cap(recipe)
     local crafting_speed = M.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
