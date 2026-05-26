@@ -188,25 +188,42 @@ function M.try_open_factoriopedia(event)
     return M.open_factoriopedia_from_elem_id(game.players[event.player_index], elem_id)
 end
 
----@param elem LuaGuiElement
+---Builds a horizontal row of `tool_button` sprite-buttons inside `parent`, one per
+---non-hidden quality, matching Factorio's engine-side quality selector. The button
+---whose quality matches `initial_value` starts toggled. Each button stores its
+---quality name in `tags.quality_name` and dispatches `on_click` on left-click.
+---@param parent LuaGuiElement
 ---@param initial_value string
-function M.make_quality_dropdown(elem, initial_value)
-    local dictionary = {}
+---@param on_click fun(event: EventData.on_gui_click)
+function M.make_quality_buttons(parent, initial_value, on_click)
     local qualities = fs_util.sort_prototypes(fs_util.to_list(prototypes.quality))
     for _, value in ipairs(qualities) do
         if not value.hidden then
-            local localised_string = { "", "[quality=", value.name, "] ", value.localised_name }
-            elem.add_item(localised_string)
-            flib_table.insert(dictionary, value.name)
-            if initial_value == value.name then
-                elem.selected_index = #dictionary
-            end
+            fs_util.add_gui(parent, {
+                type = "sprite-button",
+                name = "factory_solver_quality_button_" .. value.name,
+                style = "tool_button",
+                sprite = "quality/" .. value.name,
+                tooltip = { "", "[quality=", value.name, "] ", value.localised_name },
+                toggled = (value.name == initial_value),
+                tags = { quality_name = value.name },
+                handler = {
+                    [defines.events.on_gui_click] = on_click,
+                },
+            })
         end
     end
+end
 
-    local tags = elem.tags
-    tags.dictionary = dictionary
-    elem.tags = tags
+---Untoggles sibling quality buttons and toggles the clicked one. Returns the
+---selected quality name pulled from `tags.quality_name`.
+---@param clicked LuaGuiElement
+---@return string selected_quality_name
+function M.on_quality_button_clicked(clicked)
+    for _, sibling in pairs(clicked.parent.children) do
+        sibling.toggled = (sibling == clicked)
+    end
+    return clicked.tags.quality_name --[[@as string]]
 end
 
 ---comment

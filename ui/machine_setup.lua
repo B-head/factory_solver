@@ -79,21 +79,20 @@ function handlers.on_machine_change_toggle(event)
 end
 
 ---@param event EventDataTrait
-function handlers.on_make_machine_quality_dropdown(event)
+function handlers.on_make_machine_quality_buttons(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
     local initial_value = dialog.tags.machine_typed_name.quality --[[@as string]]
 
-    common.make_quality_dropdown(event.element, initial_value)
+    common.make_quality_buttons(event.element, initial_value, handlers.on_machine_quality_clicked)
 end
 
----@param event EventData.on_gui_selection_state_changed
-function handlers.on_machine_quality_state_changed(event)
-    local elem = event.element
-    local dictionary = elem.tags.dictionary
+---@param event EventData.on_gui_click
+function handlers.on_machine_quality_clicked(event)
+    local quality_name = common.on_quality_button_clicked(event.element)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
     local dialog_tags = dialog.tags
-    dialog_tags.machine_typed_name.quality = dictionary[elem.selected_index]
+    dialog_tags.machine_typed_name.quality = quality_name
     dialog.tags = dialog_tags
 end
 
@@ -812,14 +811,11 @@ return {
                 on_added = handlers.on_hide_for_plant,
             },
             {
-                type = "label",
-                caption = { "factory-solver-quality" },
-            },
-            {
-                type = "drop-down",
+                type = "flow",
+                direction = "horizontal",
+                style_mods = { horizontal_spacing = 0 },
                 handler = {
-                    on_added = handlers.on_make_machine_quality_dropdown,
-                    [defines.events.on_gui_selection_state_changed] = handlers.on_machine_quality_state_changed,
+                    on_added = handlers.on_make_machine_quality_buttons,
                 },
             },
         },
