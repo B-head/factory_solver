@@ -396,6 +396,30 @@ function M.is_quality_module(name)
     return effects ~= nil and (effects.quality or 0) > 0
 end
 
+---True iff `module` would actually do something under the given allow masks.
+---Returns false when the module's category is excluded from
+---`allowed_module_categories` (when it's non-nil), OR when every effect kind
+---the module carries is masked off by `allowed_effects`. Used by the module
+---picker UI to grey out modules that won't contribute on the current
+---(recipe, machine) or (recipe, beacon) pair.
+---@param module LuaItemPrototype
+---@param allowed_effects table<string, boolean>
+---@param allowed_categories table<string, true>?
+---@return boolean
+function M.is_module_effective(module, allowed_effects, allowed_categories)
+    if allowed_categories and not allowed_categories[module.category] then
+        return false
+    end
+    local effects = module.module_effects
+    if not effects then return false end
+    for kind, value in pairs(effects) do
+        if value ~= 0 and allowed_effects[kind] then
+            return true
+        end
+    end
+    return false
+end
+
 ---comment
 ---@param name string?
 ---@return LuaEntityPrototype?

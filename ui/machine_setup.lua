@@ -5,6 +5,8 @@ local preset = require "manage/preset"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
+local module_picker = require "ui/module_picker"
+local beacon_picker = require "ui/beacon_picker"
 
 local handlers = {}
 
@@ -261,6 +263,49 @@ function handlers.on_substrate_change_toggle(event)
     elem.toggled = selected == elem.tags.substrate_tile_name
 end
 
+---Builds a slot button for a module slot. Click opens the module picker.
+---When the stored module no longer exists in the loaded mod set, falls back
+---to the engine's "item-unknown" sprite while preserving the saved quality
+---so subsequent saves don't lose the original module name (the tag is read
+---directly from dialog.tags in the picker opener, not from the button).
+---@param parent LuaGuiElement
+---@param slot_index integer
+---@param beacon_index integer?
+---@param typed_name TypedName?
+local function add_module_slot_button(parent, slot_index, beacon_index, typed_name)
+    local display_typed_name = typed_name
+    if typed_name and not acc.get_module(typed_name.name) then
+        display_typed_name = tn.create_typed_name("item", "item-unknown", typed_name.quality)
+    end
+
+    local def
+    if display_typed_name then
+        def = common.create_decorated_sprite_button {
+            typed_name = display_typed_name,
+            tags = {
+                slot_index = tostring(slot_index),
+                beacon_index = beacon_index,
+            },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_open_module_picker,
+            },
+        }
+    else
+        def = {
+            type = "sprite-button",
+            style = "flib_slot_button_default",
+            tags = {
+                slot_index = tostring(slot_index),
+                beacon_index = beacon_index,
+            },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_open_module_picker,
+            },
+        }
+    end
+    fs_util.add_gui(parent, def)
+end
+
 ---@param event EventDataTrait
 function handlers.on_make_machine_modules(event)
     local elem = event.element
@@ -272,58 +317,37 @@ function handlers.on_make_machine_modules(event)
 
     elem.clear()
     for index = 1, machine.module_inventory_size do
-        local def = {
-            type = "choose-elem-button",
-            elem_type = "item-with-quality",
-            elem_filters = {
-                { filter = "type", type = "module" },
-            },
-            tags = {
-                slot_index = tostring(index),
-                beacon_index = nil,
-            },
-            handler = {
-                [defines.events.on_gui_elem_changed] = handlers.on_module_changed,
-            },
-        }
-        local _, added = fs_util.add_gui(elem, def)
         local typed_name = module_typed_names[tostring(index)]
-        if typed_name then
-            if acc.get_module(typed_name.name) then
-                added.elem_value = { name = typed_name.name, quality = typed_name.quality }
-            else
-                added.elem_value = { name = "item-unknown", quality = typed_name.quality }
-            end
-        end
+        add_module_slot_button(elem, index, nil, typed_name)
     end
 end
 
----@param event EventData.on_gui_elem_changed
-function handlers.on_module_changed(event)
+---@param event EventData.on_gui_click
+function handlers.on_open_module_picker(event)
+    if common.try_open_factoriopedia(event) then return end
     local elem = event.element
-    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
-    local dialog_tags = dialog.tags
-
+    local dialog = assert(fs_util.find_upper(elem, "factory_solver_machine_setups"))
     local slot_index = elem.tags.slot_index --[[@as string]]
     local beacon_index = elem.tags.beacon_index --[[@as integer?]]
-    local elem_value = elem.elem_value --[[@as { name: string, quality: string }]]
-    local new_typed_name = nil
-    if elem_value then
-        new_typed_name = tn.create_typed_name("item", elem_value.name, elem_value.quality)
+
+    if event.button == defines.mouse_button_type.right then
+        common.write_module_to_machine_setups(dialog, slot_index, beacon_index, nil)
+        return
     end
 
+    local current
     if beacon_index then
-        local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
-        local module_typed_names = affected_by_beacon.module_typed_names
-
-        module_typed_names[slot_index] = new_typed_name
+        local affected_by_beacon = dialog.tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
+        current = affected_by_beacon.module_typed_names[slot_index]
     else
-        local module_typed_names = dialog_tags.module_typed_names --[[@as table<string, TypedName>]]
-        module_typed_names[slot_index] = new_typed_name
+        local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
+        current = module_typed_names[slot_index]
     end
-
-    dialog.tags = dialog_tags
-    fs_util.dispatch_to_subtree(dialog, "on_module_changed")
+    common.open_gui(event.player_index, true, module_picker, {
+        slot_index = slot_index,
+        beacon_index = beacon_index,
+        current_quality = current and current.quality or "normal",
+    })
 end
 
 ---Show a warning while a quality module is set but the force has unlocked no
@@ -382,27 +406,35 @@ function handlers.on_make_beacons_table(event)
         local beacon = beacon_typed_name and acc.get_beacon(beacon_typed_name.name)
 
         do
-            local def = {
-                type = "choose-elem-button",
-                elem_type = "entity-with-quality",
-                elem_filters = {
-                    { filter = "type", type = "beacon" },
-                },
-                tags = {
-                    beacon_index = beacon_index,
-                },
-                handler = {
-                    [defines.events.on_gui_elem_changed] = handlers.on_beacon_changed,
-                },
-            }
-            local _, added = fs_util.add_gui(elem, def)
-            if beacon_typed_name then
-                if beacon then
-                    added.elem_value = { name = beacon_typed_name.name, quality = beacon_typed_name.quality }
-                else
-                    added.elem_value = { name = "entity-unknown", quality = beacon_typed_name.quality }
-                end
+            local display_typed_name = beacon_typed_name
+            if beacon_typed_name and not beacon then
+                display_typed_name = tn.create_typed_name("machine", "entity-unknown",
+                    beacon_typed_name.quality)
             end
+            local def
+            if display_typed_name then
+                def = common.create_decorated_sprite_button {
+                    typed_name = display_typed_name,
+                    tags = {
+                        beacon_index = beacon_index,
+                    },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_open_beacon_picker,
+                    },
+                }
+            else
+                def = {
+                    type = "sprite-button",
+                    style = "flib_slot_button_default",
+                    tags = {
+                        beacon_index = beacon_index,
+                    },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_open_beacon_picker,
+                    },
+                }
+            end
+            fs_util.add_gui(elem, def)
         end
 
         do
@@ -424,41 +456,21 @@ function handlers.on_make_beacons_table(event)
         end
 
         do
+            -- Module slots live in their own flow with a dedicated rebuild
+            -- handler so module picks update without rebuilding the whole
+            -- beacons table (which would reset in-progress quantity edits).
             local def = {
                 type = "flow",
                 direction = "horizontal",
+                tags = {
+                    beacon_index = beacon_index,
+                },
+                handler = {
+                    on_added = handlers.on_make_beacon_modules,
+                    on_module_changed = handlers.on_make_beacon_modules,
+                },
             }
-            local _, flow = fs_util.add_gui(elem, def)
-
-            if beacon then
-                local module_typed_names = affected_by_beacon.module_typed_names
-
-                for slot_index = 1, beacon.module_inventory_size do
-                    local def = {
-                        type = "choose-elem-button",
-                        elem_type = "item-with-quality",
-                        elem_filters = {
-                            { filter = "type", type = "module" },
-                        },
-                        tags = {
-                            slot_index = tostring(slot_index),
-                            beacon_index = beacon_index,
-                        },
-                        handler = {
-                            [defines.events.on_gui_elem_changed] = handlers.on_module_changed,
-                        },
-                    }
-                    local _, added = fs_util.add_gui(flow, def)
-                    local typed_name = module_typed_names[tostring(slot_index)]
-                    if typed_name then
-                        if acc.get_module(typed_name.name) then
-                            added.elem_value = { name = typed_name.name, quality = typed_name.quality }
-                        else
-                            added.elem_value = { name = "item-unknown", quality = typed_name.quality }
-                        end
-                    end
-                end
-            end
+            fs_util.add_gui(elem, def)
         end
 
         do
@@ -477,6 +489,26 @@ function handlers.on_make_beacons_table(event)
             }
             fs_util.add_gui(elem, def)
         end
+    end
+end
+
+---@param event EventDataTrait
+function handlers.on_make_beacon_modules(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(elem, "factory_solver_machine_setups"))
+
+    local beacon_index = elem.tags.beacon_index --[[@as integer]]
+    local affected_by_beacon = dialog.tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
+    local beacon_typed_name = affected_by_beacon.beacon_typed_name
+    local beacon = beacon_typed_name and acc.get_beacon(beacon_typed_name.name)
+
+    elem.clear()
+    if not beacon then return end
+
+    local module_typed_names = affected_by_beacon.module_typed_names
+    for slot_index = 1, beacon.module_inventory_size do
+        add_module_slot_button(elem, slot_index, beacon_index,
+            module_typed_names[tostring(slot_index)])
     end
 end
 
@@ -499,23 +531,24 @@ function handlers.on_add_beacon_click(event)
     fs_util.dispatch_to_subtree(dialog, "on_beacon_changed")
 end
 
----@param event EventData.on_gui_elem_changed
-function handlers.on_beacon_changed(event)
+---@param event EventData.on_gui_click
+function handlers.on_open_beacon_picker(event)
+    if common.try_open_factoriopedia(event) then return end
     local elem = event.element
-    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
-    local dialog_tags = dialog.tags
-
-    local elem_value = elem.elem_value --[[@as { name: string, quality: string }]]
+    local dialog = assert(fs_util.find_upper(elem, "factory_solver_machine_setups"))
     local beacon_index = elem.tags.beacon_index --[[@as integer]]
-    local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
-    if elem_value then
-        affected_by_beacon.beacon_typed_name = tn.create_typed_name("machine", elem_value.name, elem_value.quality)
-    else
-        affected_by_beacon.beacon_typed_name = nil
+
+    if event.button == defines.mouse_button_type.right then
+        common.write_beacon_to_machine_setups(dialog, beacon_index, nil)
+        return
     end
 
-    dialog.tags = dialog_tags
-    fs_util.dispatch_to_subtree(dialog, "on_beacon_changed")
+    local affected_by_beacon = dialog.tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
+    local current = affected_by_beacon.beacon_typed_name --[[@as TypedName?]]
+    common.open_gui(event.player_index, true, beacon_picker, {
+        beacon_index = beacon_index,
+        current_quality = current and current.quality or "normal",
+    })
 end
 
 ---@param event EventData.on_gui_text_changed
@@ -847,6 +880,7 @@ return {
                     direction = "horizontal",
                     handler = {
                         on_machine_setup_changed = handlers.on_make_machine_modules,
+                        on_module_changed = handlers.on_make_machine_modules,
                     },
                 },
             },

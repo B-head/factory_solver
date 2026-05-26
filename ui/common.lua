@@ -229,6 +229,46 @@ function M.on_quality_button_clicked(clicked)
     return clicked.tags.quality_name --[[@as string]]
 end
 
+---Writes a module selection into the `factory_solver_machine_setups` dialog's
+---tags and dispatches `on_module_changed` so the rest of the dialog (total
+---effectivity table, quality-module warning, slot re-render) updates. Used by
+---the module picker on commit, and shared with the machine_setups handler
+---that mutates tags from the engine `on_gui_elem_changed` event so both
+---paths stay in lockstep.
+---@param dialog LuaGuiElement
+---@param slot_index string
+---@param beacon_index integer?
+---@param new_typed_name TypedName?
+function M.write_module_to_machine_setups(dialog, slot_index, beacon_index, new_typed_name)
+    local dialog_tags = dialog.tags
+    if beacon_index then
+        local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
+        affected_by_beacon.module_typed_names[slot_index] = new_typed_name
+    else
+        local module_typed_names = dialog_tags.module_typed_names --[[@as table<string, TypedName>]]
+        module_typed_names[slot_index] = new_typed_name
+    end
+    dialog.tags = dialog_tags
+    fs_util.dispatch_to_subtree(dialog, "on_module_changed")
+end
+
+---Writes a beacon entity selection into the `factory_solver_machine_setups`
+---dialog's tags and dispatches `on_beacon_changed`. The existing
+---`on_make_beacons_table` handler rebuilds the entire beacon row in response,
+---so module slots whose index exceeds the new beacon's inventory size simply
+---stop rendering — their tag entries are intentionally preserved so swapping
+---back to a larger beacon restores them.
+---@param dialog LuaGuiElement
+---@param beacon_index integer
+---@param new_typed_name TypedName?
+function M.write_beacon_to_machine_setups(dialog, beacon_index, new_typed_name)
+    local dialog_tags = dialog.tags
+    local affected_by_beacon = dialog_tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
+    affected_by_beacon.beacon_typed_name = new_typed_name
+    dialog.tags = dialog_tags
+    fs_util.dispatch_to_subtree(dialog, "on_beacon_changed")
+end
+
 ---comment
 ---@param player_index integer
 ---@param is_dialog boolean
