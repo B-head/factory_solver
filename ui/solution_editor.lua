@@ -75,7 +75,7 @@ function handlers.make_production_line_table(event)
                 direction = "vertical",
                 {
                     type = "sprite-button",
-                    style = "factory_solver_silent_mini_button",
+                    style = "mini_button",
                     sprite = "utility/speed_up",
                     tags = {
                         line_index = line_index,
@@ -87,7 +87,7 @@ function handlers.make_production_line_table(event)
                 },
                 {
                     type = "sprite-button",
-                    style = "factory_solver_silent_mini_button",
+                    style = "mini_button",
                     sprite = "utility/speed_down",
                     tags = {
                         line_index = line_index,
@@ -116,7 +116,6 @@ function handlers.make_production_line_table(event)
                 typed_name = typed_name,
                 is_hidden = is_hidden,
                 is_unresearched = is_unresearched,
-                silent_click = true,
                 tags = recipe_tags,
                 handler = {
                     [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
@@ -169,8 +168,7 @@ function handlers.make_production_line_table(event)
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
-                    silent_click = true,
-                    tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
+                        tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                     },
@@ -193,8 +191,7 @@ function handlers.make_production_line_table(event)
                         flib_table.insert(buttons, common.create_decorated_sprite_button {
                             typed_name = module_typed_name,
                             number = counts.effective,
-                            silent_click = true,
-                            tags = module_tags,
+                                        tags = module_tags,
                             handler = {
                                 [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                             },
@@ -205,8 +202,7 @@ function handlers.make_production_line_table(event)
                             typed_name = module_typed_name,
                             number = counts.ineffective,
                             top_right_sprite = "utility/warning_icon",
-                            silent_click = true,
-                            tags = module_tags,
+                                        tags = module_tags,
                             handler = {
                                 [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                             },
@@ -226,7 +222,7 @@ function handlers.make_production_line_table(event)
                 -- opens, where Substrate section lets the user switch.
                 local def = {
                     type = "sprite-button",
-                    style = "factory_solver_silent_slot_button_default",
+                    style = "flib_slot_button_default",
                     sprite = "tile/" .. line.substrate_tile_name,
                     elem_tooltip = { type = "tile", name = line.substrate_tile_name },
                     tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
@@ -246,7 +242,7 @@ function handlers.make_production_line_table(event)
                 -- substrate button above for consistency.
                 local def = {
                     type = "sprite-button",
-                    style = "factory_solver_silent_slot_button_default",
+                    style = "flib_slot_button_default",
                     sprite = "utility/clock",
                     tags = recipe_tags,
                     handler = {
@@ -284,8 +280,7 @@ function handlers.make_production_line_table(event)
                         typed_name = typed_name,
                         is_hidden = is_hidden,
                         is_unresearched = is_unresearched,
-                        silent_click = true,
-                        tags = {
+                                tags = {
                             line_index = line_index,
                             typed_name = typed_name,
                             is_product = true,
@@ -325,8 +320,7 @@ function handlers.make_production_line_table(event)
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
-                    silent_click = true,
-                    tags = {
+                        tags = {
                         line_index = line_index,
                         typed_name = typed_name,
                         is_product = false,
@@ -380,8 +374,7 @@ function handlers.make_production_line_table(event)
                     typed_name = ftn,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
-                    silent_click = true,
-                    tags = {
+                        tags = {
                         line_index = line_index,
                         typed_name = ftn,
                         is_product = false,
@@ -427,7 +420,7 @@ function handlers.make_production_line_table(event)
         do
             local def = {
                 type = "sprite-button",
-                style = "factory_solver_silent_mini_tool_button_red",
+                style = "mini_tool_button_red",
                 sprite = "utility/close",
                 hovered_sprite = "utility/close_black",
                 clicked_sprite = "utility/close_black",
@@ -528,26 +521,20 @@ function handlers.on_production_line_recipe_click(event)
     -- Alt+Right has no defined meaning here (Alt+Left is Factoriopedia),
     -- but the normal right-click branch below would otherwise add a
     -- constraint — surprising when the user clearly held a modifier to
-    -- signal a different intent. Swallow the click with cannot_build audio
-    -- so the action is acknowledged but rejected.
-    if event.alt and event.button == defines.mouse_button_type.right then
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
-        return
-    end
+    -- signal a different intent. The engine's press-down click sound has
+    -- already fired by the time this handler runs; layering cannot_build
+    -- on top distinguishes the rejection from a regular click.
+    if event.alt and event.button == defines.mouse_button_type.right then return end
 
-    -- Factoriopedia opens its own dialog with its own audio, so we leave
-    -- that path silent here. All non-shift / non-alt branches play a single
-    -- utility/gui_click — the row's sprite-button styles are the silent
-    -- variants, so the click sound has to be emitted from the handler.
-    if common.try_open_factoriopedia(event) then
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
-        return
-    end
+    -- Factoriopedia and the normal left/right branches rely on the engine's
+    -- press-down `left_click_sound` for click feedback — no handler-side
+    -- play_sound is needed here. Only the shift/alt rejection paths layer
+    -- their own sound on top of the engine click.
+    if common.try_open_factoriopedia(event) then return end
 
     local tags = event.element.tags
     if event.button == defines.mouse_button_type.left then
         common.open_gui(event.player_index, true, machine_setup, tags)
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
     elseif event.button == defines.mouse_button_type.right then
         local solution = assert(save.get_selected_solution(event.player_index))
 
@@ -556,7 +543,6 @@ function handlers.on_production_line_recipe_click(event)
 
         local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
         fs_util.dispatch_to_subtree(root, "on_constraint_changed", data)
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
     end
 end
 
@@ -657,16 +643,10 @@ function handlers.on_production_line_inout_click(event)
     -- See on_production_line_recipe_click: Alt+Right has no defined action
     -- here either, so reject it audibly instead of falling through to the
     -- right-click branch and adding a constraint.
-    if event.alt and event.button == defines.mouse_button_type.right then
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
-        return
-    end
+    if event.alt and event.button == defines.mouse_button_type.right then return end
 
-    if common.try_open_factoriopedia(event) then
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
-        return
-    end
-    
+    if common.try_open_factoriopedia(event) then return end
+
     local tags = event.element.tags
     local typed_name = tags.typed_name --[[@as TypedName]]
     local is_product = tags.is_product --[[@as boolean]]
@@ -684,7 +664,6 @@ function handlers.on_production_line_inout_click(event)
             line_index = line_index,
         }
         common.open_gui(event.player_index, true, production_line_adder, data)
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
     elseif event.button == defines.mouse_button_type.right then
         local solution = assert(save.get_selected_solution(event.player_index))
 
@@ -692,7 +671,6 @@ function handlers.on_production_line_inout_click(event)
 
         local root = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
         fs_util.dispatch_to_subtree(root, "on_constraint_changed", data)
-        game.players[event.player_index].play_sound { path = "utility/inventory_click" }
     end
 end
 
@@ -729,7 +707,6 @@ function handlers.on_move_production_line_click(event)
 
     local root = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
     fs_util.dispatch_to_subtree(root, "on_production_line_changed")
-    game.players[event.player_index].play_sound { path = "factory_solver_mini_button_click" }
 end
 
 ---@param event EventData.on_gui_click
@@ -741,7 +718,6 @@ function handlers.on_remove_production_line(event)
 
     local root = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
     fs_util.dispatch_to_subtree(root, "on_production_line_changed")
-    game.players[event.player_index].play_sound { path = "factory_solver_mini_tool_button_click" }
 end
 
 fs_util.add_handlers(handlers)

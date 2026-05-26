@@ -194,30 +194,6 @@ data:extend({
     },
 })
 
--- Sound prototypes wrapping the engine's mini-button click samples. The
--- production-line row silences every button at the style level, then the
--- handler re-emits the per-branch click sound via play_sound — for slot
--- buttons that's `utility/inventory_click` (already a utility sound), but
--- `mini_button` and `mini_tool_button_red` source their clicks from raw
--- core files with no `utility/<name>` registration. Wrapping each in a
--- named sound prototype gives play_sound a bare name to reference while
--- preserving the original audio character of move-up/down and remove
--- buttons. Volumes match the engine-side style definitions.
-data:extend({
-    {
-        type = "sound",
-        name = "factory_solver_mini_button_click",
-        filename = "__core__/sound/gui-button-mini.ogg",
-        volume = 1,
-    },
-    {
-        type = "sound",
-        name = "factory_solver_mini_tool_button_click",
-        filename = "__core__/sound/gui-tool-button.ogg",
-        volume = 1,
-    },
-})
-
 local styles = data.raw["gui-style"].default
 
 -- common --
@@ -310,24 +286,6 @@ styles.factory_solver_slot_temperature_flow = {
     right_padding = 0,
 }
 
--- Silent style variants used by the production-line row. The whole row is
--- silenced so the engine's GUI click sound doesn't double-up with the
--- handler-side play_sound calls (entity_settings_copied / pasted /
--- cannot_build / gui_click); the handler then decides exactly which sound
--- fires per branch, including non-shift left/right clicks. `left_click_sound
--- = {}` is the canonical way to suppress the inherited click sound at the
--- data stage. The slot-button color set mirrors common.get_style's four
--- flib_slot_button_* variants (default / blue=recipe / grey=hidden /
--- orange=unresearched); mini variants cover the row's move-up/down and
--- remove buttons.
-for _, color in ipairs({ "default", "blue", "grey", "orange" }) do
-    styles["factory_solver_silent_slot_button_" .. color] = {
-        type = "button_style",
-        parent = "flib_slot_button_" .. color,
-        left_click_sound = {},
-    }
-end
-
 -- Generic top-right slot overlay: a 32x32 sprite child whose padding
 -- squeezes the drawable area into the top-right quadrant of a 40x40 slot
 -- button. Modeled after the now-retired factory_solver_slot_image_with_quality
@@ -346,18 +304,6 @@ styles.factory_solver_slot_image_top_right = {
     left_padding = 19,
     right_padding = 0,
     stretch_image_to_widget_size = true,
-}
-
-styles.factory_solver_silent_mini_button = {
-    type = "button_style",
-    parent = "mini_button",
-    left_click_sound = {},
-}
-
-styles.factory_solver_silent_mini_tool_button_red = {
-    type = "button_style",
-    parent = "mini_tool_button_red",
-    left_click_sound = {},
 }
 
 -- main_window --
