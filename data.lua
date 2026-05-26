@@ -328,6 +328,26 @@ for _, color in ipairs({ "default", "blue", "grey", "orange" }) do
     }
 end
 
+-- Generic top-right slot overlay: a 32x32 sprite child whose padding
+-- squeezes the drawable area into the top-right quadrant of a 40x40 slot
+-- button. Modeled after the now-retired factory_solver_slot_image_with_quality
+-- style (commit 04c98af). The slot's `number` badge sits at bottom-right and
+-- the engine's native `quality` indicator sits at bottom-left, so top-right
+-- is the remaining corner free of collision. The first caller is the module
+-- picker (warning icon for effect-masked modules); the parameter is kept
+-- as a freeform sprite path on common.create_decorated_sprite_button so
+-- future callers can render different indicators in the same slot region.
+styles.factory_solver_slot_image_top_right = {
+    type = "image_style",
+    width = 32,
+    height = 32,
+    top_padding = 1,
+    bottom_padding = 18,
+    left_padding = 19,
+    right_padding = 0,
+    stretch_image_to_widget_size = true,
+}
+
 styles.factory_solver_silent_mini_button = {
     type = "button_style",
     parent = "mini_button",

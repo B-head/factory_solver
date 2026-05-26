@@ -85,6 +85,7 @@ function M.create_decorated_sprite_button(data)
     local typed_name = assert(data.typed_name) --[[@as TypedName]]
     local is_hidden = data.is_hidden or false
     local is_unresearched = data.is_unresearched or false
+    local top_right_sprite = data.top_right_sprite --[[@as string?]]
     local children = {}
 
     if typed_name.temperature ~= nil then
@@ -122,6 +123,20 @@ function M.create_decorated_sprite_button(data)
                     ignored_by_interaction = true,
                 },
             },
+        })
+    end
+
+    -- Generic top-right overlay slot. Currently used by the module picker
+    -- to flag effect-masked modules (warning icon); future callers can reuse
+    -- the same corner for other per-slot indicators by passing their own
+    -- sprite path. Tooltip extension is left to the caller because the
+    -- meaning of the indicator is caller-specific.
+    if top_right_sprite then
+        flib_table.insert(children, {
+            type = "sprite",
+            style = "factory_solver_slot_image_top_right",
+            sprite = top_right_sprite,
+            ignored_by_interaction = true,
         })
     end
 

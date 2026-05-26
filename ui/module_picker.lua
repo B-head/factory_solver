@@ -1,4 +1,3 @@
-local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local save = require "manage/save"
@@ -83,6 +82,7 @@ function handlers.on_make_module_grid(event)
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
+                    top_right_sprite = (not is_effective) and "utility/warning_icon" or nil,
                     tags = {
                         module_name = module.name,
                     },
@@ -91,13 +91,7 @@ function handlers.on_make_module_grid(event)
                     },
                 }
                 if not is_effective then
-                    -- Override the colour-coded style with the disabled grey
-                    -- and tack a one-liner onto the tooltip so the user knows
-                    -- why this module is dim. Click is still permitted —
-                    -- silent rejection is against the project's UX rule.
-                    def.style = "flib_slot_button_grey"
-                    local base_tooltip = def.tooltip
-                    def.tooltip = { "", base_tooltip or "", "\n",
+                    def.tooltip = { "", def.tooltip or "", "\n",
                         { "factory-solver-module-no-effect-here" } }
                 end
                 fs_util.add_gui(elem, def)

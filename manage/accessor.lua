@@ -396,12 +396,27 @@ function M.is_quality_module(name)
     return effects ~= nil and (effects.quality or 0) > 0
 end
 
----True iff `module` would actually do something under the given allow masks.
----Returns false when the module's category is excluded from
----`allowed_module_categories` (when it's non-nil), OR when every effect kind
----the module carries is masked off by `allowed_effects`. Used by the module
----picker UI to grey out modules that won't contribute on the current
----(recipe, machine) or (recipe, beacon) pair.
+---Sign of the "beneficial" direction for each module effect kind. A module
+---only counts as useful when at least one of its effects is on the
+---beneficial side of zero AND the corresponding effect is allowed. Without
+---this sign table, a productivity module on a productivity-disallowed
+---recipe would still register as "effective" via its incidental speed
+---penalty (which is the opposite of useful).
+local beneficial_effect_sign = {
+    speed = 1,
+    productivity = 1,
+    quality = 1,
+    consumption = -1,
+    pollution = -1,
+}
+
+---True iff `module` would actually do something useful under the given
+---allow masks. Returns false when the module's category is excluded from
+---`allowed_module_categories` (when it's non-nil), OR when every
+---*beneficial* effect direction the module carries is masked off by
+---`allowed_effects`. Used by the module picker UI to grey out modules that
+---won't contribute on the current (recipe, machine) or (recipe, beacon)
+---pair.
 ---@param module LuaItemPrototype
 ---@param allowed_effects table<string, boolean>
 ---@param allowed_categories table<string, true>?
@@ -413,7 +428,8 @@ function M.is_module_effective(module, allowed_effects, allowed_categories)
     local effects = module.module_effects
     if not effects then return false end
     for kind, value in pairs(effects) do
-        if value ~= 0 and allowed_effects[kind] then
+        local sign = beneficial_effect_sign[kind]
+        if sign and value * sign > 0 and allowed_effects[kind] then
             return true
         end
     end
