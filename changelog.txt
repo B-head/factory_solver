@@ -2,6 +2,59 @@
 Version: 0.5.0
 Date: ????
   Changes:
+    - Helmod codec: map virtual recipes across the (energy / resource / boiler /
+      fluid / rocket / agricultural / spoiling) lua_type discriminator instead
+      of dropping every non-recipe production line. Best-effort: research,
+      burnt, customized, and Helmod's pseudo-energy items still warn and drop
+      because they have no factory_solver counterpart.
+    - Helmod codec: omit the `factory` subtable on export of `spoiling`
+      virtual recipes (and any future `is_support_factory = false` Helmod
+      type), matching Helmod's own shape. Helmod's ModelCompute reads
+      `recipe.factory.energy_total` unconditionally when the field exists
+      and crashes if it's a placeholder; skipping the factory entirely
+      lets Helmod's solver skip the per-line energy math the same way it
+      does for its own spoilage recipes. On import we synthesize the
+      `entity-unknown` sentinel machine factory_solver expects.
+    - Helmod codec: surface a warning when an export produces zero recipes
+      despite the source solution having production lines, and a per-line
+      warning when a line is dropped because its `machine_typed_name` is
+      missing. Validates the serialised model round-trips through
+      `helpers.encode_string` / `loadstring` before returning so a malformed
+      payload is caught here instead of as an opaque Helmod-side crash.
+    - Helmod codec: substitute the agricultural-tower for the plant entity
+      in `<grow>` virtual recipe exports. factory_solver uses the plant
+      itself as the line's machine (it occupies a tower slot), but Helmod's
+      EntityPrototype:getCraftingSpeed dereferences energy_source_prototype
+      and crashes when fed a plant entity. The plant identity is preserved
+      in the FS recipe name (`<grow>{plant}:{seed}`) and restored on import.
+    - Helmod codec: drop thruster virtual recipes (`<run>{thruster_entity}`)
+      with a warning instead of exporting them as Helmod `lua_type = "energy"`.
+      Helmod's getEnergyMachines filter excludes the thruster prototype type,
+      so the entry would otherwise deserialize into a 0-W / 0-factory ghost
+      recipe with no meaningful semantics on Helmod's side.
+    - Helmod codec: drop import constraints / objectives whose Helmod-side
+      entry has `type="energy"` (the electricity / steam-heat pseudo-item).
+      factory_solver's LP has no electricity channel, so these were
+      previously silently coerced into "item" constraints and surfaced in
+      the UI as unknown-item "?" placeholders.
+    - Helmod codec: skip import of `factory.fuel = "steam-heat"` or
+      `"energy"` so the preset lookup fills in factory_solver's `<heat>`
+      virtual_material for heat-exchanger and similar heat-energy machines
+      instead of producing an unresolved "?" fuel slot.
+    - Helmod codec: never emit factory_solver virtual_material names (e.g.
+      `<heat>`) into the exported `factory.fuel` field. Helmod models heat
+      energy as a recipe ingredient (`steam-heat` pseudo-item), not as a
+      `factory.fuel` value, so writing the virtual name caused Helmod to
+      round-trip it verbatim and corrupted later imports with an unknown-
+      item fuel slot. Defensive `<`-prefix detection on the import side
+      keeps older exports recoverable.
+    - Helmod codec: fall back to `accessor.try_get_fixed_fuel` when import
+      can't resolve `factory.fuel` for a fuel-using machine. Helmod itself
+      doesn't store factory.fuel for heat-energy machines (heat enters via
+      the recipe's steam-heat ingredient), and pseudo-item fuels are
+      filtered above; without this fallback the imported line entered
+      storage with a nil fuel_typed_name and tripped
+      `normalize_production_line`'s assert.
     - Route quality multiplier calculations through Factorio 2.0's per-prototype
       quality runtime APIs (LuaQualityPrototype::default_multiplier,
       LuaEntityPrototype::get_max_energy_usage / get_fluid_usage_per_tick /

@@ -37,6 +37,289 @@ local function infer_item_or_fluid(name)
     return "item"
 end
 
+-- Virtual recipe interop. Helmod and factory_solver agree on the *concept* of
+-- non-Recipe production sources (boilers, mining, offshore-pumping,
+-- agriculture, spoilage, energy generation, rocket launches) but encode them
+-- in incompatible namespaces:
+--   * Helmod uses (lua_type, name) pairs, where lua_type is one of
+--     `energy` / `resource` / `boiler` / `fluid` / `rocket` / `agricultural`
+--     / `spoiling` (plus `recipe`, which is the vanilla real recipe path).
+--     Names are bare (e.g. `solar-panel`, `iron-ore`) except for boilers,
+--     which synthesize `"<input>-><output>#<target_temperature>"`, and rocket
+--     recipes, which lose silo/part identity and keep only the cargo item name.
+--   * factory_solver uses a single flat name with a kind prefix on the
+--     virtual_recipe TypedName: `<run>...` / `<mine>...` / `<grow>...:<seed>`
+--     / `<pump>...` / `<spoil>...` / `<research>...`. Lookup goes through
+--     `storage.virtuals.recipe[name]` (see manage/typed_name.lua).
+-- The two helpers below bridge the namespaces in both directions. Best-effort
+-- only: research, burnt, customized, and Helmod's `type="energy"` pseudo-item
+-- have no factory_solver equivalent and are intentionally dropped with a
+-- warning rather than silently turned into wrong recipes.
+
+---Some Helmod virtual-recipe lua_types are marked `is_support_factory = false`
+---(see Helmod's RecipePrototype.lua). For those, Helmod itself never sets a
+---`factory` on the recipe child, and downstream code (`ModelCompute.lua`'s
+---`recipe.factory.energy_total` etc.) only reads the factory when it's
+---present. Writing a placeholder factory for these tripped the solver with
+---arithmetic-on-nil errors, so we mirror Helmod's shape and omit it.
+---@param lua_type string?
+---@return boolean
+local function helmod_lua_type_uses_factory(lua_type)
+    return lua_type ~= "spoiling"
+end
+
+---factory_solver uses the plant entity itself as the "machine" for `<grow>`
+---recipes (the plant occupies one tile slot, which is what the LP needs to
+---track). Helmod expects the agricultural-tower as the machine, because its
+---EntityPrototype:getCraftingSpeed reads energy_source_prototype — which
+---plant entities don't have — and crashes with nil index when the recipe
+---factory points at a plant. Find any non-hidden tower to substitute.
+---@return string?
+local function find_first_agricultural_tower_name()
+    for _, proto in pairs(prototypes.entity) do
+        if proto.type == "agricultural-tower" and not proto.hidden then
+            return proto.name
+        end
+    end
+    return nil
+end
+
+---For FS→Helmod export, swap FS-only machine identities with the real
+---production entity Helmod's solver expects. Currently covers `<grow>`
+---(plant entity → agricultural-tower); spoilage takes the no-factory path
+---and never reaches this helper. Returns the original name when no
+---substitution applies.
+---@param fs_recipe_name string
+---@param fs_machine_name string
+---@return string
+local function substitute_machine_for_helmod(fs_recipe_name, fs_machine_name)
+    if fs_recipe_name:sub(1, 6) == "<grow>" then
+        return find_first_agricultural_tower_name() or fs_machine_name
+    end
+    return fs_machine_name
+end
+
+---Helmod export sometimes writes virtual-recipe entries without an explicit
+---rocket-silo identity (Player.buildRocketRecipe only stores the cargo item
+---name; the silo is inferred from the first one with a fixed_recipe). Find
+---one runtime silo to fill in `{silo}:{part}` for the factory_solver name.
+---@return LuaEntityPrototype?, LuaRecipePrototype?
+local function find_first_rocket_silo()
+    local filters = {
+        { filter = "type",   type = "rocket-silo", mode = "or" },
+        { filter = "hidden", mode = "and",         invert = true },
+    }
+    for _, silo in pairs(prototypes.get_entity_filtered(filters)) do
+        if silo.fixed_recipe then
+            local part = prototypes.recipe[silo.fixed_recipe]
+            if part then return silo, part end
+        end
+    end
+    return nil, nil
+end
+
+---Convert a Helmod (lua_type, name) virtual-recipe pair into a factory_solver
+---virtual recipe name. Returns nil + warning key when the lua_type has no
+---factory_solver counterpart, or when the inferred name is not registered
+---in storage.virtuals.recipe (e.g. the underlying boiler is hidden / from a
+---disabled mod).
+---@param lua_type string
+---@param name string
+---@return string? recipe_name
+---@return string? warning_key
+local function helmod_to_factory_recipe_name(lua_type, name)
+    local pool = storage.virtuals.recipe
+
+    if lua_type == "energy" then
+        -- Helmod includes accumulator/electric-energy-interface here, which
+        -- factory_solver intentionally excludes (no item I/O — see
+        -- feedback_no_electricity_only_virtuals). The storage lookup naturally
+        -- weeds those out and we surface the generic unmappable warning.
+        local candidate = "<run>" .. name
+        if pool[candidate] then return candidate end
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+    elseif lua_type == "resource" then
+        local candidate = "<mine>" .. name
+        if pool[candidate] then return candidate end
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+    elseif lua_type == "spoiling" then
+        local candidate = "<spoil>" .. name
+        if pool[candidate] then return candidate end
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+    elseif lua_type == "fluid" then
+        -- Helmod stores fluid recipes keyed by the output fluid name; the
+        -- backing tile is whichever offshore-pump tile produces that fluid.
+        -- Walk tiles and take the first match. (Tile candidates are usually
+        -- 1:1 with their fluid in vanilla/SA, so the ambiguity is academic.)
+        for _, tile in pairs(prototypes.tile) do
+            local fluid = tile.fluid
+            if fluid and fluid.name == name then
+                local candidate = "<pump>" .. tile.name
+                if pool[candidate] then return candidate end
+            end
+        end
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+    elseif lua_type == "agricultural" then
+        -- Helmod names this recipe by the seed item; the plant is the seed's
+        -- `plant_result`. factory_solver keys by `<grow>{plant}:{seed}`.
+        local seed_item = prototypes.item[name]
+        if seed_item and seed_item.plant_result then
+            local candidate = string.format("<grow>%s:%s",
+                seed_item.plant_result.name, name)
+            if pool[candidate] then return candidate end
+        end
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+    elseif lua_type == "boiler" then
+        -- Helmod synthesises `"input->output#target"` (Player.buildFluidRecipe).
+        -- Parse, then iterate runtime boilers to find a match whose
+        -- per-input virtual recipe registers the expected output + temperature.
+        -- Non-greedy capture keeps fluid names containing `-` (heavy-oil,
+        -- light-oil, sulfuric-acid …) intact instead of stopping at the
+        -- first hyphen.
+        local input_name, output_name, temp_str = string.match(name,
+            "^(.-)%->(.-)#(.+)$")
+        if not (input_name and output_name and temp_str) then
+            return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+        end
+        local target_temp = tonumber(temp_str)
+        local boiler_filters = {
+            { filter = "type",   type = "boiler", mode = "or" },
+            { filter = "hidden", mode = "and",    invert = true },
+        }
+        for boiler_name, _ in pairs(prototypes.get_entity_filtered(boiler_filters)) do
+            local candidate = string.format("<run>%s:%s", boiler_name, input_name)
+            local recipe = pool[candidate]
+            if recipe and recipe.products and recipe.products[1] then
+                local p = recipe.products[1]
+                local temp_ok = (target_temp == nil)
+                    or (p.temperature and math.abs(p.temperature - target_temp) < 1e-3)
+                if p.name == output_name and temp_ok then
+                    return candidate
+                end
+            end
+        end
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+    elseif lua_type == "rocket" then
+        -- Helmod keeps only the cargo item name; pick any silo + its part to
+        -- fill in the factory_solver-side identity. Best-effort: vanilla has
+        -- exactly one silo, so this is deterministic in the common case.
+        local silo, part = find_first_rocket_silo()
+        if silo and part then
+            local candidate = string.format("<run>%s:%s:%s", silo.name, part.name, name)
+            if pool[candidate] then return candidate end
+        end
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+    elseif lua_type == "burnt" then
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-burnt"
+    elseif lua_type == "technology" then
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-technology"
+    elseif lua_type == "constant" then
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-customized"
+    end
+    -- Helmod-side customized recipes carry `lua_type == "recipe"` plus the
+    -- `helmod_customized_` prefix; flag those before falling through.
+    if string.find(name, "^helmod_customized_") then
+        return nil, "factory-solver-helmod-import-warning-virtual-recipe-customized"
+    end
+    return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
+end
+
+---Convert a factory_solver virtual recipe name into a Helmod (lua_type, name)
+---pair. Returns nil + warning key when the prefix has no Helmod counterpart
+---(`<research>`) or when the underlying recipe entry has gone missing.
+---@param recipe_name string
+---@return string? lua_type
+---@return string? helmod_name
+---@return string? warning_key
+local function factory_to_helmod_recipe_name(recipe_name)
+    local pool = storage.virtuals.recipe
+
+    -- `<mine>{entity}` → Helmod (resource, entity)
+    local mine_body = string.match(recipe_name, "^<mine>(.+)$")
+    if mine_body then
+        return "resource", mine_body
+    end
+
+    -- `<spoil>{item}` → Helmod (spoiling, item)
+    local spoil_body = string.match(recipe_name, "^<spoil>(.+)$")
+    if spoil_body then
+        return "spoiling", spoil_body
+    end
+
+    -- `<grow>{plant}:{seed}` → Helmod (agricultural, seed)
+    local _, grow_seed = string.match(recipe_name, "^<grow>([^:]+):(.+)$")
+    if grow_seed then
+        return "agricultural", grow_seed
+    end
+
+    -- `<pump>{tile}` → Helmod (fluid, fluid_name_from_tile)
+    local pump_body = string.match(recipe_name, "^<pump>(.+)$")
+    if pump_body then
+        local tile = prototypes.tile[pump_body]
+        if tile and tile.fluid then
+            return "fluid", tile.fluid.name
+        end
+        return nil, nil, "factory-solver-helmod-export-warning-virtual-recipe"
+    end
+
+    -- `<research>` has no Helmod analogue with matching semantics; tech
+    -- recipes in Helmod produce a `technology` pseudo-item, not pack flow.
+    if string.find(recipe_name, "^<research>") then
+        return nil, nil, "factory-solver-helmod-export-warning-virtual-recipe-research"
+    end
+
+    -- `<run>...` is overloaded across boilers / rocket silos / standalone
+    -- energy entities; differentiate by colon count.
+    local run_body = string.match(recipe_name, "^<run>(.+)$")
+    if run_body then
+        local first, second = string.match(run_body, "^([^:]+):([^:]+)$")
+        if first and second then
+            -- `<run>{boiler}:{input_fluid}` → (boiler, "input->output#temp")
+            local recipe = pool[recipe_name]
+            if recipe and recipe.products and recipe.products[1] then
+                local p = recipe.products[1]
+                local temp = p.temperature
+                if temp then
+                    return "boiler", string.format("%s->%s#%s", second, p.name, temp)
+                end
+            end
+            return nil, nil, "factory-solver-helmod-export-warning-virtual-recipe"
+        end
+        local silo, part, cargo = string.match(run_body, "^([^:]+):([^:]+):(.+)$")
+        if silo and part and cargo then
+            -- `<run>{silo}:{part}:{cargo}`. Helmod-side rocket recipes name
+            -- themselves after the cargo item; `space-age` is the SA cargo-pod
+            -- launch path which has no Helmod analogue.
+            if cargo == "space-age" then
+                return nil, nil, "factory-solver-helmod-export-warning-virtual-recipe"
+            end
+            return "rocket", cargo
+        end
+        -- No colon → standalone energy entity. factory_solver builds a
+        -- `<run>X` recipe for many entity types (generator, burner-generator,
+        -- reactor, fusion-reactor, fusion-generator, thruster); Helmod's
+        -- `lua_type == "energy"` is built off Player.getEnergyMachines, which
+        -- accepts only the subset below. Anything outside it (notably
+        -- thrusters) deserializes into a 0-W / 0-factory ghost recipe, so
+        -- whitelist explicitly rather than blacklist by hand: an unknown
+        -- entity type stays on the safe side and surfaces a warning instead
+        -- of producing a degenerate entry.
+        local entity = prototypes.entity[run_body]
+        if entity then
+            local t = entity.type
+            if t == "generator" or t == "burner-generator"
+                or t == "reactor" or t == "fusion-reactor"
+                or t == "fusion-generator" or t == "solar-panel"
+                or t == "accumulator" or t == "electric-energy-interface" then
+                return "energy", run_body
+            end
+        end
+        return nil, nil, "factory-solver-helmod-export-warning-virtual-recipe"
+    end
+
+    return nil, nil, "factory-solver-helmod-export-warning-virtual-recipe"
+end
+
 ---Helmod keys block.products / block.ingredients by Product:getTableKey()
 ---(src/model/Product.lua). That format is:
 ---  - normal quality, no temperature: just `name`
@@ -153,25 +436,68 @@ local function pack_modules(module_typed_names)
     return modules
 end
 
+---Decode a Helmod recipe entry into a factory_solver TypedName. Returns a
+---second value (warning key) for non-fatal mapping issues — usually because
+---the Helmod lua_type has no factory_solver counterpart, or the named
+---virtual recipe isn't present in this save's prototype set.
 ---@param recipe_data any
 ---@return TypedName?
+---@return string?
 local function unpack_recipe_typed_name(recipe_data)
     local name = recipe_data.name
     if not name then return nil end
-    -- Helmod stores `type` per recipe (usually "recipe"; non-recipe Helmod
-    -- production sources are rare). factory_solver's FilterType enumeration
-    -- only knows "recipe" / "virtual_recipe", so unknown values are coerced
-    -- to "recipe" and dropped if the LP can't resolve them.
+    local lua_type = recipe_data.type
+    if lua_type == nil or lua_type == "recipe" then
+        -- Helmod-side customized recipes share the "recipe" type tag but use
+        -- a sentinel name prefix; factory_solver has no editable-recipe
+        -- mechanism so they're flagged and dropped.
+        if string.find(name, "^helmod_customized_") then
+            return nil, "factory-solver-helmod-import-warning-virtual-recipe-customized"
+        end
+        return {
+            type = "recipe",
+            name = name,
+            quality = read_quality(recipe_data.quality),
+        }
+    end
+    local mapped, warning_key = helmod_to_factory_recipe_name(lua_type, name)
+    if not mapped then
+        return nil, warning_key
+    end
     return {
-        type = "recipe",
-        name = name,
+        type = "virtual_recipe",
+        name = mapped,
         quality = read_quality(recipe_data.quality),
     }
 end
 
 ---@param factory any
+---@param recipe_typed_name TypedName?
 ---@return TypedName?
-local function unpack_machine_typed_name(factory)
+local function unpack_machine_typed_name(factory, recipe_typed_name)
+    if recipe_typed_name and recipe_typed_name.type == "virtual_recipe" then
+        -- Helmod's own export omits `factory` for `is_support_factory = false`
+        -- recipe types (notably `spoiling`). For those, synthesize the FS-side
+        -- sentinel machine that pre_solve expects rather than dropping the line.
+        if recipe_typed_name.name:sub(1, 7) == "<spoil>" then
+            return {
+                type = "machine",
+                name = "entity-unknown",
+                quality = "normal",
+            }
+        end
+        -- `<grow>{plant}:{seed}`: Helmod's factory.name is the agricultural-tower
+        -- (substituted on export). Restore the plant entity from the FS recipe
+        -- name so pre_solve / get_machine_preset finds it via fixed_crafting_machine.
+        local plant = recipe_typed_name.name:match("^<grow>([^:]+):")
+        if plant then
+            return {
+                type = "machine",
+                name = plant,
+                quality = read_quality(factory and factory.quality),
+            }
+        end
+    end
     if type(factory) ~= "table" then return nil end
     local name = factory.name
     if not name then return nil end
@@ -186,6 +512,13 @@ end
 ---reflecting two on-disk shapes Helmod itself accepts. Decode both so
 ---factory_solver receives a uniform TypedName regardless of which form
 ---Helmod chose to write.
+---
+---Helmod uses the "steam-heat" / "energy" pseudo-item names for heat /
+---electricity respectively (type="energy"). factory_solver instead carries
+---heat as the `<heat>` virtual_material via `accessor.try_get_fixed_fuel`
+---and has no electricity-as-fuel concept. Returning nil for these falls
+---through to `save.new_production_line`'s preset lookup, which fills in
+---the correct fuel TypedName from the machine prototype's energy source.
 ---@param factory any
 ---@return TypedName?
 local function unpack_fuel_typed_name(factory)
@@ -200,6 +533,17 @@ local function unpack_fuel_typed_name(factory)
         temperature = tonumber(fuel.temperature)
     end
     if not name then return nil end
+    -- Helmod-side pseudo-items ("steam-heat" / "energy") and any
+    -- factory_solver virtual_material name (`<heat>`, etc., from a previous
+    -- round-trip through an older codec version) have no `item`/`fluid`
+    -- prototype to bind to. Returning nil lets the import-time preset
+    -- ([save.lua] new_production_line → preset.get_fuel_preset) fill in
+    -- the correct TypedName from the machine's energy source instead of
+    -- materialising as an unresolved "?" fuel slot.
+    if name == "steam-heat" or name == "energy"
+        or name:sub(1, 1) == "<" then
+        return nil
+    end
     local fuel_type = infer_item_or_fluid(name)
     return {
         type = fuel_type,
@@ -232,16 +576,16 @@ local function unpack_beacons(beacons_array)
 end
 
 ---@param factory any
----@param recipe_name string
+---@param recipe_typed_name TypedName
 ---@return Constraint?
-local function unpack_factory_limit_constraint(factory, recipe_name)
+local function unpack_factory_limit_constraint(factory, recipe_typed_name)
     if type(factory) ~= "table" then return nil end
     local limit = tonumber(factory.limit)
     if not limit or limit == 0 then return nil end
     return {
-        type = "recipe",
-        name = recipe_name,
-        quality = "normal",
+        type = recipe_typed_name.type,
+        name = recipe_typed_name.name,
+        quality = recipe_typed_name.quality or "normal",
         limit_type = "upper",
         limit_amount_per_second = limit,
     }
@@ -251,25 +595,38 @@ end
 ---`input` is set into factory_solver Constraints. Helmod uses `input` as
 ---the user-specified target rate per `Model.time`, so we normalise to
 ---per-second by dividing through.
+---
+---Helmod's `type="energy"` pseudo-item (covering both electricity and
+---`steam-heat`) has no factory_solver counterpart — the LP has no
+---electricity channel — so we record a warning and drop the entry rather
+---than letting `infer_item_or_fluid` coerce it into a non-existent item
+---constraint that surfaces in the UI as a "?" placeholder.
 ---@param dict any
 ---@param time number
 ---@param out Constraint[]
-local function append_io_constraints(dict, time, out)
+---@param warnings LocalisedString[]
+local function append_io_constraints(dict, time, out, warnings)
     if type(dict) ~= "table" then return end
     local divisor = (time and time > 0) and time or 1
     for _, p in pairs(dict) do
         local input = tonumber(p and p.input)
         local name = p and p.name
         if input and name then
-            local t = p.type
-            if t ~= "item" and t ~= "fluid" then t = infer_item_or_fluid(name) end
-            out[#out + 1] = {
-                type = t,
-                name = name,
-                quality = read_quality(p.quality),
-                limit_type = "lower",
-                limit_amount_per_second = input / divisor,
-            }
+            if p.type == "energy" then
+                warnings[#warnings + 1] = {
+                    "factory-solver-helmod-import-warning-energy-pseudo-item", name,
+                }
+            else
+                local t = p.type
+                if t ~= "item" and t ~= "fluid" then t = infer_item_or_fluid(name) end
+                out[#out + 1] = {
+                    type = t,
+                    name = name,
+                    quality = read_quality(p.quality),
+                    limit_type = "lower",
+                    limit_amount_per_second = input / divisor,
+                }
+            end
         end
     end
 end
@@ -287,7 +644,8 @@ end
 ---@param time number
 ---@param out Constraint[]
 ---@param seen { [string]: boolean }
-local function append_block_objectives(block, time, out, seen)
+---@param warnings LocalisedString[]
+local function append_block_objectives(block, time, out, seen, warnings)
     if type(block) ~= "table" then return end
     if type(block.objectives) ~= "table" then return end
     local divisor = (time and time > 0) and time or 1
@@ -300,19 +658,29 @@ local function append_block_objectives(block, time, out, seen)
                 local name = (type(entry) == "table" and entry.name) or (type(key) == "string" and key)
                 if type(name) == "string" then
                     local raw_t = entry and entry.type
-                    local t = (raw_t == "item" or raw_t == "fluid") and raw_t
-                        or infer_item_or_fluid(name)
-                    local quality = read_quality(entry and entry.quality)
-                    local seen_key = string.format("%s/%s/%s", t, name, quality)
-                    if not seen[seen_key] then
-                        seen[seen_key] = true
-                        out[#out + 1] = {
-                            type = t,
-                            name = name,
-                            quality = quality,
-                            limit_type = "lower",
-                            limit_amount_per_second = value / divisor,
+                    if raw_t == "energy" then
+                        -- Helmod's `type="energy"` pseudo-item (electricity /
+                        -- steam-heat) has no factory_solver counterpart; the
+                        -- LP doesn't model an electricity channel. Drop the
+                        -- objective so it doesn't materialise as a "?" item.
+                        warnings[#warnings + 1] = {
+                            "factory-solver-helmod-import-warning-energy-pseudo-item", name,
                         }
+                    else
+                        local t = (raw_t == "item" or raw_t == "fluid") and raw_t
+                            or infer_item_or_fluid(name)
+                        local quality = read_quality(entry and entry.quality)
+                        local seen_key = string.format("%s/%s/%s", t, name, quality)
+                        if not seen[seen_key] then
+                            seen[seen_key] = true
+                            out[#out + 1] = {
+                                type = t,
+                                name = name,
+                                quality = quality,
+                                limit_type = "lower",
+                                limit_amount_per_second = value / divisor,
+                            }
+                        end
                     end
                 end
             end
@@ -362,7 +730,7 @@ function M.model_to_payload(model)
         local seen_keys = {}
         local function append_unique_io(dict)
             local pending = {}
-            append_io_constraints(dict, time, pending)
+            append_io_constraints(dict, time, pending, warnings)
             for _, c in ipairs(pending) do
                 local key = string.format("%s/%s/%s", c.type, c.name, c.quality or "normal")
                 if not seen_keys[key] then
@@ -372,7 +740,7 @@ function M.model_to_payload(model)
             end
         end
         for _, b in ipairs(visited_blocks) do
-            append_block_objectives(b, time, constraints, seen_keys)
+            append_block_objectives(b, time, constraints, seen_keys, warnings)
             append_unique_io(b.products)
             append_unique_io(b.ingredients)
         end
@@ -383,8 +751,12 @@ function M.model_to_payload(model)
     end
 
     for _, recipe_data in ipairs(leaf_recipes) do
-        local recipe_typed_name = unpack_recipe_typed_name(recipe_data)
-        local machine_typed_name = unpack_machine_typed_name(recipe_data.factory)
+        local recipe_typed_name, recipe_warning = unpack_recipe_typed_name(recipe_data)
+        local machine_typed_name = unpack_machine_typed_name(recipe_data.factory,
+            recipe_typed_name)
+        if recipe_warning then
+            warnings[#warnings + 1] = { recipe_warning, recipe_data.name or "?" }
+        end
         if recipe_typed_name and machine_typed_name then
             -- Helmod's stored `.production` accumulates float noise from its
             -- own LP / Gauss solver (e.g. 0.99999999999999982 in a recycling
@@ -425,16 +797,32 @@ function M.model_to_payload(model)
                 }
             end
 
+            -- `accessor.normalize_production_line` asserts that fuel-using
+            -- machines carry a fuel_typed_name. Helmod itself omits the fuel
+            -- field for heat-energy machines (heat goes in via the recipe's
+            -- steam-heat ingredient, not factory.fuel), and our import side
+            -- nil's out pseudo-item / virtual-material names. Fall back to
+            -- the entity's fixed fuel (heat → `<heat>` virtual_material,
+            -- filtered fluid energy → that fluid's TypedName) so the line
+            -- arrives in storage in the same shape pre_solve expects.
+            local fuel_typed_name = unpack_fuel_typed_name(factory)
+            if not fuel_typed_name then
+                local machine_proto = prototypes.entity[machine_typed_name.name]
+                if machine_proto and acc.is_use_fuel(machine_proto) then
+                    fuel_typed_name = acc.try_get_fixed_fuel(machine_proto)
+                end
+            end
+
             production_lines[#production_lines + 1] = {
                 recipe_typed_name = recipe_typed_name,
                 machine_typed_name = machine_typed_name,
                 module_typed_names = unpack_modules(factory.modules),
                 affected_by_beacons = unpack_beacons(recipe_data.beacons),
-                fuel_typed_name = unpack_fuel_typed_name(factory),
+                fuel_typed_name = fuel_typed_name,
             }
 
             local limit_constraint = unpack_factory_limit_constraint(
-                factory, recipe_typed_name.name)
+                factory, recipe_typed_name)
             if limit_constraint then
                 constraints[#constraints + 1] = limit_constraint
             end
@@ -506,7 +894,11 @@ local function solution_to_packed_model(solution)
                 -- "produce at least X" semantics, so this maps cleanly.
                 products[key] = entry
             end
-        elseif c.type == "recipe" then
+        elseif c.type == "recipe" or c.type == "virtual_recipe" then
+            -- Virtual-recipe constraints reuse the same per-line `factory.limit`
+            -- channel as real recipes; the LP variable is the same kind (one
+            -- variable per ProductionLine) and Helmod has no concept-level
+            -- distinction once the variable is realised as a Recipe child.
             recipe_constraints[c.name] = c
             if c.limit_type == "lower" then
                 warnings[#warnings + 1] = {
@@ -531,8 +923,20 @@ local function solution_to_packed_model(solution)
         local recipe_tn = pl.recipe_typed_name
         local machine = pl.machine_typed_name
         local is_real_recipe = recipe_tn and recipe_tn.type == "recipe"
+        local is_virtual_recipe = recipe_tn and recipe_tn.type == "virtual_recipe"
 
-        if recipe_tn and not is_real_recipe then
+        -- For virtual recipes, resolve the Helmod (lua_type, name) pair up
+        -- front; this either succeeds (commit to writing the line) or returns
+        -- a warning key so we can drop the line with a category-specific
+        -- message instead of the generic "unsupported" one.
+        local helmod_lua_type, helmod_name, virtual_warning
+        if is_virtual_recipe then
+            helmod_lua_type, helmod_name, virtual_warning =
+                factory_to_helmod_recipe_name(recipe_tn.name)
+            if virtual_warning then
+                warnings[#warnings + 1] = { virtual_warning, recipe_tn.name }
+            end
+        elseif recipe_tn and not is_real_recipe then
             warnings[#warnings + 1] = {
                 "factory-solver-helmod-export-warning-virtual-recipe", recipe_tn.name or "?",
             }
@@ -543,45 +947,89 @@ local function solution_to_packed_model(solution)
             }
         end
 
-        if is_real_recipe and machine then
+        local emit_as_helmod_recipe = is_real_recipe
+            or (is_virtual_recipe and helmod_lua_type and helmod_name)
+        -- Diagnostic: a line that was eligible to emit but is missing a
+        -- machine_typed_name would otherwise vanish silently. Surface it so
+        -- the user can tell the difference between "no production lines"
+        -- and "lines exist but were dropped because the machine field is
+        -- empty / unresolved".
+        if emit_as_helmod_recipe and not machine then
+            warnings[#warnings + 1] = {
+                "factory-solver-helmod-export-warning-no-machine",
+                (recipe_tn and recipe_tn.name) or "?",
+            }
+        end
+        if emit_as_helmod_recipe and machine then
             recipe_id = recipe_id + 1
             local id = "R" .. tostring(recipe_id)
 
-            local factory = {
-                class = "Factory",
-                name = machine.name,
-                type = "entity",
-                quality = machine.quality or "normal",
-                amount = 0,
-                energy = 0,
-                speed = 0,
-                limit = 0,
-                modules = pack_modules(pl.module_typed_names),
-            }
+            -- Spoilage (and any other Helmod `is_support_factory=false` type)
+            -- carries no `factory` subtable in Helmod's own model: Helmod
+            -- itself skips Model.setFactory for these (see ModelBuilder.lua's
+            -- `if recipe_prototype:isSupportFactory()` gate), and downstream
+            -- ModelCompute relies on the absence to skip count/energy math.
+            -- Writing a placeholder factory causes `recipe.factory.energy_total`
+            -- to be read as nil → arithmetic crash. Match Helmod's shape.
+            local emit_factory = not is_virtual_recipe
+                or helmod_lua_type_uses_factory(helmod_lua_type)
 
-            -- factory_solver carries fuel_typed_name from machine presets even
-            -- for electric machines; Helmod treats `factory.fuel` literally
-            -- and a stray fuel on a non-burner makes its solver fail. Mirror
-            -- the same gating we apply to the FP codec.
-            if pl.fuel_typed_name then
-                local machine_proto = prototypes.entity[machine.name]
-                if machine_proto and acc.is_use_fuel(machine_proto) then
-                    factory.fuel = {
-                        name = pl.fuel_typed_name.name,
-                        temperature = pl.fuel_typed_name.temperature,
-                    }
-                    factory.fuel_quality = pl.fuel_typed_name.quality or "normal"
-                end
+            -- For some virtual recipes, factory_solver's machine identity is
+            -- the recipe's "host" entity (plant for <grow>, etc.) which lacks
+            -- an energy source. Helmod's EntityPrototype:getCraftingSpeed
+            -- assumes a real production entity, so substitute the entity
+            -- Helmod's solver would associate with that recipe type.
+            local helmod_machine_name = machine.name
+            if is_virtual_recipe then
+                helmod_machine_name = substitute_machine_for_helmod(
+                    recipe_tn.name, machine.name)
             end
 
-            -- factory_solver's recipe-typed constraint maps onto Helmod's
-            -- per-line `factory.limit` (max machine count). Helmod has no
-            -- equivalent for `equal`, so the warning above already flagged
-            -- those; we still emit the value because Helmod will at least
-            -- read it as an upper bound.
-            local rc = recipe_constraints[recipe_tn.name]
-            if rc and rc.limit_type ~= "lower" then
-                factory.limit = rc.limit_amount_per_second
+            local factory = nil
+            if emit_factory then
+                factory = {
+                    class = "Factory",
+                    name = helmod_machine_name,
+                    type = "entity",
+                    quality = machine.quality or "normal",
+                    amount = 0,
+                    energy = 0,
+                    speed = 0,
+                    limit = 0,
+                    modules = pack_modules(pl.module_typed_names),
+                }
+
+                -- factory_solver carries fuel_typed_name from machine presets
+                -- even for electric machines; Helmod treats `factory.fuel`
+                -- literally and a stray fuel on a non-burner makes its solver
+                -- fail. Mirror the same gating we apply to the FP codec.
+                -- Also skip when the fuel is a factory_solver virtual_material
+                -- (e.g. `<heat>` for heat-exchanger): Helmod models heat as an
+                -- ingredient (steam-heat pseudo-item) rather than a factory.fuel
+                -- value, so emitting our virtual name here would have Helmod
+                -- write it back verbatim and our import side would later
+                -- decode it as an unknown item ("?" in the UI).
+                if pl.fuel_typed_name
+                    and pl.fuel_typed_name.type ~= "virtual_material" then
+                    local machine_proto = prototypes.entity[machine.name]
+                    if machine_proto and acc.is_use_fuel(machine_proto) then
+                        factory.fuel = {
+                            name = pl.fuel_typed_name.name,
+                            temperature = pl.fuel_typed_name.temperature,
+                        }
+                        factory.fuel_quality = pl.fuel_typed_name.quality or "normal"
+                    end
+                end
+
+                -- factory_solver's recipe-typed constraint maps onto Helmod's
+                -- per-line `factory.limit` (max machine count). Helmod has no
+                -- equivalent for `equal`, so the warning above already flagged
+                -- those; we still emit the value because Helmod will at least
+                -- read it as an upper bound.
+                local rc = recipe_constraints[recipe_tn.name]
+                if rc and rc.limit_type ~= "lower" then
+                    factory.limit = rc.limit_amount_per_second
+                end
             end
 
             local beacons = {}
@@ -603,12 +1051,17 @@ local function solution_to_packed_model(solution)
                 end
             end
 
+            -- Virtual recipes go out with their mapped Helmod identity; real
+            -- recipes keep the literal type/name pair. Either way, Helmod's
+            -- own decoder reconstructs the rest of the entry from `type`.
+            local child_type = is_virtual_recipe and helmod_lua_type or recipe_tn.type
+            local child_name = is_virtual_recipe and helmod_name or recipe_tn.name
             children[id] = {
                 class = "Recipe",
                 id = id,
                 index = recipe_id,
-                name = recipe_tn.name,
-                type = recipe_tn.type,
+                name = child_name,
+                type = child_type,
                 quality = recipe_tn.quality or "normal",
                 count = 0,
                 production = 1,
@@ -616,6 +1069,28 @@ local function solution_to_packed_model(solution)
                 beacons = beacons,
             }
         end
+    end
+
+    -- An empty children dict usually means every production_line failed the
+    -- emit gate (silently dropped because machine_typed_name was nil, or
+    -- because the solution had no lines at all). Surface this explicitly so
+    -- the user isn't left wondering why Helmod imports an empty model
+    -- without any other diagnostic.
+    if recipe_id == 0 and #solution.production_lines > 0 then
+        warnings[#warnings + 1] = {
+            "factory-solver-helmod-export-warning-no-recipes-emitted",
+            tostring(#solution.production_lines),
+        }
+    elseif recipe_id < #solution.production_lines then
+        -- Partial drop: at least one line was skipped. The per-line skip
+        -- already added a specific warning above, but emit a summary so the
+        -- user has an unmissable "N dropped" signal even if individual
+        -- warnings scroll past in the chat history.
+        warnings[#warnings + 1] = {
+            "factory-solver-helmod-export-warning-partial-drop",
+            tostring(#solution.production_lines - recipe_id),
+            tostring(#solution.production_lines),
+        }
     end
 
     local model = {
@@ -736,7 +1211,27 @@ function M.encode(solutions)
     local model, model_warnings = solution_to_packed_model(solutions[1])
     for _, w in ipairs(model_warnings) do warnings[#warnings + 1] = w end
     local serialised = serpent.dump(model)
-    return assert(helpers.encode_string(serialised)), warnings
+
+    -- Self-test: Helmod's Converter.read crashes (Converter.lua:47, "attempt
+    -- to call local 'data_table' (a nil value)") when its `loadstring` of our
+    -- decoded payload returns nil. Either our serpent dump isn't valid Lua, or
+    -- the encode/decode round-trip mangles the bytes. Catch both here so the
+    -- failure surfaces on the factory_solver side with a clear message,
+    -- instead of looking like a Helmod-internal crash later.
+    local load_ok = pcall(load, serialised)
+    if not load_ok then
+        warnings[#warnings + 1] = {
+            "factory-solver-helmod-export-warning-self-test-loadstring",
+        }
+    end
+    local encoded = assert(helpers.encode_string(serialised))
+    local decode_ok, decoded = pcall(helpers.decode_string, encoded)
+    if not decode_ok or type(decoded) ~= "string" or decoded ~= serialised then
+        warnings[#warnings + 1] = {
+            "factory-solver-helmod-export-warning-self-test-roundtrip",
+        }
+    end
+    return encoded, warnings
 end
 
 return M
