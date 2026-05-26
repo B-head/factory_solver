@@ -140,12 +140,16 @@ end
 ---class=="Line" leaves the right set of recipes with no duplicate.
 ---@param lines any
 ---@param out table[]
-local function collect_leaf_lines(lines, out)
+---@param flatten_seen { [any]: any }? Sentinel table; `.nested` is set true
+---when at least one Floor child is recursed into, so the caller can warn
+---that the user's subfloor structure was flattened on import.
+local function collect_leaf_lines(lines, out, flatten_seen)
     if type(lines) ~= "table" then return end
     for _, node in ipairs(lines) do
         if type(node) == "table" then
             if node.class == "Floor" then
-                collect_leaf_lines(node.lines, out)
+                if flatten_seen then flatten_seen.nested = true end
+                collect_leaf_lines(node.lines, out, flatten_seen)
             elseif node.class == "Line" or node.recipe then
                 out[#out + 1] = node
             end
@@ -571,8 +575,22 @@ function M.factory_to_payload(packed_factory, player_index)
     end
 
     local leaf_lines = {}
+    local flatten_seen = { nested = false }
     if type(packed_factory.top_floor) == "table" then
-        collect_leaf_lines(packed_factory.top_floor.lines, leaf_lines)
+        collect_leaf_lines(packed_factory.top_floor.lines, leaf_lines, flatten_seen)
+    end
+    if flatten_seen.nested then
+        warnings[#warnings + 1] = { "factory-solver-fp-import-warning-flattened-subfloors" }
+    end
+
+    -- Per-line FP fields that factory_solver has no equivalent for. They
+    -- fire on every line that uses the feature so the per-recipe identity
+    -- would drown out the truly per-line warnings (duplicate-recipe);
+    -- aggregate to one counted line each, mirroring the Helmod codec.
+    local aggregated_warning_counts = {}
+    local function add_aggregated_warning(locale_key)
+        aggregated_warning_counts[locale_key] =
+            (aggregated_warning_counts[locale_key] or 0) + 1
     end
 
     for _, packed_line in ipairs(leaf_lines) do
@@ -598,6 +616,25 @@ function M.factory_to_payload(packed_factory, player_index)
                 }
             else
                 seen_recipes[recipe_typed_name.name] = true
+                -- FP per-line scalars that have no FS equivalent. percentage
+                -- and active are load-bearing on FP's side (a 50% line emits
+                -- half the products, a deactivated line emits none); FS
+                -- always solves at the recipe's natural rate. priority_-
+                -- product steers multi-product recipes — FS lets the LP
+                -- balance byproducts instead of pinning a main output.
+                local pct = tonumber(packed_line.percentage)
+                if pct and pct ~= 100 then
+                    add_aggregated_warning(
+                        "factory-solver-fp-import-warning-percentage")
+                end
+                if packed_line.active == false then
+                    add_aggregated_warning(
+                        "factory-solver-fp-import-warning-inactive-line")
+                end
+                if packed_line.recipe and packed_line.recipe.priority_product then
+                    add_aggregated_warning(
+                        "factory-solver-fp-import-warning-priority-product")
+                end
                 local m = packed_line.machine or {}
                 local fuel_typed_name = unpack_fuel_typed_name(packed_line)
                 -- accessor.normalize_production_line asserts that any
@@ -629,6 +666,17 @@ function M.factory_to_payload(packed_factory, player_index)
         end
     end
 
+    -- Flush aggregated counters into the warning list. Sort keys so the
+    -- output is deterministic across loads.
+    local sorted_keys = {}
+    for key in pairs(aggregated_warning_counts) do
+        sorted_keys[#sorted_keys + 1] = key
+    end
+    table.sort(sorted_keys)
+    for _, key in ipairs(sorted_keys) do
+        warnings[#warnings + 1] = { key, tostring(aggregated_warning_counts[key]) }
+    end
+
     local name = packed_factory.name
     if type(name) ~= "string" or name == "" then
         name = "Imported factory"
@@ -650,6 +698,22 @@ local function solution_to_packed_factory(solution)
 
     for _, c in ipairs(solution.constraints) do
         if c.type == "item" or c.type == "fluid" then
+            -- FP's Product.required_amount has produce-at-least semantics
+            -- (FP's solver treats it as a lower target), so an FS upper or
+            -- equal bound on an item / fluid silently changes meaning when
+            -- exported. Warn so the user knows the bound direction was lost.
+            if c.limit_type and c.limit_type ~= "lower" then
+                warnings[#warnings + 1] = {
+                    "factory-solver-fp-export-warning-upper-bound-product", c.name,
+                }
+            end
+            -- FP has no fluid-temperature dimension on products, so any
+            -- temperature constraint factory_solver carries is discarded.
+            if c.temperature or c.minimum_temperature or c.maximum_temperature then
+                warnings[#warnings + 1] = {
+                    "factory-solver-fp-export-warning-constraint-temperature", c.name,
+                }
+            end
             -- Product uses category_designation="type", so the category field
             -- holds prototype.type ("item" or "fluid"). Without it,
             -- validate_prototype_object skips the lookup and the product stays

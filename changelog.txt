@@ -66,6 +66,14 @@ Date: ????
       counted line each. These fire on every recipe that uses the feature
       and otherwise drown out the rare per-line warnings (duplicate
       recipe, production multiplier ≠ 1, unmappable virtual recipe).
+    - Factory Planner codec: surface previously-silent feature drops.
+      Import: warn on subfloor flattening, on per-line `percentage` ≠
+      100%, on inactive lines being imported as active, and on dropped
+      `priority_product` selection (the last three aggregated as one
+      counted line each, since the recipe identity isn't actionable).
+      Export: warn on upper / equal item-fluid bounds (FP's product
+      target has produce-at-least semantics) and on dropped
+      temperature constraints (FP has no fluid-temperature dimension).
     - Route quality multiplier calculations through Factorio 2.0's per-prototype
       quality runtime APIs (LuaQualityPrototype::default_multiplier,
       LuaEntityPrototype::get_max_energy_usage / get_fluid_usage_per_tick /
