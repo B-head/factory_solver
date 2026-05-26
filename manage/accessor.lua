@@ -976,6 +976,29 @@ function M.get_allowed_effects(recipe, entity)
     return ret
 end
 
+---Intersection of recipe and entity allowed_module_categories. nil result
+---means "no restriction" on either side. The field is a set
+---(`dict[string → true]?`) — key absence means the category is NOT allowed,
+---which is the opposite convention to allowed_effects's `false` opt-out.
+---Consumed by get_total_effectivity to skip modules whose
+---LuaItemPrototype.category falls outside this intersection.
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@param entity LuaEntityPrototype
+---@return table<string, true>?
+function M.get_allowed_module_categories(recipe, entity)
+    ---@diagnostic disable-next-line: undefined-field
+    local r = recipe.allowed_module_categories
+    local e = entity.allowed_module_categories
+    if r == nil and e == nil then return nil end
+    if r == nil then return e end
+    if e == nil then return r end
+    local ret = {}
+    for k in pairs(r) do
+        if e[k] then ret[k] = true end
+    end
+    return ret
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@param quality QualityID
@@ -1184,11 +1207,14 @@ function M.get_total_effectivity(recipe, total_modules, effect_receiver, recipe_
 
     ---@param modules table<string, table<string, number>>
     ---@param allowed table<string, boolean>
-    local function apply_group(modules, allowed)
+    ---@param allowed_categories table<string, true>?
+    local function apply_group(modules, allowed, allowed_categories)
         for name, inner in pairs(modules) do
             for quality, count in pairs(inner) do
                 local module = M.get_module(name)
-                if module then
+                if module
+                    and (allowed_categories == nil or allowed_categories[module.category])
+                then
                     local effects = assert(module.module_effects)
                     local quality_level = M.get_quality_level(quality)
                     if allowed.speed then
@@ -1212,9 +1238,13 @@ function M.get_total_effectivity(recipe, total_modules, effect_receiver, recipe_
     end
 
     if recipe and machine then
-        apply_group(total_modules.machine_modules, M.get_allowed_effects(recipe, machine))
+        apply_group(total_modules.machine_modules,
+            M.get_allowed_effects(recipe, machine),
+            M.get_allowed_module_categories(recipe, machine))
         for _, g in ipairs(total_modules.beacon_groups) do
-            apply_group(g.modules, M.get_allowed_effects(recipe, g.beacon))
+            apply_group(g.modules,
+                M.get_allowed_effects(recipe, g.beacon),
+                M.get_allowed_module_categories(recipe, g.beacon))
         end
     end
 
