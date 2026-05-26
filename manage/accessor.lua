@@ -1235,26 +1235,56 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
     return { machine_modules = machine_modules, beacon_groups = beacon_groups }
 end
 
----Collapse a TotalModules grouped layout back to the legacy
----`name → quality → count` aggregate used by UI summary panels that only
----want a flat module roster. Effect masking is intentionally NOT applied
----here — the flat view shows which modules the user picked, not which ones
----contributed to LP effectivity.
----@param total TotalModules
----@return table<string, table<string, number>>
-function M.flatten_total_modules(total)
+---Splits the modules in `total_modules` into effective vs ineffective
+---contributions per (name, quality). Each source (machine slots, each
+---beacon's slots) is evaluated against its own `recipe ∩ entity`
+---allowed_effects / allowed_module_categories, so a quality module that is
+---effective in machine slots but masked in a beacon shows up as two
+---separate sub-counts rather than collapsing into a single misleading
+---entry. Used by aggregated UI panels (effective modules, production line
+---row) to render effective and ineffective contributions as separate slot
+---buttons.
+---@param recipe (LuaRecipePrototype | VirtualRecipe)?
+---@param machine LuaEntityPrototype
+---@param total_modules TotalModules
+---@return table<string, table<string, { effective: number, ineffective: number }>>
+function M.split_total_modules_by_effectiveness(recipe, machine, total_modules)
     local out = {}
-    local function merge(src)
-        for name, inner in pairs(src) do
+
+    ---@param entity LuaEntityPrototype
+    ---@param modules table<string, table<string, number>>
+    local function add(entity, modules)
+        local allowed_effects, allowed_categories
+        if recipe then
+            allowed_effects = M.get_allowed_effects(recipe, entity)
+            allowed_categories = M.get_allowed_module_categories(recipe, entity)
+        end
+        for name, inner in pairs(modules) do
+            local module = M.get_module(name)
+            -- Unknown module or missing recipe context falls through as
+            -- "effective" so the UI doesn't surface a misleading warning
+            -- about something we can't actually evaluate.
+            local is_effective = true
+            if module and recipe then
+                is_effective = M.is_module_effective(module, allowed_effects, allowed_categories)
+            end
             if not out[name] then out[name] = {} end
             for quality, count in pairs(inner) do
-                out[name][quality] = (out[name][quality] or 0) + count
+                if not out[name][quality] then
+                    out[name][quality] = { effective = 0, ineffective = 0 }
+                end
+                if is_effective then
+                    out[name][quality].effective = out[name][quality].effective + count
+                else
+                    out[name][quality].ineffective = out[name][quality].ineffective + count
+                end
             end
         end
     end
-    merge(total.machine_modules)
-    for _, g in ipairs(total.beacon_groups) do
-        merge(g.modules)
+
+    add(machine, total_modules.machine_modules)
+    for _, group in ipairs(total_modules.beacon_groups) do
+        add(group.beacon, group.modules)
     end
     return out
 end

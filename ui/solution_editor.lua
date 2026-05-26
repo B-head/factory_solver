@@ -179,21 +179,42 @@ function handlers.make_production_line_table(event)
             end
 
             local total_modules = acc.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+            local split = acc.split_total_modules_by_effectiveness(recipe, machine, total_modules)
 
-            for name, inner in pairs(acc.flatten_total_modules(total_modules)) do
-                for quality, count in pairs(inner) do
+            for name, qualities in pairs(split) do
+                for quality, counts in pairs(qualities) do
                     local module_typed_name = tn.create_typed_name("item", name, quality)
-
-                    local def = common.create_decorated_sprite_button {
-                        typed_name = module_typed_name,
-                        number = count,
-                        silent_click = true,
-                        tags = flib_table.deep_merge { recipe_tags, { paste_target = "module_beacon" } },
-                        handler = {
-                            [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
-                        },
-                    }
-                    flib_table.insert(buttons, def)
+                    local module_tags = flib_table.deep_merge { recipe_tags, { paste_target = "module_beacon" } }
+                    -- Effective contribution first, then the ineffective
+                    -- sub-count as a separate slot so partial masking is
+                    -- visible at-a-glance without collapsing into one
+                    -- ambiguous total.
+                    if counts.effective > 0 then
+                        flib_table.insert(buttons, common.create_decorated_sprite_button {
+                            typed_name = module_typed_name,
+                            number = counts.effective,
+                            silent_click = true,
+                            tags = module_tags,
+                            handler = {
+                                [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
+                            },
+                        })
+                    end
+                    if counts.ineffective > 0 then
+                        local def = common.create_decorated_sprite_button {
+                            typed_name = module_typed_name,
+                            number = counts.ineffective,
+                            top_right_sprite = "utility/warning_icon",
+                            silent_click = true,
+                            tags = module_tags,
+                            handler = {
+                                [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
+                            },
+                        }
+                        def.tooltip = { "", def.tooltip or "", "\n",
+                            { "factory-solver-module-no-effect-here" } }
+                        flib_table.insert(buttons, def)
+                    end
                 end
             end
 

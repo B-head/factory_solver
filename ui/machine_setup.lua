@@ -268,20 +268,36 @@ end
 ---to the engine's "item-unknown" sprite while preserving the saved quality
 ---so subsequent saves don't lose the original module name (the tag is read
 ---directly from dialog.tags in the picker opener, not from the button).
+---When `allowed_effects` is provided, marks the slot with a top-right
+---warning icon if the configured module would have no effect on the current
+---(recipe, machine) or (recipe, beacon) pair — same signal the picker shows
+---for ineffective candidates.
 ---@param parent LuaGuiElement
 ---@param slot_index integer
 ---@param beacon_index integer?
 ---@param typed_name TypedName?
-local function add_module_slot_button(parent, slot_index, beacon_index, typed_name)
+---@param allowed_effects table<string, boolean>?
+---@param allowed_categories table<string, true>?
+local function add_module_slot_button(parent, slot_index, beacon_index, typed_name,
+                                      allowed_effects, allowed_categories)
     local display_typed_name = typed_name
     if typed_name and not acc.get_module(typed_name.name) then
         display_typed_name = tn.create_typed_name("item", "item-unknown", typed_name.quality)
+    end
+
+    local is_ineffective = false
+    if typed_name and allowed_effects then
+        local module = acc.get_module(typed_name.name)
+        if module and not acc.is_module_effective(module, allowed_effects, allowed_categories) then
+            is_ineffective = true
+        end
     end
 
     local def
     if display_typed_name then
         def = common.create_decorated_sprite_button {
             typed_name = display_typed_name,
+            top_right_sprite = is_ineffective and "utility/warning_icon" or nil,
             tags = {
                 slot_index = tostring(slot_index),
                 beacon_index = beacon_index,
@@ -290,6 +306,10 @@ local function add_module_slot_button(parent, slot_index, beacon_index, typed_na
                 [defines.events.on_gui_click] = handlers.on_open_module_picker,
             },
         }
+        if is_ineffective then
+            def.tooltip = { "", def.tooltip or "", "\n",
+                { "factory-solver-module-no-effect-here" } }
+        end
     else
         def = {
             type = "sprite-button",
@@ -314,11 +334,15 @@ function handlers.on_make_machine_modules(event)
     local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = tn.typed_name_to_machine(machine_typed_name)
+    local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    local allowed_effects = acc.get_allowed_effects(recipe, machine)
+    local allowed_categories = acc.get_allowed_module_categories(recipe, machine)
 
     elem.clear()
     for index = 1, machine.module_inventory_size do
         local typed_name = module_typed_names[tostring(index)]
-        add_module_slot_button(elem, index, nil, typed_name)
+        add_module_slot_button(elem, index, nil, typed_name, allowed_effects, allowed_categories)
     end
 end
 
@@ -505,10 +529,15 @@ function handlers.on_make_beacon_modules(event)
     elem.clear()
     if not beacon then return end
 
+    local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    local allowed_effects = acc.get_allowed_effects(recipe, beacon)
+    local allowed_categories = acc.get_allowed_module_categories(recipe, beacon)
+
     local module_typed_names = affected_by_beacon.module_typed_names
     for slot_index = 1, beacon.module_inventory_size do
         add_module_slot_button(elem, slot_index, beacon_index,
-            module_typed_names[tostring(slot_index)])
+            module_typed_names[tostring(slot_index)], allowed_effects, allowed_categories)
     end
 end
 
@@ -586,20 +615,36 @@ function handlers.on_make_total_effectivity(event)
 
     local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
     local machine = tn.typed_name_to_machine(machine_typed_name)
+    local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
     local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
     local total_modules = acc.get_total_modules(machine, module_typed_names, affected_by_beacons)
+    local split = acc.split_total_modules_by_effectiveness(recipe, machine, total_modules)
 
     elem.clear()
-    for name, inner in pairs(acc.flatten_total_modules(total_modules)) do
-        for quality, count in pairs(inner) do
+    for name, qualities in pairs(split) do
+        for quality, counts in pairs(qualities) do
             local module_typed_name = tn.create_typed_name("item", name, quality)
-
-            local def = common.create_decorated_sprite_button {
-                typed_name = module_typed_name,
-                number = count,
-            }
-            fs_util.add_gui(elem, def)
+            -- Render the effective contribution first so the user reads
+            -- "good ones, then problematic ones"; a partially-masked entry
+            -- becomes two side-by-side slots instead of one ambiguous total.
+            if counts.effective > 0 then
+                fs_util.add_gui(elem, common.create_decorated_sprite_button {
+                    typed_name = module_typed_name,
+                    number = counts.effective,
+                })
+            end
+            if counts.ineffective > 0 then
+                local def = common.create_decorated_sprite_button {
+                    typed_name = module_typed_name,
+                    number = counts.ineffective,
+                    top_right_sprite = "utility/warning_icon",
+                }
+                def.tooltip = { "", def.tooltip or "", "\n",
+                    { "factory-solver-module-no-effect-here" } }
+                fs_util.add_gui(elem, def)
+            end
         end
     end
 end
