@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.3
-Date: ????
+Date: 2026-05-27
   Bugfixes:
     - Honor LuaRecipePrototype.maximum_productivity, so module, beacon, and
       research-bonus contributions can no longer push a capped recipe past
