@@ -96,6 +96,7 @@ function M.reinit_player_data(player_index)
                 end
             end
         end
+        tn.typed_name_migration(player_data.module_clipboard)
     else
         M.init_player_data(player_index)
     end
@@ -680,6 +681,24 @@ end
 ---@return MachineClipboard?
 function M.get_machine_clipboard(player_index)
     return storage.players[player_index].machine_clipboard
+end
+
+---Slot-level companion to set_machine_clipboard for the single-module
+---Shift+Click flow inside machine_setup. The clipboard is independent
+---from machine_clipboard so the two coexist: the row-level flow stores
+---a full ProductionLine snapshot, this one stores a single module
+---TypedName. deep_copy detaches from any caller-owned table; nil clears.
+---@param player_index integer
+---@param typed_name TypedName?
+function M.set_module_clipboard(player_index, typed_name)
+    storage.players[player_index].module_clipboard =
+        typed_name and flib_table.deep_copy(typed_name) or nil
+end
+
+---@param player_index integer
+---@return TypedName?
+function M.get_module_clipboard(player_index)
+    return storage.players[player_index].module_clipboard
 end
 
 ---@alias PasteResult "ok"|"empty"|"incompatible_machine"|"no_module_or_beacon_slot"

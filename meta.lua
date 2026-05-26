@@ -36,6 +36,7 @@ __factory_solver__storage = {}
 ---@field presets Presets
 ---@field opened_gui string[]
 ---@field machine_clipboard MachineClipboard?
+---@field module_clipboard TypedName?
 
 ---Per-player clipboard for the Shift+Click copy/paste flow over production
 ---line rows in solution_editor. A copy snapshots the whole machine-side

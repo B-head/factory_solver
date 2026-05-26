@@ -348,6 +348,16 @@ end
 
 ---@param event EventData.on_gui_click
 function handlers.on_open_module_picker(event)
+    -- Shift+Click is the slot-level copy/paste vocabulary, mirroring the
+    -- production-line-row clipboard but for a single module TypedName.
+    -- Routes before the Factoriopedia / right-click-clear / left-click-
+    -- picker branches so the modifier is unambiguous on filled and empty
+    -- slots alike.
+    if event.shift then
+        handlers.on_module_clipboard_shift_click(event)
+        return
+    end
+
     if common.try_open_factoriopedia(event) then return end
     local elem = event.element
     local dialog = assert(fs_util.find_upper(elem, "factory_solver_machine_setups"))
@@ -372,6 +382,65 @@ function handlers.on_open_module_picker(event)
         beacon_index = beacon_index,
         current_quality = current and current.quality or "normal",
     })
+end
+
+---Slot-level Shift+R copies the slot's current TypedName into the
+---per-player module clipboard; Shift+L writes the clipboard back into
+---another (or the same) slot via the shared write_module_to_machine_setups
+---path, which dispatches on_module_changed and re-runs the existing
+---is_module_effective warning logic. allowed_effects / allowed_categories
+---mismatches are not blocked at paste — the existing module-warning
+---overlay surfaces ineffective modules and lets the user decide.
+---@param event EventData.on_gui_click
+function handlers.on_module_clipboard_shift_click(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(elem, "factory_solver_machine_setups"))
+    local slot_index = elem.tags.slot_index --[[@as string]]
+    local beacon_index = elem.tags.beacon_index --[[@as integer?]]
+    local player = game.players[event.player_index]
+
+    local current
+    if beacon_index then
+        local affected_by_beacon = dialog.tags.affected_by_beacons[beacon_index] --[[@as AffectedByBeacon]]
+        current = affected_by_beacon.module_typed_names[slot_index]
+    else
+        local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
+        current = module_typed_names[slot_index]
+    end
+
+    if event.button == defines.mouse_button_type.right then
+        if not current then
+            player.create_local_flying_text {
+                text = { "factory-solver-clipboard-no-source-module" },
+                create_at_cursor = true,
+            }
+            player.play_sound { path = "utility/cannot_build" }
+            return
+        end
+        save.set_module_clipboard(event.player_index, current)
+        player.create_local_flying_text {
+            text = { "factory-solver-clipboard-copied-module" },
+            create_at_cursor = true,
+        }
+        player.play_sound { path = "utility/entity_settings_copied" }
+    elseif event.button == defines.mouse_button_type.left then
+        local clipboard = save.get_module_clipboard(event.player_index)
+        if not clipboard then
+            player.create_local_flying_text {
+                text = { "factory-solver-clipboard-empty" },
+                create_at_cursor = true,
+            }
+            player.play_sound { path = "utility/cannot_build" }
+            return
+        end
+        common.write_module_to_machine_setups(dialog, slot_index, beacon_index,
+            flib_table.deep_copy(clipboard))
+        player.create_local_flying_text {
+            text = { "factory-solver-clipboard-pasted-module" },
+            create_at_cursor = true,
+        }
+        player.play_sound { path = "utility/entity_settings_pasted" }
+    end
 end
 
 ---Show a warning while a quality module is set but the force has unlocked no
