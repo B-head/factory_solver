@@ -87,6 +87,21 @@ Date: ????
       maximum_quality_jump tiers above the source quality. Vanilla default is
       effectively unlimited; mods that lower the cap are now respected.
 ---------------------------------------------------------------------------------------------------
+Version: 0.4.3
+Date: 2026-05-27
+  Bugfixes:
+    - Honor LuaRecipePrototype.maximum_productivity, so module, beacon, and
+      research-bonus contributions can no longer push a capped recipe past
+      its engine-side productivity limit.
+    - Honor allowed_effects on both the recipe and the machine (or beacon),
+      so module effect kinds the engine would reject (e.g. productivity in a
+      recycler) no longer feed into the LP.
+    - Honor allowed_module_categories on both the recipe and the machine (or
+      beacon), so modules from a disallowed category contribute nothing
+      regardless of their effect kinds.
+    - Scale the external material source cost per material kind, fixing the
+      LP collapsing to all-zero whenever heat had to be drawn from a source.
+---------------------------------------------------------------------------------------------------
 Version: 0.4.2
 Date: 2026-05-26
   Gui:

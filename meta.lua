@@ -121,6 +121,17 @@ __factory_solver__storage = {}
 ---@field beacon_quantity integer
 ---@field module_typed_names table<string, TypedName>
 
+---Per-source module aggregation produced by accessor.get_total_modules.
+---machine_modules contains modules sitting in the machine's own slots.
+---beacon_groups holds one entry per beacon attached to the line, with
+---per-module counts already scaled by that beacon's distribution effectivity.
+---Splitting by source lets get_total_effectivity apply
+---(recipe ∩ machine).allowed_effects to machine modules and
+---(recipe ∩ beacon).allowed_effects to each beacon's modules independently.
+---@class TotalModules
+---@field machine_modules table<string, table<string, number>>
+---@field beacon_groups { beacon: LuaEntityPrototype, modules: table<string, table<string, number>> }[]
+
 ---@class PackedVariables
 ---@field x table<string, number>
 ---@field y table<string, number>

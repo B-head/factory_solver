@@ -1110,7 +1110,7 @@ end
 
 ---One virtual recipe per science pack item that at least one lab accepts.
 ---The picker dispatches by consumed_pack_name to the set of labs whose
----lab_inputs contains the pack. crafting_speed is folded in acc.get_crafting_speed
+---lab_inputs contains the pack. crafting_speed is folded in acc.get_virtual_recipe_rates
 ---as researching_speed × science_pack_drain_rate_percent/100, so 1 craft = 1
 ---pack consumed = 1 <research> emitted at base speed/drain.
 ---@param pack_prototype LuaItemPrototype

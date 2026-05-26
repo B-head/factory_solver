@@ -9,9 +9,31 @@ local slack_cost = 0
 -- recipes that produce the same product at different material efficiency:
 -- the LP now prefers the chain that draws less raw input. Without it those
 -- optima are degenerate and the IPM splits the flow arbitrarily.
-local source_cost = 1
+--
+-- The per-unit cost is scaled by material kind so the LP weight matches the
+-- natural magnitude of one "unit": items are 1 piece, fluids are conventionally
+-- 10x denser per recipe slot (vanilla writes 10 water per 1 plate), and <heat>
+-- is in joules at ~10 MW scale (a heat exchanger turns 10 MJ/s of heat into
+-- ~100 steam/s). Without this scaling, source_cost on <heat> alone would
+-- dominate the objective by seven orders of magnitude and the LP collapses
+-- to the all-zero solution whenever heat is sourced externally.
+local source_cost_item = 1
+local source_cost_fluid = 0.1
+local source_cost_heat = 100 / 10e6
 local elastic_cost = 2 ^ 10
 local target_cost = 2 ^ 20
+
+---@param variable_name string
+---@return number
+local function source_cost_for(variable_name)
+    if string.sub(variable_name, 1, 24) == "virtual_material/<heat>/" then
+        return source_cost_heat
+    elseif string.sub(variable_name, 1, 6) == "fluid/" then
+        return source_cost_fluid
+    else
+        return source_cost_item
+    end
+end
 
 local bridge_prefix = "|bridge|"
 
@@ -440,7 +462,7 @@ function M.create_problem(solution_name, constraints, production_lines)
         -- is far below elastic_cost so the shortage gate is unaffected.
         if deficits[constraint_name] then
             local slack_name = "|basic_source|" .. constraint_name
-            problem:add_objective(slack_name, source_cost)
+            problem:add_objective(slack_name, source_cost_for(constraint_name))
             problem:add_subject_term(slack_name, constraint_name, 1)
             problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
 
@@ -483,7 +505,7 @@ function M.create_problem(solution_name, constraints, production_lines)
         problem:add_equivalence_constraint(constraint_name, 0)
 
         local slack_name = "|basic_source|" .. constraint_name
-        problem:add_objective(slack_name, source_cost)
+        problem:add_objective(slack_name, source_cost_for(constraint_name))
         problem:add_subject_term(slack_name, constraint_name, 1)
         problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
 

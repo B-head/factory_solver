@@ -939,6 +939,72 @@ function M.get_crafting_speed_cap(recipe)
     end
 end
 
+---Productivity bonus ceiling for the given recipe. Mirrors get_crafting_speed_cap:
+---LuaRecipePrototype carries a vanilla-default 3.0 with smaller values on a few
+---Space Age recipes; VirtualRecipe leaves the field unset and the cap collapses
+---to math.huge until a future virtual recipe needs one. Consumed by
+---get_total_effectivity to clamp the final productivity sum.
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@return number
+function M.get_maximum_productivity(recipe)
+    ---@diagnostic disable-next-line: param-type-mismatch
+    if recipe.object_name == "LuaRecipePrototype" then
+        -- maximum_productivity landed in Factorio 2.0.77; the LuaCATS bundle
+        -- shipped with the build hasn't picked it up yet, so the read is real
+        -- but flagged as undefined here.
+        ---@diagnostic disable-next-line: undefined-field
+        return recipe.maximum_productivity
+    else
+        return recipe.maximum_productivity or math.huge
+    end
+end
+
+---Per-effect-kind allow mask for the (recipe, entity) pair. Returns a dict
+---over { speed, productivity, consumption, pollution, quality } with `true`
+---for kinds that both sides accept. Either side leaving allowed_effects nil
+---is treated as "no restriction" (Factorio semantics). VirtualRecipe never
+---declares allowed_effects, so the union read falls through nil-safely.
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@param entity LuaEntityPrototype
+---@return table<string, boolean>
+function M.get_allowed_effects(recipe, entity)
+    local ret = { speed = true, productivity = true, consumption = true,
+                  pollution = true, quality = true }
+    local function intersect(src)
+        if src == nil then return end
+        for k in pairs(ret) do
+            if src[k] == false then ret[k] = false end
+        end
+    end
+    ---@diagnostic disable-next-line: undefined-field
+    intersect(recipe.allowed_effects)
+    intersect(entity.allowed_effects)
+    return ret
+end
+
+---Intersection of recipe and entity allowed_module_categories. nil result
+---means "no restriction" on either side. The field is a set
+---(`dict[string → true]?`) — key absence means the category is NOT allowed,
+---which is the opposite convention to allowed_effects's `false` opt-out.
+---Consumed by get_total_effectivity to skip modules whose
+---LuaItemPrototype.category falls outside this intersection.
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@param entity LuaEntityPrototype
+---@return table<string, true>?
+function M.get_allowed_module_categories(recipe, entity)
+    ---@diagnostic disable-next-line: undefined-field
+    local r = recipe.allowed_module_categories
+    local e = entity.allowed_module_categories
+    if r == nil and e == nil then return nil end
+    if r == nil then return e end
+    if e == nil then return r end
+    local ret = {}
+    for k in pairs(r) do
+        if e[k] then ret[k] = true end
+    end
+    return ret
+end
+
 ---comment
 ---@param quality QualityID
 function M.get_quality_level(quality)
@@ -1065,31 +1131,34 @@ function M.trim_modules(module_typed_names, module_inventory_size)
     return ret
 end
 
----comment
+---Aggregate modules in slots into per-source counts. Beacon modules are
+---kept in a separate per-beacon list so get_total_effectivity can mask each
+---group against (recipe ∩ machine) or (recipe ∩ beacon)'s allowed_effects
+---independently. The pre-allowed_effects layout collapsed both into a single
+---table, which made it impossible to apply per-entity effect restrictions.
 ---@param machine LuaEntityPrototype
 ---@param module_typed_names table<string, TypedName>
 ---@param affected_by_beacons AffectedByBeacon[]
 ---@param bonuses ResearchBonuses?
----@return table<string, table<string, number>>
+---@return TotalModules
 function M.get_total_modules(machine, module_typed_names, affected_by_beacons, bonuses)
-    local module_counts = {}
-
+    ---@param dest table<string, table<string, number>>
     ---@param typed_name TypedName
     ---@param effectivity number
-    local function count(typed_name, effectivity)
+    local function count(dest, typed_name, effectivity)
         local name = typed_name.name
         local quality = typed_name.quality
-        if not module_counts[name] then
-            module_counts[name] = {}
+        if not dest[name] then
+            dest[name] = {}
         end
-        local inner = module_counts[name]
-        local value = inner[quality] or 0
-        inner[quality] = value + effectivity
+        local inner = dest[name]
+        inner[quality] = (inner[quality] or 0) + effectivity
     end
 
+    local machine_modules = {}
     module_typed_names = M.trim_modules(module_typed_names, machine.module_inventory_size)
     for _, typed_name in pairs(module_typed_names) do
-        count(typed_name, 1)
+        count(machine_modules, typed_name, 1)
     end
 
     -- Research-derived beacon distribution scales beacon contribution
@@ -1097,6 +1166,9 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
     -- distribution_effectivity. Module contribution from machine inventory is
     -- unaffected.
     local beacon_multiplier = 1 + ((bonuses and bonuses.beacon_distribution) or 0)
+
+    ---@type { beacon: LuaEntityPrototype, modules: table<string, table<string, number>> }[]
+    local beacon_groups = {}
 
     -- Machines that cannot receive beacon effects ignore any beacons attached
     -- to the line, so stale data on such a line never reaches the LP.
@@ -1111,24 +1183,58 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
                 local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
                     beacon.module_inventory_size)
 
+                local modules = {}
                 for _, typed_name in pairs(beacon_module_names) do
-                    count(typed_name, effectivity)
+                    count(modules, typed_name, effectivity)
                 end
+                flib_table.insert(beacon_groups, { beacon = beacon, modules = modules })
             end
         end
     end
 
-    return module_counts
+    return { machine_modules = machine_modules, beacon_groups = beacon_groups }
 end
 
----comment
----@param module_counts table<string, table<string, number>>
+---Collapse a TotalModules grouped layout back to the legacy
+---`name → quality → count` aggregate used by UI summary panels that only
+---want a flat module roster. Effect masking is intentionally NOT applied
+---here — the flat view shows which modules the user picked, not which ones
+---contributed to LP effectivity.
+---@param total TotalModules
+---@return table<string, table<string, number>>
+function M.flatten_total_modules(total)
+    local out = {}
+    local function merge(src)
+        for name, inner in pairs(src) do
+            if not out[name] then out[name] = {} end
+            for quality, count in pairs(inner) do
+                out[name][quality] = (out[name][quality] or 0) + count
+            end
+        end
+    end
+    merge(total.machine_modules)
+    for _, g in ipairs(total.beacon_groups) do
+        merge(g.modules)
+    end
+    return out
+end
+
+---Sum every contribution to a line's ModuleEffects: modules in the machine
+---slots, modules in attached beacon slots, the machine's effect_receiver
+---base_effect, and research bonuses. Modules are masked by recipe ∩ entity
+---allowed_effects per source (machine modules against the machine's
+---allowed_effects, each beacon's modules against that beacon's). base_effect
+---and research bonuses are intentionally NOT masked — they bypass the module
+---effect-type restriction in Factorio.
+---@param recipe (LuaRecipePrototype | VirtualRecipe)?
+---@param total_modules TotalModules
 ---@param effect_receiver EffectReceiver?
 ---@param recipe_typed_name TypedName?
 ---@param machine LuaEntityPrototype?
 ---@param bonuses ResearchBonuses?
+---@param maximum_productivity number?
 ---@return ModuleEffects
-function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_name, machine, bonuses)
+function M.get_total_effectivity(recipe, total_modules, effect_receiver, recipe_typed_name, machine, bonuses, maximum_productivity)
     ---@type ModuleEffects
     local ret = {
         speed = 1,
@@ -1157,27 +1263,51 @@ function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_na
         return effect * count
     end
 
-    for name, inner in pairs(module_counts) do
-        for quality, count in pairs(inner) do
-            local module = M.get_module(name)
-            if not module then
-                goto continue
+    ---@param modules table<string, table<string, number>>
+    ---@param allowed table<string, boolean>
+    ---@param allowed_categories table<string, true>?
+    local function apply_group(modules, allowed, allowed_categories)
+        for name, inner in pairs(modules) do
+            for quality, count in pairs(inner) do
+                local module = M.get_module(name)
+                if module
+                    and (allowed_categories == nil or allowed_categories[module.category])
+                then
+                    local effects = assert(module.module_effects)
+                    -- Quality scaling on module effects: default_multiplier is the
+                    -- engine-side per-tier multiplier (vanilla: 1, 1.3, 1.6, 1.9, 2.5
+                    -- for normal..legendary). Reading it through the QualityPrototype
+                    -- replaces the previous hardcoded (1 + quality_level * 0.3) so
+                    -- modded quality tiers are honored.
+                    local multiplier = M.get_module_quality_multiplier(quality)
+                    if allowed.speed then
+                        ret.speed = ret.speed + modify(effects.speed, count, multiplier, false)
+                    end
+                    if allowed.consumption then
+                        ret.consumption = ret.consumption + modify(effects.consumption, count, multiplier, true)
+                    end
+                    if allowed.productivity then
+                        ret.productivity = ret.productivity + modify(effects.productivity, count, multiplier, false)
+                    end
+                    if allowed.pollution then
+                        ret.pollution = ret.pollution + modify(effects.pollution, count, multiplier, true)
+                    end
+                    if allowed.quality then
+                        ret.quality = ret.quality + modify(effects.quality, count, multiplier, false)
+                    end
+                end
             end
+        end
+    end
 
-            local effects = assert(module.module_effects)
-            -- Quality scaling on module effects: default_multiplier is the
-            -- engine-side per-tier multiplier (vanilla: 1, 1.3, 1.6, 1.9, 2.5
-            -- for normal..legendary). Reading it through the QualityPrototype
-            -- replaces the previous hardcoded (1 + quality_level * 0.3) so
-            -- modded quality tiers are honored.
-            local multiplier = M.get_module_quality_multiplier(quality)
-
-            ret.speed = ret.speed + modify(effects.speed, count, multiplier, false)
-            ret.consumption = ret.consumption + modify(effects.consumption, count, multiplier, true)
-            ret.productivity = ret.productivity + modify(effects.productivity, count, multiplier, false)
-            ret.pollution = ret.pollution + modify(effects.pollution, count, multiplier, true)
-            ret.quality = ret.quality + modify(effects.quality, count, multiplier, false)
-            ::continue::
+    if recipe and machine then
+        apply_group(total_modules.machine_modules,
+            M.get_allowed_effects(recipe, machine),
+            M.get_allowed_module_categories(recipe, machine))
+        for _, g in ipairs(total_modules.beacon_groups) do
+            apply_group(g.modules,
+                M.get_allowed_effects(recipe, g.beacon),
+                M.get_allowed_module_categories(recipe, g.beacon))
         end
     end
 
@@ -1211,6 +1341,9 @@ function M.get_total_effectivity(module_counts, effect_receiver, recipe_typed_na
     ret.speed = math.max(ret.speed, 0.2)
     ret.consumption = math.max(ret.consumption, 0.2)
     ret.productivity = math.max(ret.productivity, 0)
+    if maximum_productivity then
+        ret.productivity = math.min(ret.productivity, maximum_productivity)
+    end
     ret.pollution = math.max(ret.pollution, 0.2)
     ret.quality = math.max(ret.quality, 0)
 
@@ -1235,10 +1368,11 @@ function M.normalize_production_line(line, bonuses)
     local recipe_quality = line.recipe_typed_name.quality
     local machine = tn.typed_name_to_machine(line.machine_typed_name)
     local machine_quality = line.machine_typed_name.quality
-    local module_counts = M.get_total_modules(machine, line.module_typed_names,
+    local total_modules = M.get_total_modules(machine, line.module_typed_names,
         line.affected_by_beacons, bonuses)
-    local effectivity = M.get_total_effectivity(module_counts, machine.effect_receiver,
-        line.recipe_typed_name, machine, bonuses)
+    local maximum_productivity = M.get_maximum_productivity(recipe)
+    local effectivity = M.get_total_effectivity(recipe, total_modules, machine.effect_receiver,
+        line.recipe_typed_name, machine, bonuses, maximum_productivity)
     local crafting_energy = M.get_crafting_energy(recipe)
     local crafting_speed_cap = M.get_crafting_speed_cap(recipe)
     -- Dispatch by recipe object kind. Real recipes (LuaRecipePrototype) are
