@@ -219,7 +219,7 @@ function M.register_fluid_temperature_single(materials, fluid_name, temperature)
     local key = string.format("fluid/%s@%g", fluid_name, temperature)
     if materials[key] then return end
     local fluid_proto = prototypes.fluid[fluid_name]
-    if not fluid_proto then return end
+    if not fluid_proto or fluid_proto.parameter then return end
     ---@type VirtualMaterial
     materials[key] = {
         type = "virtual_material",
@@ -240,7 +240,7 @@ end
 ---@param max_temperature number
 function M.register_fluid_temperature_range(materials, fluid_name, min_temperature, max_temperature)
     local fluid_proto = prototypes.fluid[fluid_name]
-    if not fluid_proto then return end
+    if not fluid_proto or fluid_proto.parameter then return end
     -- Clamp the FLT-sentinel values Factorio returns for unset ingredient bounds
     -- (e.g. -3.4e38 / 3.4e38) to the fluid's physical range.
     if min_temperature < fluid_proto.default_temperature then
