@@ -1,91 +1,38 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.0
 Date: ????
+  Features:
+    - Import / export solutions as a shared string, with multi-solution support.
+    - Bidirectional interop with Factory Planner via its shared-string format.
+    - Bidirectional interop with Helmod via its shared-string format.
+    - Accept arithmetic expressions (e.g. `1k+50`, `60/4`) in constraint amount
+      fields.
   Changes:
-    - Helmod codec: map virtual recipes across the (energy / resource / boiler /
-      fluid / rocket / agricultural / spoiling) lua_type discriminator instead
-      of dropping every non-recipe production line. Best-effort: research,
-      burnt, customized, and Helmod's pseudo-energy items still warn and drop
-      because they have no factory_solver counterpart.
-    - Helmod codec: omit the `factory` subtable on export of `spoiling`
-      virtual recipes (and any future `is_support_factory = false` Helmod
-      type), matching Helmod's own shape. Helmod's ModelCompute reads
-      `recipe.factory.energy_total` unconditionally when the field exists
-      and crashes if it's a placeholder; skipping the factory entirely
-      lets Helmod's solver skip the per-line energy math the same way it
-      does for its own spoilage recipes. On import we synthesize the
-      `entity-unknown` sentinel machine factory_solver expects.
-    - Helmod codec: surface a warning when an export produces zero recipes
-      despite the source solution having production lines, and a per-line
-      warning when a line is dropped because its `machine_typed_name` is
-      missing. Validates the serialised model round-trips through
-      `helpers.encode_string` / `loadstring` before returning so a malformed
-      payload is caught here instead of as an opaque Helmod-side crash.
-    - Helmod codec: substitute the agricultural-tower for the plant entity
-      in `<grow>` virtual recipe exports. factory_solver uses the plant
-      itself as the line's machine (it occupies a tower slot), but Helmod's
-      EntityPrototype:getCraftingSpeed dereferences energy_source_prototype
-      and crashes when fed a plant entity. The plant identity is preserved
-      in the FS recipe name (`<grow>{plant}:{seed}`) and restored on import.
-    - Helmod codec: drop thruster virtual recipes (`<run>{thruster_entity}`)
-      with a warning instead of exporting them as Helmod `lua_type = "energy"`.
-      Helmod's getEnergyMachines filter excludes the thruster prototype type,
-      so the entry would otherwise deserialize into a 0-W / 0-factory ghost
-      recipe with no meaningful semantics on Helmod's side.
-    - Helmod codec: drop import constraints / objectives whose Helmod-side
-      entry has `type="energy"` (the electricity / steam-heat pseudo-item).
-      factory_solver's LP has no electricity channel, so these were
-      previously silently coerced into "item" constraints and surfaced in
-      the UI as unknown-item "?" placeholders.
-    - Helmod codec: skip import of `factory.fuel = "steam-heat"` or
-      `"energy"` so the preset lookup fills in factory_solver's `<heat>`
-      virtual_material for heat-exchanger and similar heat-energy machines
-      instead of producing an unresolved "?" fuel slot.
-    - Helmod codec: never emit factory_solver virtual_material names (e.g.
-      `<heat>`) into the exported `factory.fuel` field. Helmod models heat
-      energy as a recipe ingredient (`steam-heat` pseudo-item), not as a
-      `factory.fuel` value, so writing the virtual name caused Helmod to
-      round-trip it verbatim and corrupted later imports with an unknown-
-      item fuel slot. Defensive `<`-prefix detection on the import side
-      keeps older exports recoverable.
-    - Helmod codec: fall back to `accessor.try_get_fixed_fuel` and then to
-      the user's FS fuel preset when import can't resolve `factory.fuel`
-      for a fuel-using machine. Heat-energy machines (which Helmod stores
-      without factory.fuel) take the fixed-fuel branch; generic burners
-      (stone-furnace, pY's burner family, ...) take the preset branch.
-      Without these fallbacks the imported line entered storage with a
-      nil fuel_typed_name and tripped `normalize_production_line`'s
-      assert during the first solve.
-    - Helmod codec: dedupe import production lines that resolve to the
-      same (type, name, quality) tuple. Helmod's hierarchical model can
-      hold the same recipe in multiple blocks and our flattening turned
-      that into duplicate LP variables, tripping `add_objective`'s "same
-      name" assert. Subsequent occurrences are dropped with a warning.
-    - Helmod codec: aggregate the per-recipe `beacon per_factory`, module-
-      priority, and Helmod-specific-constraints import warnings into one
-      counted line each. These fire on every recipe that uses the feature
-      and otherwise drown out the rare per-line warnings (duplicate
-      recipe, production multiplier ≠ 1, unmappable virtual recipe).
-    - Factory Planner codec: surface previously-silent feature drops.
-      Import: warn on subfloor flattening, on per-line `percentage` ≠
-      100%, on inactive lines being imported as active, and on dropped
-      `priority_product` selection (the last three aggregated as one
-      counted line each, since the recipe identity isn't actionable).
-      Export: warn on upper / equal item-fluid bounds (FP's product
-      target has produce-at-least semantics) and on dropped
-      temperature constraints (FP has no fluid-temperature dimension).
     - Route quality multiplier calculations through Factorio 2.0's per-prototype
-      quality runtime APIs (LuaQualityPrototype::default_multiplier,
-      LuaEntityPrototype::get_max_energy_usage / get_fluid_usage_per_tick /
-      get_pumping_speed / get_researching_speed / get_crafting_speed at a given
-      quality) instead of assuming the vanilla 1 + 0.3 x tier constants. Per-second
-      throughputs for virtual recipes (boilers, reactors, generators, fusion-*,
-      thrusters, offshore-pumps, mining, plants, labs) are now derived at solve
-      time from the engine. Vanilla numerics are preserved; mods that customize
-      QualityPrototype multipliers or per-machine quality scaling are now honored.
-    - Cap quality cascade decomposition at utility-constants
-      maximum_quality_jump tiers above the source quality. Vanilla default is
-      effectively unlimited; mods that lower the cap are now respected.
+      quality runtime APIs instead of assuming the vanilla 1 + 0.3 x tier
+      constants. Per-second throughputs for virtual recipes (boilers, reactors,
+      generators, fusion-*, thrusters, offshore-pumps, mining, plants, labs) are
+      now derived from the engine, honoring mods that customize quality scaling.
+    - Cap quality cascade decomposition at utility-constants maximum_quality_jump
+      tiers above the source quality, so mods that lower the cap are respected.
+    - Extract hardcoded UI strings into the locale file in preparation for
+      translation.
+  Gui:
+    - Replace the module and beacon choose-elem-button with custom pickers that
+      mark modules whose effects are masked by the current recipe or machine's
+      allowed_effects / allowed_module_categories with a warning overlay and a
+      tooltip, while still allowing the pick.
+    - Mark already-set modules whose effects are fully masked by the current
+      recipe / machine with a top-right warning overlay, and surface a tooltip
+      on the row.
+    - Add Shift+Click clipboard for module sets in the machine settings dialog
+      and for full machine settings on the production line row.
+    - Add a quality multi-select on bulk recipe addition.
+    - Use an engine-style tool_button row for the quality selectors.
+    - Open Factoriopedia on Alt+left-click of elem_tooltip buttons.
+    - Tag research and spoilage virtual recipes with category overlays, and use
+      the pre-spoilage item icon for spoilage entries.
+    - Custom shortcut icon and lowercase "S" thumbnail.
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.4
 Date: 2026-05-28
