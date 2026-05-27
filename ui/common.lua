@@ -83,6 +83,16 @@ function M.create_decorated_sprite_button(data)
     local is_hidden = data.is_hidden or false
     local is_unresearched = data.is_unresearched or false
     local top_right_sprite = data.top_right_sprite --[[@as string?]]
+    if not top_right_sprite and typed_name.type == "virtual_recipe" then
+        local recipe = storage.virtuals.recipe[typed_name.name]
+        if recipe then
+            if recipe.consumed_pack_name then
+                top_right_sprite = "factory-solver-research-overlay"
+            elseif recipe.is_spoilage then
+                top_right_sprite = "factory-solver-spoilage-overlay"
+            end
+        end
+    end
     local children = {}
 
     if typed_name.temperature ~= nil then

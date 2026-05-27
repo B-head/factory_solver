@@ -194,6 +194,42 @@ data:extend({
     },
 })
 
+-- Tight-cropped variants of __core__ utility sprites, used as the top-right
+-- overlay on virtual recipes that need a category indicator (research, spoilage).
+-- The stock utility sprites have significant transparent padding inside their
+-- frames, which made the overlay render visibly smaller and shifted relative
+-- to utility/warning_icon (which fills its frame fully) when scaled into the
+-- small overlay slot. Cropping to each sprite's content bounding box lets the
+-- overlay fill the allocated px the same way the warning icon does.
+data:extend({
+    {
+        -- bbox in __core__'s technology-white.png first mip level: (17,16)-(47,48).
+        type = "sprite",
+        name = "factory-solver-research-overlay",
+        filename = "__core__/graphics/icons/mip/technology-white.png",
+        x = 17,
+        y = 16,
+        width = 32,
+        height = 32,
+        flags = { "gui-icon" },
+    },
+    {
+        -- Pre-rendered from __core__'s clock-icon.png: the source clock content
+        -- is 24x29 (non-square), so feeding it directly to an image_style with
+        -- stretch_image_to_widget_size produced a visibly smaller / aspect-
+        -- mismatched render than the 32x32-square research overlay. We pad the
+        -- content to square then upscale to 32x32 in the bundled asset so the
+        -- intrinsic sprite size matches the research overlay and the round
+        -- clock face stays circular when the overlay slot stretches it.
+        type = "sprite",
+        name = "factory-solver-spoilage-overlay",
+        filename = "__factory_solver__/graphics/spoilage-overlay.png",
+        width = 32,
+        height = 32,
+        flags = { "gui-icon" },
+    },
+})
+
 local styles = data.raw["gui-style"].default
 
 -- common --
