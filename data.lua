@@ -558,6 +558,14 @@ styles.factory_solver_filter_scroll_pane = {
     right_margin = 12,
 }
 
+styles.factory_solver_fit_filter_scroll_pane = {
+    type = "scroll_pane_style",
+    parent = "deep_slots_scroll_pane",
+    maximal_height = 360,
+    left_margin = 12,
+    right_margin = 12,
+}
+
 styles.factory_solver_filter_background_frame = {
     type = "frame_style",
     parent = "factory_solver_slot_background_frame",

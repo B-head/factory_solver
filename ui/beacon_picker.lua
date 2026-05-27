@@ -165,17 +165,22 @@ return {
         style = "factory_solver_filter_picker_frame",
         direction = "vertical",
         {
-            type = "frame",
-            style = "factory_solver_filter_group_background_frame",
-            style_mods = { margin = 12 },
+            type = "scroll-pane",
+            style = "factory_solver_fit_filter_scroll_pane",
+            horizontal_scroll_policy = "never",
+            vertical_scroll_policy = "auto-and-reserve-space",
             {
-                type = "table",
-                name = "beacon_grid",
-                style = "filter_slot_table",
-                column_count = 10,
-                handler = {
-                    on_added = handlers.on_make_beacon_grid,
-                    on_craft_visible_changed = handlers.on_make_beacon_grid,
+                type = "frame",
+                style = "factory_solver_slot_background_frame",
+                {
+                    type = "table",
+                    name = "beacon_grid",
+                    style = "filter_slot_table",
+                    column_count = 10,
+                    handler = {
+                        on_added = handlers.on_make_beacon_grid,
+                        on_craft_visible_changed = handlers.on_make_beacon_grid,
+                    },
                 },
             },
         },
