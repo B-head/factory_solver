@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.0
-Date: ????
+Date: 2026-05-28
   Features:
     - Import / export solutions as a shared string, with multi-solution support.
     - Bidirectional interop with Factory Planner via its shared-string format.
