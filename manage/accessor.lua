@@ -1004,16 +1004,28 @@ end
 ---@param quality QualityID
 ---@param effectivity_speed number
 ---@param crafting_speed_cap number
+---@param bonuses ResearchBonuses?
 ---@return number
-function M.get_crafting_speed(machine, quality, effectivity_speed, crafting_speed_cap)
+function M.get_crafting_speed(machine, quality, effectivity_speed, crafting_speed_cap, bonuses)
     local ret
     if machine.type == "lab" then
         -- 1 craft of a <research>{pack} virtual recipe represents 1 unit of
-        -- research progress. researching_speed alone defines the rate; the
-        -- pack-consumption side of drain_rate is applied as an input-only
-        -- productivity-like factor in pre_solve, so output (research) and
-        -- input (pack) can scale independently.
+        -- research progress. researching_speed scales the unit rate; the
+        -- pack-consumption side (drain_rate, pack durability) is layered on
+        -- the input ingredient by apply_lab_input_productivity_to_ingredient,
+        -- so output (research progress) and input (pack count) stay linked
+        -- by the 1:1 invariant baked into the virtual recipe but scale on
+        -- independent axes.
+        -- research_unit_energy (seconds per research unit, snapshotted from
+        -- force.current_research via the Research bonuses dialog; defaults
+        -- to 30s for vanilla automation-science-pack) divides the rate so
+        -- that a vanilla lab + automation-science-pack settles at
+        -- 1/30 pack/sec/lab rather than the unscaled 1 pack/sec/lab.
         ret = machine.get_researching_speed(quality)
+        local rue = bonuses and bonuses.research_unit_energy
+        if rue and rue > 0 then
+            ret = ret / rue
+        end
     elseif machine.type == "offshore-pump" then
         -- get_pumping_speed returns per-tick units; offshore-pump virtual
         -- recipes bake acc.second_per_tick into product.amount to compensate.
@@ -1312,7 +1324,7 @@ function M.normalize_production_line(line, bonuses)
         line.recipe_typed_name, machine, bonuses, maximum_productivity)
     local crafting_energy = M.get_crafting_energy(recipe)
     local crafting_speed_cap = M.get_crafting_speed_cap(recipe)
-    local crafting_speed = M.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap)
+    local crafting_speed = M.get_crafting_speed(machine, machine_quality, effectivity.speed, crafting_speed_cap, bonuses)
 
     ---@type NormalizedAmount[]
     local products = {}

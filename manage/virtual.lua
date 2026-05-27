@@ -1107,9 +1107,16 @@ end
 
 ---One virtual recipe per science pack item that at least one lab accepts.
 ---The picker dispatches by consumed_pack_name to the set of labs whose
----lab_inputs contains the pack. crafting_speed is folded in acc.get_crafting_speed
----as researching_speed × science_pack_drain_rate_percent/100, so 1 craft = 1
----pack consumed = 1 <research> emitted at base speed/drain.
+---lab_inputs contains the pack. The per-craft 1 pack → 1 <research>
+---invariant is what the recipe encodes; the per-second rate is composed
+---by two independent axes outside this file:
+---  * acc.get_crafting_speed folds in researching_speed and divides by
+---    bonuses.research_unit_energy (seconds per research unit), so a
+---    vanilla lab + automation-science-pack settles at 1/30 craft/sec.
+---  * acc.apply_lab_input_productivity_to_ingredient scales the
+---    pack-side ingredient by science_pack_drain_rate_percent and by the
+---    pack's quality durability, keeping the pack/research ratio
+---    independent from the speed axis.
 ---@param pack_prototype LuaItemPrototype
 ---@param labs LuaEntityPrototype[]
 ---@return (VirtualRecipe|VirtualMaterial)[]

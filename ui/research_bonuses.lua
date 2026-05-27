@@ -343,6 +343,7 @@ return {
                 scalar_row("Laboratory productivity", "laboratory_productivity"),
                 scalar_row("Laboratory speed", "laboratory_speed"),
                 scalar_row("Beacon distribution", "beacon_distribution"),
+                scalar_row("Seconds per research unit", "research_unit_energy"),
             },
             {
                 type = "frame",
