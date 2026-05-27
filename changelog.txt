@@ -1,7 +1,17 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.4
 Date: ????
-  Changes:
+  Gui:
+    - Wrap the machine settings dialog content in a scroll-pane so the
+      Confirm button and lower sections stay reachable when many compatible
+      machines or beacon rows push the dialog past the screen edge.
+  Bugfixes:
+    - Honor the current research's research_unit_energy when computing the
+      lab science-pack rate, fixing the solver under-estimating required lab
+      counts by roughly 30x in the vanilla case.
+    - Skip parameter fluids when registering fluid-temperature virtual
+      materials, so parameter-0 .. parameter-9 no longer appear as
+      selectable entries in the constraint picker's Virtual tab.
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.3
 Date: 2026-05-27
