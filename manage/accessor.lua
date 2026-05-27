@@ -1105,7 +1105,15 @@ end
 ---                                   slots / radius instead. Verified
 ---                                   in-game on 2026-05-24)
 ---  offshore-pump                 -> get_pumping_speed(q)
----  lab                           -> get_researching_speed(q)
+---  lab                           -> get_researching_speed(q) / research_unit_energy
+---                                   (research_unit_energy = seconds per
+---                                   research unit, snapshotted from
+---                                   force.current_research by the Research
+---                                   bonuses dialog; defaults to 30s for the
+---                                   vanilla automation-science-pack. A
+---                                   vanilla lab + automation-science-pack
+---                                   therefore settles at 1/30 pack/sec/lab
+---                                   rather than the unscaled 1 pack/sec/lab)
 ---  plant / agricultural-tower    -> 1.0 (growth_ticks lives on the plant
 ---                                   prototype; tower quality has no effect)
 ---  default                       -> get_crafting_speed(q) (covers every
@@ -1113,12 +1121,13 @@ end
 ---All return values are normalised to "per second" (per-tick APIs are
 ---multiplied by second_per_tick internally). effectivity must be applied
 ---by the caller (this function is a pure helper depending only on machine
----+ quality).
+---+ quality + research-derived scalars).
 ---When the API returns nil (modded entity / placeholder), falls back to 0.
 ---@param machine LuaEntityPrototype
 ---@param quality QualityID
+---@param bonuses ResearchBonuses?
 ---@return number
-function M.get_virtual_recipe_rates(machine, quality)
+function M.get_virtual_recipe_rates(machine, quality, bonuses)
     local t = machine.type
     if t == "boiler" or t == "reactor" then
         return (machine.get_max_energy_usage(quality) or 0) * M.second_per_tick
@@ -1133,7 +1142,21 @@ function M.get_virtual_recipe_rates(machine, quality)
     elseif t == "offshore-pump" then
         return (machine.get_pumping_speed(quality) or 0) * M.second_per_tick
     elseif t == "lab" then
-        return machine.get_researching_speed(quality) or 0
+        local rate = machine.get_researching_speed(quality) or 0
+        -- 1 craft of a <research>{pack} virtual recipe represents 1 unit of
+        -- research progress. researching_speed scales the unit rate; the
+        -- pack-consumption side (drain_rate, pack durability) is layered on
+        -- the input ingredient by apply_lab_input_productivity_to_ingredient,
+        -- so output (research progress) and input (pack count) stay linked
+        -- by the 1:1 invariant baked into the virtual recipe but scale on
+        -- independent axes. Dividing by research_unit_energy here makes the
+        -- final rate "packs per second per lab" rather than "research units
+        -- per second per lab".
+        local rue = bonuses and bonuses.research_unit_energy
+        if rue and rue > 0 then
+            rate = rate / rue
+        end
+        return rate
     elseif t == "plant" or t == "agricultural-tower" then
         return 1.0
     else
@@ -1462,7 +1485,7 @@ function M.normalize_production_line(line, bonuses)
             or machine.mining_speed
             or 0
     else
-        crafting_speed = M.get_virtual_recipe_rates(machine, machine_quality)
+        crafting_speed = M.get_virtual_recipe_rates(machine, machine_quality, bonuses)
     end
     crafting_speed = math.min(crafting_speed * effectivity.speed, crafting_speed_cap)
 

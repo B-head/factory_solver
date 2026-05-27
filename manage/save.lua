@@ -117,6 +117,7 @@ function M.default_research_bonuses()
         laboratory_productivity = 0,
         laboratory_speed = 0,
         beacon_distribution = 0,
+        research_unit_energy = 30,
         unlocked_qualities = { normal = true },
     }
 end
@@ -151,6 +152,14 @@ function M.reinit_force_data(force_index)
         -- opts in. LuaForce values are deliberately not snapshotted here.
         if not force_data.research_bonuses then
             force_data.research_bonuses = M.default_research_bonuses()
+        end
+        -- Saves opted in before research_unit_energy existed still have the
+        -- field nil, which would silently fall back to "no scaling" in the
+        -- lab branch of get_crafting_speed. Backfill with the 30s default so
+        -- the opted-in user gets the new behaviour without having to reopen
+        -- the dialog and re-Sync.
+        if force_data.research_bonuses and not force_data.research_bonuses.research_unit_energy then
+            force_data.research_bonuses.research_unit_energy = 30
         end
 
         for _, solution in pairs(force_data.solutions) do
@@ -329,6 +338,16 @@ function M.snapshot_force_research_bonuses(force)
     bonuses.laboratory_productivity = cleanup_float(force.laboratory_productivity_bonus)
     bonuses.laboratory_speed = cleanup_float(force.laboratory_speed_modifier)
     bonuses.beacon_distribution = cleanup_float(force.beacon_distribution_modifier)
+    -- research_unit_energy is per-technology, so we snapshot the active
+    -- research's value (or 30s as the vanilla automation-science-pack default
+    -- when no research is queued). The runtime field returns ticks at the
+    -- baseline lab power draw, so we divide by acc.second_per_tick (=60 here)
+    -- to land on the seconds-per-unit semantics the rest of the mod uses.
+    -- cleanup_float is unnecessary: the value is read directly from the
+    -- prototype, not accumulated through additive deltas the way the
+    -- modifier-based scalars above are.
+    local rue_ticks = force.current_research and force.current_research.research_unit_energy
+    bonuses.research_unit_energy = rue_ticks and (rue_ticks / acc.second_per_tick) or 30
 
     for _, recipe_name in ipairs(M.list_productivity_research_recipes()) do
         local raw = force.recipes[recipe_name] and force.recipes[recipe_name].productivity_bonus or 0

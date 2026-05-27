@@ -343,6 +343,7 @@ return {
                 scalar_row({ "factory-solver-laboratory-productivity" }, "laboratory_productivity"),
                 scalar_row({ "factory-solver-laboratory-speed" }, "laboratory_speed"),
                 scalar_row({ "factory-solver-beacon-distribution-efficiency" }, "beacon_distribution"),
+                scalar_row({ "factory-solver-research-unit-energy" }, "research_unit_energy"),
             },
             {
                 type = "frame",

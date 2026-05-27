@@ -78,6 +78,7 @@ __factory_solver__storage = {}
 ---@field laboratory_productivity number
 ---@field laboratory_speed number
 ---@field beacon_distribution number
+---@field research_unit_energy number
 ---@field unlocked_qualities table<string, boolean>
 
 ---@class RelationToRecipes

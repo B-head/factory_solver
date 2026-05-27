@@ -880,121 +880,93 @@ return {
     },
     {
         type = "frame",
-        style = "inside_shallow_frame_with_padding",
-        direction = "vertical",
+        style = "inside_shallow_frame",
         {
-            type = "label",
-            caption = "No configurable items.",
-            visible = false,
-            handler = {
-                on_added = handlers.on_no_configurable_items_visible,
-            },
-        },
-        {
-            type = "label",
-            style = "caption_label",
-            caption = { "factory-solver-machine" },
-            handler = {
-                on_added = handlers.on_hide_for_plant,
-            },
-        },
-        {
-            type = "frame",
-            style = "factory_solver_slot_background_frame",
-            handler = {
-                on_added = handlers.on_hide_for_plant,
-            },
-            {
-                type = "table",
-                style = "filter_slot_table",
-                column_count = 6,
-                handler = {
-                    on_added = handlers.on_make_machine_table,
-                },
-            },
-        },
-        {
-            type = "label",
-            name = "no_machine_label",
-            single_line = false,
-            visible = false,
-        },
-        -- Plant-only counterpart to the Machine label+frame above: plant lines
-        -- replace the machine identity with a substrate tile pick, so this sits
-        -- at the same vertical position as Machine. on_hide_for_plant hides
-        -- the Machine block iff the line is a plant; on_substrate_visible
-        -- makes this block visible only then, so exactly one of the two shows.
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
+            type = "scroll-pane",
+            style = "factory_solver_dialog_fit_scroll_pane",
             direction = "vertical",
-            handler = {
-                on_added = handlers.on_substrate_visible,
+            vertical_scroll_policy = "auto-and-reserve-space",
+            {
+                type = "label",
+                caption = "No configurable items.",
+                visible = false,
+                handler = {
+                    on_added = handlers.on_no_configurable_items_visible,
+                },
             },
             {
                 type = "label",
                 style = "caption_label",
-                caption = { "factory-solver-substrate" },
+                caption = { "factory-solver-machine" },
+                handler = {
+                    on_added = handlers.on_hide_for_plant,
+                },
             },
             {
                 type = "frame",
                 style = "factory_solver_slot_background_frame",
+                handler = {
+                    on_added = handlers.on_hide_for_plant,
+                },
                 {
                     type = "table",
                     style = "filter_slot_table",
                     column_count = 6,
                     handler = {
-                        on_added = handlers.on_make_substrate_table,
+                        on_added = handlers.on_make_machine_table,
                     },
                 },
             },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_centering_horizontal_flow",
-            direction = "horizontal",
-            visible = script.feature_flags.quality,
-            handler = {
-                on_added = handlers.on_hide_for_plant,
-            },
             {
-                type = "flow",
-                direction = "horizontal",
-                style_mods = { horizontal_spacing = 0 },
-                handler = {
-                    on_added = handlers.on_make_machine_quality_buttons,
-                },
+                type = "label",
+                name = "no_machine_label",
+                single_line = false,
+                visible = false,
             },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
-            handler = {
-                on_machine_setup_changed = handlers.on_total_effectivity_visible,
-            },
-            {
-                type = "line",
-                style = "factory_solver_line",
-            },
+            -- Plant-only counterpart to the Machine label+frame above: plant lines
+            -- replace the machine identity with a substrate tile pick, so this sits
+            -- at the same vertical position as Machine. on_hide_for_plant hides
+            -- the Machine block iff the line is a plant; on_substrate_visible
+            -- makes this block visible only then, so exactly one of the two shows.
             {
                 type = "flow",
                 style = "factory_solver_no_spacing_vertical_flow_style",
                 direction = "vertical",
                 handler = {
-                    on_machine_setup_changed = handlers.on_modules_visible,
+                    on_added = handlers.on_substrate_visible,
                 },
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = { "factory-solver-modules" },
+                    caption = { "factory-solver-substrate" },
+                },
+                {
+                    type = "frame",
+                    style = "factory_solver_slot_background_frame",
+                    {
+                        type = "table",
+                        style = "filter_slot_table",
+                        column_count = 6,
+                        handler = {
+                            on_added = handlers.on_make_substrate_table,
+                        },
+                    },
+                },
+            },
+            {
+                type = "flow",
+                style = "factory_solver_centering_horizontal_flow",
+                direction = "horizontal",
+                visible = script.feature_flags.quality,
+                handler = {
+                    on_added = handlers.on_hide_for_plant,
                 },
                 {
                     type = "flow",
                     direction = "horizontal",
+                    style_mods = { horizontal_spacing = 0 },
                     handler = {
-                        on_machine_setup_changed = handlers.on_make_machine_modules,
-                        on_module_changed = handlers.on_make_machine_modules,
+                        on_added = handlers.on_make_machine_quality_buttons,
                     },
                 },
             },
@@ -1003,98 +975,131 @@ return {
                 style = "factory_solver_no_spacing_vertical_flow_style",
                 direction = "vertical",
                 handler = {
-                    on_machine_setup_changed = handlers.on_beacons_visible,
+                    on_machine_setup_changed = handlers.on_total_effectivity_visible,
+                },
+                {
+                    type = "line",
+                    style = "factory_solver_line",
+                },
+                {
+                    type = "flow",
+                    style = "factory_solver_no_spacing_vertical_flow_style",
+                    direction = "vertical",
+                    handler = {
+                        on_machine_setup_changed = handlers.on_modules_visible,
+                    },
+                    {
+                        type = "label",
+                        style = "caption_label",
+                        caption = { "factory-solver-modules" },
+                    },
+                    {
+                        type = "flow",
+                        direction = "horizontal",
+                        handler = {
+                            on_machine_setup_changed = handlers.on_make_machine_modules,
+                            on_module_changed = handlers.on_make_machine_modules,
+                        },
+                    },
+                },
+                {
+                    type = "flow",
+                    style = "factory_solver_no_spacing_vertical_flow_style",
+                    direction = "vertical",
+                    handler = {
+                        on_machine_setup_changed = handlers.on_beacons_visible,
+                    },
+                    {
+                        type = "label",
+                        style = "caption_label",
+                        caption = { "factory-solver-beacons" },
+                    },
+                    {
+                        type = "table",
+                        style = "factory_solver_beacons_table",
+                        column_count = 4,
+                        draw_horizontal_lines = true,
+                        handler = {
+                            on_added = handlers.on_make_beacons_table,
+                            on_beacon_changed = handlers.on_make_beacons_table,
+                        },
+                    },
+                    {
+                        type = "button",
+                        caption = { "factory-solver-add-beacon" },
+                        handler = {
+                            [defines.events.on_gui_click] = handlers.on_add_beacon_click,
+                        },
+                    },
                 },
                 {
                     type = "label",
                     style = "caption_label",
-                    caption = { "factory-solver-beacons" },
+                    caption = { "factory-solver-effective-modules" },
                 },
                 {
-                    type = "table",
-                    style = "factory_solver_beacons_table",
-                    column_count = 4,
-                    draw_horizontal_lines = true,
-                    handler = {
-                        on_added = handlers.on_make_beacons_table,
-                        on_beacon_changed = handlers.on_make_beacons_table,
+                    type = "frame",
+                    style = "factory_solver_effectivity_slot_background_frame",
+                    {
+                        type = "table",
+                        style = "filter_slot_table",
+                        column_count = 6,
+                        handler = {
+                            on_machine_setup_changed = handlers.on_make_total_effectivity,
+                            on_beacon_changed = handlers.on_make_total_effectivity,
+                            on_module_changed = handlers.on_make_total_effectivity,
+                        },
                     },
                 },
+                -- Kept out of the Modules section on purpose: on_modules_visible
+                -- hides that section for machines with no module slots, but such a
+                -- machine can still take quality modules through beacons and the
+                -- warning must stay visible. single_line is a LuaStyle property, so
+                -- it must go in style_mods (not as an element field) to wrap.
                 {
-                    type = "button",
-                    caption = { "factory-solver-add-beacon" },
+                    type = "label",
+                    visible = false,
+                    style_mods = {
+                        single_line = false,
+                        font_color = { r = 1, g = 0.7, b = 0.2 },
+                        top_margin = 4,
+                        maximal_width = 280,
+                    },
+                    caption = { "factory-solver-quality-module-warning" },
                     handler = {
-                        [defines.events.on_gui_click] = handlers.on_add_beacon_click,
+                        on_added = handlers.on_quality_module_warning_update,
+                        on_machine_setup_changed = handlers.on_quality_module_warning_update,
+                        on_module_changed = handlers.on_quality_module_warning_update,
+                        on_beacon_changed = handlers.on_quality_module_warning_update,
                     },
                 },
             },
             {
-                type = "label",
-                style = "caption_label",
-                caption = { "factory-solver-effective-modules" },
-            },
-            {
-                type = "frame",
-                style = "factory_solver_effectivity_slot_background_frame",
-                {
-                    type = "table",
-                    style = "filter_slot_table",
-                    column_count = 6,
-                    handler = {
-                        on_machine_setup_changed = handlers.on_make_total_effectivity,
-                        on_beacon_changed = handlers.on_make_total_effectivity,
-                        on_module_changed = handlers.on_make_total_effectivity,
-                    },
-                },
-            },
-            -- Kept out of the Modules section on purpose: on_modules_visible
-            -- hides that section for machines with no module slots, but such a
-            -- machine can still take quality modules through beacons and the
-            -- warning must stay visible. single_line is a LuaStyle property, so
-            -- it must go in style_mods (not as an element field) to wrap.
-            {
-                type = "label",
-                visible = false,
-                style_mods = {
-                    single_line = false,
-                    font_color = { r = 1, g = 0.7, b = 0.2 },
-                    top_margin = 4,
-                    maximal_width = 280,
-                },
-                caption = { "factory-solver-quality-module-warning" },
+                type = "flow",
+                style = "factory_solver_no_spacing_vertical_flow_style",
+                direction = "vertical",
                 handler = {
-                    on_added = handlers.on_quality_module_warning_update,
-                    on_machine_setup_changed = handlers.on_quality_module_warning_update,
-                    on_module_changed = handlers.on_quality_module_warning_update,
-                    on_beacon_changed = handlers.on_quality_module_warning_update,
+                    on_machine_setup_changed = handlers.on_fuel_visible,
                 },
-            },
-        },
-        {
-            type = "flow",
-            style = "factory_solver_no_spacing_vertical_flow_style",
-            direction = "vertical",
-            handler = {
-                on_machine_setup_changed = handlers.on_fuel_visible,
-            },
-            {
-                type = "line",
-                style = "factory_solver_line",
-            },
-            {
-                type = "label",
-                style = "caption_label",
-                caption = { "factory-solver-fuel" },
-            },
-            {
-                type = "frame",
-                style = "factory_solver_slot_background_frame",
                 {
-                    type = "table",
-                    style = "filter_slot_table",
-                    column_count = 6,
-                    handler = {
-                        on_machine_setup_changed = handlers.on_make_fuel_table,
+                    type = "line",
+                    style = "factory_solver_line",
+                },
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = { "factory-solver-fuel" },
+                },
+                {
+                    type = "frame",
+                    style = "factory_solver_slot_background_frame",
+                    {
+                        type = "table",
+                        style = "filter_slot_table",
+                        column_count = 6,
+                        handler = {
+                            on_machine_setup_changed = handlers.on_make_fuel_table,
+                        },
                     },
                 },
             },

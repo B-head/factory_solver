@@ -566,6 +566,13 @@ styles.factory_solver_fit_filter_scroll_pane = {
     right_margin = 12,
 }
 
+styles.factory_solver_dialog_fit_scroll_pane = {
+    type = "scroll_pane_style",
+    parent = "scroll_pane",
+    padding = 12,
+    maximal_height = 600,
+}
+
 styles.factory_solver_filter_background_frame = {
     type = "frame_style",
     parent = "factory_solver_slot_background_frame",
