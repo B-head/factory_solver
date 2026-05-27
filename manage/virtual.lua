@@ -1076,11 +1076,11 @@ function M.create_spoilage_virtual(item_prototype)
     local recipe = {
         type = "virtual_recipe",
         name = "<spoil>" .. item_prototype.name,
-        sprite_path = "item/" .. spoil_result.name,
+        sprite_path = "item/" .. item_prototype.name,
         elem_tooltip = { type = "item", name = item_prototype.name },
-        order = spoil_result.order .. ":" .. item_prototype.name,
-        group_name = spoil_result.group.name,
-        subgroup_name = spoil_result.subgroup.name,
+        order = item_prototype.order .. ":" .. spoil_result.name,
+        group_name = item_prototype.group.name,
+        subgroup_name = item_prototype.subgroup.name,
         products = {
             {
                 type = "item",
