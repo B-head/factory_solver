@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.4
-Date: ????
+Date: 2026-05-28
   Gui:
     - Wrap the machine settings dialog content in a scroll-pane so the
       Confirm button and lower sections stay reachable when many compatible
