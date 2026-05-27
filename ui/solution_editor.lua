@@ -7,6 +7,7 @@ local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
 local machine_setup = require "ui/machine_setup"
+local quality_variants_adder = require "ui/quality_variants_adder"
 local production_line_adder = require "ui/production_line_adder"
 
 local headers = {
@@ -116,7 +117,7 @@ function handlers.make_production_line_table(event)
                 typed_name = typed_name,
                 is_hidden = is_hidden,
                 is_unresearched = is_unresearched,
-                tags = recipe_tags,
+                tags = flib_table.deep_merge { recipe_tags, { is_recipe_icon = true } },
                 handler = {
                     [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                 },
@@ -534,7 +535,16 @@ function handlers.on_production_line_recipe_click(event)
 
     local tags = event.element.tags
     if event.button == defines.mouse_button_type.left then
-        common.open_gui(event.player_index, true, machine_setup, tags)
+        if tags.is_recipe_icon and script.feature_flags.quality then
+            local recipe_typed_name = tags.recipe_typed_name --[[@as TypedName]]
+            common.open_gui(event.player_index, true, quality_variants_adder, {
+                line_index = tags.line_index,
+                recipe_typed_name = recipe_typed_name,
+                source_quality = recipe_typed_name.quality,
+            })
+        else
+            common.open_gui(event.player_index, true, machine_setup, tags)
+        end
     elseif event.button == defines.mouse_button_type.right then
         local solution = assert(save.get_selected_solution(event.player_index))
 

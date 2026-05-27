@@ -241,6 +241,58 @@ function M.on_quality_button_clicked(clicked)
     return clicked.tags.quality_name --[[@as string]]
 end
 
+---Multi-select variant of `make_quality_buttons`: each button is independently
+---toggleable, and `initial_set[quality_name] = true` marks which start toggled.
+---Visual style is identical to the single-select row.
+---@param parent LuaGuiElement
+---@param initial_set table<string, boolean>
+---@param on_click fun(event: EventData.on_gui_click)
+function M.make_quality_buttons_multi(parent, initial_set, on_click)
+    local qualities = fs_util.sort_prototypes(fs_util.to_list(prototypes.quality))
+    for _, value in ipairs(qualities) do
+        if not value.hidden then
+            fs_util.add_gui(parent, {
+                type = "sprite-button",
+                name = "factory_solver_quality_button_" .. value.name,
+                style = "tool_button",
+                sprite = "quality/" .. value.name,
+                tooltip = { "", "[quality=", value.name, "] ", value.localised_name },
+                toggled = initial_set[value.name] == true,
+                tags = { quality_name = value.name },
+                handler = {
+                    [defines.events.on_gui_click] = on_click,
+                },
+            })
+        end
+    end
+end
+
+---Multi-select click: flips only the clicked button, leaving siblings alone.
+---Returns the clicked quality name and its new toggled state.
+---@param clicked LuaGuiElement
+---@return string quality_name
+---@return boolean new_state
+function M.on_quality_button_clicked_multi(clicked)
+    clicked.toggled = not clicked.toggled
+    return clicked.tags.quality_name --[[@as string]], clicked.toggled
+end
+
+---Reads the current toggled set from a quality-button row built by
+---`make_quality_buttons` or `make_quality_buttons_multi`. Returns a set
+---(`{ [quality_name] = true }`) of currently-checked quality names.
+---@param parent LuaGuiElement
+---@return table<string, true>
+function M.read_quality_button_set(parent)
+    local set = {}
+    for _, child in pairs(parent.children) do
+        local quality_name = child.tags and child.tags.quality_name --[[@as string?]]
+        if quality_name and child.toggled then
+            set[quality_name] = true
+        end
+    end
+    return set
+end
+
 ---Writes a module selection into the `factory_solver_machine_setups` dialog's
 ---tags and dispatches `on_module_changed` so the rest of the dialog (total
 ---effectivity table, quality-module warning, slot re-render) updates. Used by

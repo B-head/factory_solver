@@ -15,6 +15,8 @@ function handlers.on_init_choose_visiblity(event)
 
     local reference_typed_name = dialog_tags.typed_name --[[@as TypedName]]
     dialog_tags.recipe_quality = reference_typed_name.quality
+    dialog_tags.recipe_quality_multi = { [reference_typed_name.quality] = true }
+    dialog_tags.is_multi_mode = false
     dialog.tags = dialog_tags
 
     local kind = elem.tags.kind --[[@as string]]
@@ -167,9 +169,16 @@ end
 ---@param event EventDataTrait
 function handlers.on_make_recipe_quality_buttons(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_production_line_adder"))
-    local initial_value = dialog.tags.recipe_quality --[[@as string]]
-
-    common.make_quality_buttons(event.element, initial_value, handlers.on_recipe_quality_clicked)
+    local tags = dialog.tags
+    event.element.clear()
+    if tags.is_multi_mode then
+        local set = tags.recipe_quality_multi --[[@as table<string, true>]]
+        common.make_quality_buttons_multi(event.element, set or {},
+            handlers.on_recipe_quality_clicked_multi)
+    else
+        local initial_value = tags.recipe_quality --[[@as string]]
+        common.make_quality_buttons(event.element, initial_value, handlers.on_recipe_quality_clicked)
+    end
 end
 
 ---@param event EventData.on_gui_click
@@ -183,22 +192,127 @@ function handlers.on_recipe_quality_clicked(event)
 end
 
 ---@param event EventData.on_gui_click
+function handlers.on_recipe_quality_clicked_multi(event)
+    local quality_name, new_state = common.on_quality_button_clicked_multi(event.element)
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_production_line_adder"))
+
+    local dialog_tags = dialog.tags
+    local set = dialog_tags.recipe_quality_multi or {}
+    if new_state then
+        set[quality_name] = true
+    else
+        set[quality_name] = nil
+    end
+    dialog_tags.recipe_quality_multi = set
+    dialog.tags = dialog_tags
+end
+
+---Toggle between single-quality (radio) and multi-quality (independent
+---toggle) modes for the picker. Rebuilds the quality button row in place
+---so the new behaviour takes effect immediately, carrying state in both
+---directions: single→multi seeds the multi set from the current radio
+---selection; multi→single picks one quality (preferring the dialog's
+---reference quality, falling back to the lowest-level selected quality,
+---then "normal").
+---@param event EventData.on_gui_checked_state_changed
+function handlers.on_multi_mode_toggle(event)
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_production_line_adder"))
+    local dialog_tags = dialog.tags
+    local is_multi = event.element.state
+
+    if is_multi then
+        -- Seed the multi-select set with the current single-mode quality and
+        -- every higher tier, mirroring the per-line dialog's "source quality
+        -- and above" default. The user can deselect afterwards.
+        local current = dialog_tags.recipe_quality --[[@as string]]
+        local current_proto = current and prototypes.quality[current]
+        local threshold = current_proto and current_proto.level or 0
+        local set = {}
+        for _, q in pairs(prototypes.quality) do
+            if not q.hidden and q.level >= threshold then
+                set[q.name] = true
+            end
+        end
+        if current then set[current] = true end
+        dialog_tags.recipe_quality_multi = set
+    else
+        local set = dialog_tags.recipe_quality_multi or {} --[[@as table<string, true>]]
+        local reference_typed_name = dialog_tags.typed_name --[[@as TypedName]]
+        local picked
+        if set[reference_typed_name.quality] then
+            picked = reference_typed_name.quality
+        elseif set[dialog_tags.recipe_quality] then
+            picked = dialog_tags.recipe_quality --[[@as string]]
+        else
+            local lowest_level, lowest_name = math.huge, nil
+            for name in pairs(set) do
+                local proto = prototypes.quality[name]
+                if proto and proto.level < lowest_level then
+                    lowest_level = proto.level
+                    lowest_name = name
+                end
+            end
+            picked = lowest_name or "normal"
+        end
+        dialog_tags.recipe_quality = picked
+    end
+    dialog_tags.is_multi_mode = is_multi
+    dialog.tags = dialog_tags
+
+    local quality_flow
+    for e in fs_util.dfs_lower(dialog) do
+        if e.name == "recipe_quality_flow" then
+            quality_flow = e
+            break
+        end
+    end
+    if quality_flow then
+        local rebuild_event = fs_util.create_gui_event(quality_flow)
+        handlers.on_make_recipe_quality_buttons(rebuild_event)
+    end
+end
+
+---@param event EventData.on_gui_click
 function handlers.on_production_line_picker_button_click(event)
     if common.try_open_factoriopedia(event) then return end
     local tags = event.element.tags
     local solution = assert(save.get_selected_solution(event.player_index))
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
+    local dialog_tags = dialog.tags
 
     local recipe_typed_name = tags.recipe_typed_name --[[@as TypedName]]
-    local recipe_quality = dialog.tags.recipe_quality --[[@as string]]
-    recipe_typed_name.quality = recipe_quality
-
-    local line_index = dialog.tags.line_index --[[@as integer?]]
+    local line_index = dialog_tags.line_index --[[@as integer?]]
     local kind = tags.kind --[[@as string]]
-    local reference_typed_name = dialog.tags.typed_name --[[@as TypedName]]
+    local reference_typed_name = dialog_tags.typed_name --[[@as TypedName]]
     local fuel_typed_name = (kind == "fuel") and reference_typed_name or nil
 
-    save.new_production_line(event.player_index, solution, recipe_typed_name, fuel_typed_name, line_index)
+    if dialog_tags.is_multi_mode then
+        local set = dialog_tags.recipe_quality_multi or {} --[[@as table<string, true>]]
+        local qualities = {}
+        for name in pairs(set) do
+            local proto = prototypes.quality[name]
+            if proto then qualities[#qualities + 1] = proto end
+        end
+        if #qualities == 0 then
+            local player = game.players[event.player_index]
+            player.create_local_flying_text {
+                text = { "factory-solver-no-qualities-selected" },
+                create_at_cursor = true,
+            }
+            player.play_sound { path = "utility/cannot_build" }
+            return
+        end
+        table.sort(qualities, function(a, b) return a.level > b.level end)
+        for i, q in ipairs(qualities) do
+            local tn_copy = flib_table.deep_copy(recipe_typed_name)
+            tn_copy.quality = q.name
+            local li = line_index and (line_index + i - 1) or nil
+            save.new_production_line(event.player_index, solution, tn_copy, fuel_typed_name, li)
+        end
+    else
+        recipe_typed_name.quality = dialog_tags.recipe_quality --[[@as string]]
+        save.new_production_line(event.player_index, solution, recipe_typed_name, fuel_typed_name, line_index)
+    end
 
     local re_event = fs_util.create_gui_event(dialog)
     common.on_close_self(re_event)
@@ -372,12 +486,28 @@ return {
         },
         {
             type = "flow",
+            name = "recipe_quality_flow",
             style = "factory_solver_centering_horizontal_flow",
             style_mods = { horizontal_spacing = 0 },
             direction = "horizontal",
             visible = script.feature_flags.quality,
             handler = {
                 on_added = handlers.on_make_recipe_quality_buttons,
+            },
+        },
+        {
+            type = "flow",
+            style = "factory_solver_centering_horizontal_flow",
+            direction = "horizontal",
+            visible = script.feature_flags.quality,
+            {
+                type = "checkbox",
+                name = "multi_quality_checkbox",
+                state = false,
+                caption = { "factory-solver-select-multiple-qualities" },
+                handler = {
+                    [defines.events.on_gui_checked_state_changed] = handlers.on_multi_mode_toggle,
+                },
             },
         },
         {
