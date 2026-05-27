@@ -15,7 +15,8 @@ A powerful solver based on interior-point methods for linear programming allows 
   thrusters, agricultural towers, and item spoilage as virtual recipes.
 - Accepts upper, lower, or equal bound constraints on machines and
   ingredients.
-- Supports Factorio 2.0 / Space Age (quality tiers, fluid temperatures).
+- Supports Factorio 2.0 / Space Age (quality tiers).
+- Splits per-fluid recipes by temperature and bridges them automatically.
 
 Warning: Multiplayer games have not been tested. Note that solution data may be lost if the mod is used in multiplayer.
 
