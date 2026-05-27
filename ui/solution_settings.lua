@@ -12,6 +12,35 @@ local limit_type_to_index = {
     ["equal"] = 3,
 }
 
+---Evaluate the text in a constraint amount field. Delegates to the same
+---engine helper Factorio's own numeric textboxes use, so the supported
+---syntax (operators, precedence, variable substitution shape, parse-error
+---behaviour) matches what users already learned in vanilla textboxes — we
+---do not maintain a parallel grammar.
+---The field accepts any character, so partial / mid-typing states like
+---"60*" raise inside the helper; we pcall and return false in `ok` so the
+---handler keeps the previously-saved value rather than clobbering it with
+---0 on every keystroke. An explicitly empty field returns 0 + true so
+---clearing the textbox still maps to "no constraint".
+---@param text string?
+---@return number value
+---@return boolean ok
+local function eval_amount_expression(text)
+    text = text and text:match("^%s*(.-)%s*$") or ""
+    if text == "" then return 0, true end
+    local n = tonumber(text)
+    if n then return n, true end
+    local ok, result = pcall(helpers.evaluate_expression, text)
+    if not ok or type(result) ~= "number" then return 0, false end
+    -- NaN / ±inf collapse the LP, so treat them as "invalid input, keep the
+    -- last good value" rather than committing them and watching the solver
+    -- blow up on the next tick.
+    if result ~= result or result == math.huge or result == -math.huge then
+        return 0, false
+    end
+    return result, true
+end
+
 local handlers = {}
 
 ---@param event EventData.on_gui_click
@@ -54,10 +83,9 @@ function handlers.on_make_constraints_table(event)
             local def = {
                 type = "textfield",
                 style = "factory_solver_limit_amount_textfield",
-                numeric = true,
-                allow_decimal = true,
                 clear_and_focus_on_right_click = true,
                 text = tostring(amount),
+                tooltip = { "factory-solver-limit-amount-tooltip" },
                 tags = data,
                 handler = {
                     [defines.events.on_gui_text_changed] = handlers.on_limit_amount_confirmed,
@@ -158,7 +186,11 @@ function handlers.on_limit_amount_confirmed(event)
     local pos = assert(fs_util.find(solution.constraints, function(value)
         return tn.equals_typed_name(value, typed_name)
     end))
-    local amount = tonumber(elem.text) or 0
+    local amount, ok = eval_amount_expression(elem.text)
+    -- Mid-typing partial expressions ("60*", "(1+") evaluate as failure; do
+    -- not clobber the saved value with 0 just because the user is in the
+    -- middle of a keystroke. The next valid text-changed event will commit.
+    if not ok then return end
     if not (typed_name.type == "recipe" or typed_name.type == "virtual_recipe") then
         amount = fs_util.from_scale(amount, player_data.time_scale)
     end
