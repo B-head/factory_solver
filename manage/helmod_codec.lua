@@ -908,36 +908,42 @@ local function solution_to_packed_model(solution)
                 warnings[#warnings + 1] = {
                     "factory-solver-helmod-export-warning-upper-bound-product", c.name,
                 }
-            else
-                if c.temperature or c.minimum_temperature or c.maximum_temperature then
-                    warnings[#warnings + 1] = {
-                        "factory-solver-helmod-export-warning-constraint-temperature", c.name,
-                    }
-                end
-                local key = table_key(c.name, c.quality, c.temperature,
-                    c.minimum_temperature, c.maximum_temperature)
-                local entry = {
-                    key = key,
-                    name = c.name,
-                    type = c.type,
-                    quality = c.quality or "normal",
-                    temperature = c.temperature,
-                    minimum_temperature = c.minimum_temperature,
-                    maximum_temperature = c.maximum_temperature,
-                    amount = 0,
-                    -- state=1 marks "main product" in Helmod (see
-                    -- ModelCompute.prepareBlockElements). It gets recomputed
-                    -- on the receiving side, but presetting it keeps the
-                    -- entry consistent with what Helmod itself would write.
-                    state = 1,
-                    input = c.limit_amount_per_second,
-                }
-                -- block_root.products is what Helmod surfaces as the block's
-                -- output requirements when by_product=true (its default).
-                -- Lower-bound constraints in factory_solver have the same
-                -- "produce at least X" semantics, so this maps cleanly.
-                products[key] = entry
             end
+            if c.temperature or c.minimum_temperature or c.maximum_temperature then
+                warnings[#warnings + 1] = {
+                    "factory-solver-helmod-export-warning-constraint-temperature", c.name,
+                }
+            end
+            local key = table_key(c.name, c.quality, c.temperature,
+                c.minimum_temperature, c.maximum_temperature)
+            local entry = {
+                key = key,
+                name = c.name,
+                type = c.type,
+                quality = c.quality or "normal",
+                temperature = c.temperature,
+                minimum_temperature = c.minimum_temperature,
+                maximum_temperature = c.maximum_temperature,
+                amount = 0,
+                -- state=1 marks "main product" in Helmod (see
+                -- ModelCompute.prepareBlockElements). It gets recomputed
+                -- on the receiving side, but presetting it keeps the
+                -- entry consistent with what Helmod itself would write.
+                state = 1,
+                input = c.limit_amount_per_second,
+            }
+            -- block_root.products is what Helmod surfaces as the block's
+            -- output requirements when by_product=true (its default), which
+            -- has "produce at least X" semantics. factory_solver's lower
+            -- bound maps cleanly. upper / equal bounds have no equivalent
+            -- on Helmod's side, so we write the amount through the same
+            -- input field anyway: the value flows across so the user can
+            -- retune in Helmod rather than rebuild from scratch, and the
+            -- warning above flags the semantic shift. Dropping the entry
+            -- entirely (the previous behaviour) was the worst option since
+            -- factory_solver's default constraint is upper, meaning a
+            -- typical export silently lost most of the user's targets.
+            products[key] = entry
         elseif c.type == "recipe" or c.type == "virtual_recipe" then
             -- Virtual-recipe constraints reuse the same per-line `factory.limit`
             -- channel as real recipes; the LP variable is the same kind (one
