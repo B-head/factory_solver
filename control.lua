@@ -84,10 +84,10 @@ script.on_configuration_changed(function(event)
         player_data.opened_gui = {}
         player.set_shortcut_toggled("factory-solver-toggle-main-window", false)
 
-        -- The build assistant is a non-modal persistent window outside the
+        -- The build assistant is a docked panel in gui.left, outside the
         -- opened_gui modal stack, so it is destroyed and untoggled explicitly.
-        if screen["factory_solver_build_assistant"] then
-            screen["factory_solver_build_assistant"].destroy()
+        if player.gui.left["factory_solver_build_assistant"] then
+            player.gui.left["factory_solver_build_assistant"].destroy()
         end
         player.set_shortcut_toggled("factory-solver-toggle-build-assistant", false)
     end
@@ -159,7 +159,7 @@ script.on_event(defines.events.on_tick, function(event)
             if window then
                 fs_util.dispatch_to_subtree(window, "on_calculation_changed")
             end
-            local build_window = player.gui.screen["factory_solver_build_assistant"]
+            local build_window = player.gui.left["factory_solver_build_assistant"]
             if build_window then
                 fs_util.dispatch_to_subtree(build_window, "on_calculation_changed")
             end
@@ -186,17 +186,17 @@ local function toggle_main_window(player_index)
     end
 end
 
--- Unlike the main window, the build assistant is non-modal and persistent: it
--- coexists with the main window, so it is added/destroyed directly rather than
--- through common.open_gui (which would push it onto the opened_gui modal stack
--- and set player.opened, breaking the LIFO close logic for two base windows).
+-- The build assistant is a persistent, docked panel rather than a floating
+-- window: it lives in gui.left so it sits beside the main window instead of
+-- hiding behind it, and it is added/destroyed directly rather than through
+-- common.open_gui (which targets gui.screen, pushes onto the opened_gui modal
+-- stack, and sets player.opened — none of which fit a docked panel).
 ---@param player_index integer
 local function toggle_build_assistant(player_index)
     local player = game.players[player_index]
-    local window = player.gui.screen["factory_solver_build_assistant"]
+    local window = player.gui.left["factory_solver_build_assistant"]
     if window == nil then
-        local _, added = fs_util.add_gui(player.gui.screen, build_assistant)
-        added.force_auto_center()
+        fs_util.add_gui(player.gui.left, build_assistant)
     else
         fs_util.dispatch_to_subtree(window, "on_close")
         window.destroy()

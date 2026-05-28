@@ -423,6 +423,41 @@ styles.factory_solver_production_line_table = {
     },
 }
 
+-- Build assistant's compact 3-column rows (recipe | required | machine). Same
+-- row striping and spacing as the main production-line table, but its own
+-- column alignments: the Required number is right-aligned to read identically
+-- to the main window's Required column, and the padding is trimmed (left/right
+-- only) so rows sit close to the docked panel's edges.
+styles.factory_solver_build_assistant_table = {
+    type = "table_style",
+    horizontal_spacing = 8,
+    vertical_spacing = 10,
+    top_padding = 0,
+    bottom_padding = 0,
+    left_padding = 4,
+    right_padding = 4,
+    column_alignments = {
+        {
+            column = 1,
+            alignment = "center",
+        },
+        {
+            column = 2,
+            alignment = "right",
+        },
+        {
+            column = 3,
+            alignment = "right",
+        },
+    },
+    odd_row_graphical_set =
+    {
+        filename = "__core__/graphics/gui-new.png",
+        position = { 472, 25 },
+        size = 1
+    },
+}
+
 styles.factory_solver_production_line_header_label = {
     type = "label_style",
     parent = "bold_label",

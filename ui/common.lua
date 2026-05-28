@@ -413,9 +413,11 @@ M.root_window_names = {
 ---@param event_name string
 ---@param data table?
 function M.broadcast(player_index, event_name, data)
-    local screen = game.players[player_index].gui.screen
+    -- find_root_element searches every gui root, so this finds each window
+    -- regardless of where it is docked (main window in gui.screen, build
+    -- assistant in gui.left).
     for _, name in ipairs(M.root_window_names) do
-        local window = screen[name]
+        local window = M.find_root_element(player_index, name)
         if window then
             fs_util.dispatch_to_subtree(window, event_name, data)
         end
