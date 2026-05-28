@@ -19,32 +19,28 @@
 -- mass entering is the power-cell, the only thing leaving is (unmodelled)
 -- electricity.
 --
--- This fixture is xfail: the problem is feasible and bounded -- in-game it
--- converged in 18 iterations (Solution 7) -- but the headless COLD start
--- fails with "Cholesky lost precision" around iteration 13. Verified that a
--- warm start seeded near the optimum (x ~ 266 on the bridges, 1/60 on the
--- power-cell) converges in ~15 iterations, so the in-game success came from
--- warm-starting off a prior solve while the user iterated on this factory.
+-- This fixture WAS xfail. The problem is feasible and bounded -- in-game it
+-- converged in 18 iterations (Solution 7) via warm start -- but the headless
+-- COLD start used to fail with "Cholesky lost precision" around iteration 13.
 --
--- Root cause -- a cold-start scaling gap: the IPM seeds x_0 proportional to
--- ||b||_inf (see the cold-start block in solver/linear_programming.lua). Here
+-- The old cold start seeded x_0 proportional to ||b||_inf. Here
 -- ||b||_inf = 1/60 ~ 0.0167 (the lone power-cell cap), but the true optimum
 -- has x ~ 266 on the fluid bridges -- a ~16000x gap. The amplifier is the
 -- 0.00025 power-cell coefficient in the fusion-reactor row: a tiny input cap
 -- drives a huge internal fluid throughput. Starting x ~ 0.0167 when the
--- optimum is ~266, the first Newton steps pin most slacks at the 2^-52 clamp,
--- D^2 = X.S^-1 blows its dynamic range, and the unpivoted Cholesky hits a
--- zero/NaN pivot that the ε.I retry can't recover. The symmetric
--- ||b||-vs-||c|| scaling argument in the solver comments assumes x ~ ||b||;
--- this outlet-less loop is the counterexample where a small cap fans out into
--- a large-throughput cycle. See [[ipm-cold-start-small-cap-large-loop]].
+-- optimum is ~266, the first Newton steps pinned most slacks at the 2^-52
+-- clamp, D^2 = X.S^-1 blew its dynamic range, and the unpivoted Cholesky hit a
+-- zero/NaN pivot the ε.I retry could not recover. The symmetric
+-- ||b||-vs-||c|| scaling argument assumed x ~ ||b||; this outlet-less loop is
+-- the counterexample where a small cap fans out into a large-throughput cycle.
 --
--- The assertions below describe the DESIRED outcome (converged, loop closed).
--- They fail today (cold start -> "unfinished"); when the cold-start scaling
--- learns to account for coefficient-driven amplification this becomes XPASS
--- and should be promoted to a normal case.
+-- Fixed by switching the cold start to Mehrotra's heuristic starting point
+-- (mehrotra_start in solver/linear_programming.lua): x is now seeded from the
+-- least-norm solution of A.x = b, so its magnitude reflects the coefficient
+-- amplification and the iteration no longer collapses. This case now converges
+-- cold. See [[ipm-cold-start-small-cap-large-loop]].
 --
--- Two structural points the fixture also exercises once it does converge:
+-- Two structural points the fixture also exercises:
 --  1. Outlet-less: with no |final_sink| to pull on, the solve is anchored
 --     purely by the fusion-power-cell |limit| (= 1/60, an upper cap whose
 --     2^20 slack pins it to equality).
@@ -60,8 +56,7 @@ local pg = require "solver/problem_generator"
 local cases = {}
 
 table.insert(cases, {
-    name = "outlet-less fusion loop: cold start fails to converge (feasible in-game via warm start)",
-    xfail = true,
+    name = "outlet-less fusion loop: cold start converges via Mehrotra starting point",
     run = function()
         local p = pg.new("fusion-outlet-less-loop")
 

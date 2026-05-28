@@ -44,6 +44,83 @@ local function find_step(variables, deltas)
     end)
 end
 
+---Mehrotra's heuristic starting point (Nocedal & Wright 2e, eq. 14.38).
+---Seeds (x, y, s) from the minimum-norm solutions of A·x = b and Aᵀ·y ≈ c,
+---then shifts both x and s into the strictly-positive orthant with a two-stage
+---displacement. Unlike the ‖b‖∞ cold start, x here actually solves A·x = b in
+---the least-norm sense, so its magnitude reflects coefficient-driven
+---amplification (a tiny input cap fanning out through a small coefficient into
+---a large internal throughput) rather than the raw right-hand-side scale.
+---Returns nil if the normal-equation factorisation is non-finite (A not full
+---row rank), so the caller can fall back to the data-scale cold start.
+---@param A CsrMatrix
+---@param AT CsrMatrix
+---@param b CsrMatrix
+---@param c CsrMatrix
+---@param p_degree integer
+---@param d_degree integer
+---@return CsrMatrix? x
+---@return CsrMatrix? y
+---@return CsrMatrix? s
+local function mehrotra_start(A, AT, b, c, p_degree, d_degree)
+    -- One symmetric factorisation of A·Aᵀ drives every normal-equation solve
+    -- below. This is the same d×d system shape (and sparsity pattern, since SX
+    -- is diagonal) as the per-iteration A·D²·Aᵀ Cholesky, so it costs roughly
+    -- one extra IPM iteration, paid once at cold start.
+    local L, D = csr_matrix.cholesky_decomposition(A * AT)
+    local LD = L * D
+    local LT = L:T()
+    local function solve_normal(rhs)
+        return csr_matrix.backward_substitution(LT,
+            csr_matrix.forward_substitution(LD, rhs))
+    end
+
+    -- x̃ = Aᵀ·(A·Aᵀ)⁻¹·b  (least-norm primal solution to A·x = b)
+    -- ỹ = (A·Aᵀ)⁻¹·(A·c), s̃ = c - Aᵀ·ỹ  (least-squares dual)
+    local x_tilde = csr_matrix.to_list(AT * solve_normal(b))
+    local y = solve_normal(A * c)
+    local s_tilde = csr_matrix.to_list(c - AT * y)
+
+    -- First shift: lift each component clear of zero by 1.5× the most negative
+    -- entry (implicit sparse zeros count, so the min is ≤ 0 in general).
+    local min_x, min_s = math.huge, math.huge
+    for i = 1, p_degree do
+        if x_tilde[i] < min_x then min_x = x_tilde[i] end
+        if s_tilde[i] < min_s then min_s = s_tilde[i] end
+    end
+    local dx = math.max(-1.5 * min_x, 0)
+    local ds = math.max(-1.5 * min_s, 0)
+
+    -- Second shift: centre the point so x̂ᵀ·ŝ is spread evenly, guaranteeing
+    -- strict positivity even where the first shift left a component at zero.
+    local sum_xs, sum_x, sum_s = 0, 0, 0
+    for i = 1, p_degree do
+        local xh, sh = x_tilde[i] + dx, s_tilde[i] + ds
+        sum_xs = sum_xs + xh * sh
+        sum_x = sum_x + xh
+        sum_s = sum_s + sh
+    end
+    local dx_hat = 0.5 * sum_xs / sum_s
+    local ds_hat = 0.5 * sum_xs / sum_x
+
+    local x_list, s_list = {}, {}
+    for i = 1, p_degree do
+        local xv = x_tilde[i] + dx + dx_hat
+        local sv = s_tilde[i] + ds + ds_hat
+        -- Reject the whole point if the factorisation poisoned any component
+        -- (NaN/inf from a near-singular A·Aᵀ). Cheaper than per-step recovery.
+        if xv ~= xv or sv ~= sv or xv == math.huge or sv == math.huge
+            or xv == -math.huge or sv == -math.huge then
+            return nil, nil, nil
+        end
+        x_list[i] = xv
+        s_list[i] = sv
+    end
+
+    return csr_matrix.with_vector(x_list, p_degree), y,
+        csr_matrix.with_vector(s_list, p_degree)
+end
+
 ---Scan a vector's underlying `values` array for any IEEE NaN.
 ---We can't use csr_matrix.fold here: its `initial or 0` clause coerces the
 ---natural `false` sentinel to 0 (truthy in Lua), so a fold-based predicate
@@ -99,36 +176,29 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
 
     local x, y, s
     if raw_variables == nil then
-        -- Cold start: scale the initial point to the problem's data magnitude.
-        -- With the fixed defaults (x=100, s=1, y=0) the first Newton step is
-        -- dominated by enforcing dual feasibility (s ≈ c) from a starting s
-        -- that is orders of magnitude below ||c||_∞ when the problem includes
-        -- BIG-M penalties (elastic/target costs in the 10³–10⁵ range). The
-        -- resulting Δx blows up and find_step pins the step length to ~1e-10,
-        -- effectively stalling the iteration. Setting s_0 ∝ ||c||_∞ keeps the
-        -- initial residual proportional to the problem scale, so the Newton
-        -- step takes meaningful progress from iteration 1. (Mehrotra's full
-        -- starting point also adjusts x via an A·Aᵀ Cholesky; this cheaper
-        -- data-scale-only proxy avoids the extra factorisation.)
+        -- Cold start via Mehrotra's heuristic starting point. It seeds x from
+        -- the least-norm solution of A·x = b, so x's magnitude tracks the
+        -- problem's true scale -- including coefficient-driven amplification,
+        -- where a tiny input cap fans out through a small coefficient into a
+        -- large internal throughput. See mehrotra_start.
         --
-        -- The same scaling argument applies symmetrically to the primal: an
-        -- LP whose constraint right-hand side has ‖b‖∞ ≈ 1/60 (the in-game
-        -- "1 / min" entry) demands x ≈ 1/60 at optimum, so a starting x = 1
-        -- is ~60× too large. The Newton step then has to shrink most of x
-        -- toward the boundary in one go, find_step picks an α that pins
-        -- many s_i (or x_i) at the 2⁻⁵² clamp, and the very next Cholesky
-        -- factorisation hits the ill-conditioned D²-imbalance regime the
-        -- regularisation comment below describes — at iteration 1, with
-        -- no regularisation strong enough to recover. Use a small positive
-        -- floor instead of 1 so the IPM stays strictly interior without
-        -- blowing the primal scale up out of proportion to b.
-        local b_floor = 2 ^ -32
-        local c_floor = 2 ^ -32
-        local b_inf_norm = math.max(b_floor, vector_inf_norm(b))
-        local c_inf_norm = math.max(c_floor, vector_inf_norm(c))
-        x = csr_matrix.with_vector(b_inf_norm, p_degree)
-        y = csr_matrix.with_vector(0, d_degree)
-        s = csr_matrix.with_vector(c_inf_norm, p_degree)
+        -- The fallback below is the older data-scale seed: x ∝ ‖b‖∞, s ∝ ‖c‖∞.
+        -- It keeps the first Newton step proportional to the problem scale (a
+        -- naive x=100, s=1 stalls find_step to ~1e-10 against BIG-M elastic/
+        -- target costs in the 10³–10⁵ range), but assumes x ≈ ‖b‖∞. That
+        -- assumption is exactly what breaks on amplifying loops, so it is now
+        -- only the rank-deficient fallback when A·Aᵀ cannot be factored.
+        x, y, s = mehrotra_start(A, AT, b, c, p_degree, d_degree)
+        if x == nil then
+            local b_inf_norm = math.max(2 ^ -32, vector_inf_norm(b))
+            local c_inf_norm = math.max(2 ^ -32, vector_inf_norm(c))
+            x = csr_matrix.with_vector(b_inf_norm, p_degree)
+            y = csr_matrix.with_vector(0, d_degree)
+            s = csr_matrix.with_vector(c_inf_norm, p_degree)
+        end
+        ---@cast x CsrMatrix
+        ---@cast y CsrMatrix
+        ---@cast s CsrMatrix
     else
         x = problem:make_primal_variables(raw_variables)
         y = problem:make_dual_variables(raw_variables)
