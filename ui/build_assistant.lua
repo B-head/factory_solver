@@ -172,12 +172,17 @@ function handlers.on_pipette_click(event)
     -- lockstep; acting unconditionally on the event player's own cursor is
     -- correct (each client mutates that player's cursor identically). The
     -- entity list is built deterministically in manage/blueprint.lua.
-    local cursor = game.players[event.player_index].cursor_stack
+    local player = game.players[event.player_index]
+    local cursor = player.cursor_stack
     if not (cursor and cursor.valid) then return end
 
     local entities = bp.build_machine_blueprint_entities(line)
     if cursor.set_stack { name = "blueprint" } then
         cursor.set_blueprint_entities(entities)
+        -- Mark the cursor blueprint temporary so the engine destroys it when
+        -- the cursor is cleared, instead of dumping a real blueprint item into
+        -- the player's inventory on every pipette.
+        player.cursor_stack_temporary = true
     end
 end
 
@@ -199,11 +204,13 @@ function handlers.on_beacon_pipette_click(event)
 
     -- Same multiplayer reasoning as on_pipette_click: act unconditionally on
     -- the event player's own cursor; entities are built deterministically.
-    local cursor = game.players[event.player_index].cursor_stack
+    local player = game.players[event.player_index]
+    local cursor = player.cursor_stack
     if not (cursor and cursor.valid) then return end
 
     if cursor.set_stack { name = "blueprint" } then
         cursor.set_blueprint_entities(entities)
+        player.cursor_stack_temporary = true
     end
 end
 
