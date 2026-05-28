@@ -76,6 +76,13 @@ local case_files = {
     "isolated_line",
     "lp_scale_invariance",
     "lp_tiebreak",
+    "lp_extreme_coefficients",
+    "lp_branched_targets",
+    "lp_dual_resource_caps",
+    "lp_input_cap_output_target",
+    "lp_gleba_loop",
+    "lp_asteroid_upcycling",
+    "lp_fusion_loop",
     "material_cycles",
     "problem_dump",
 }
