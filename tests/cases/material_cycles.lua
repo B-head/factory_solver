@@ -219,7 +219,6 @@ table.insert(cases, {
 
 table.insert(cases, {
     name = "mass-positive grow loop must not flag any deficit",
-    xfail = true,
     -- Minimal reproduction of the Gleba <grow> false positive (see
     -- [[deficit-false-positive-grow-loops]] and lp_gleba_loop's bioflux
     -- xfail). A seed<->plant cycle that GAINS mass:
@@ -235,10 +234,11 @@ table.insert(cases, {
     -- process and plant balances. The spurious |basic_source|plant this
     -- produces is what lets the LP bypass the recipe chain in-game.
     --
-    -- Desired behaviour (asserted below): a self-sustaining cycle flags
-    -- nothing. This FAILS today; it should XPASS once find_deficit_materials
-    -- gates flagging on a "can this SCC sustain itself at some positive
-    -- rate vector?" feasibility test instead of the unit-rate snapshot.
+    -- A self-sustaining cycle flags nothing. find_deficit_materials gates
+    -- flagging on a "can this SCC sustain itself at some positive rate
+    -- vector?" feasibility test (is_self_sustaining / cone_feasible) ahead of
+    -- the unit-rate snapshot, so the mass-positive grow loop is recognised as
+    -- needing no external supply.
     run = function()
         local lines = {
             line("grow", "normal",

@@ -23,23 +23,28 @@
 --      so their materials are already supplied indirectly; flagging them
 --      as deficits would give the LP free copies at every tier and
 --      collapse to a degenerate solution that bypasses the cascade.
---   4. Inside each source SCC, compute the net flow per material when
---      every recipe touching the SCC runs at unit rate. A material whose
---      net consumption exceeds half its total inflow is flagged as a
---      deficit candidate.
+--   4. Inside each source SCC, first ask whether the cycle can sustain
+--      itself: is there a positive recipe-rate vector x with A·x >= 0 for
+--      every internal material (cone_feasible / is_self_sustaining)? If so
+--      the cycle produces at least as much of every material as it consumes
+--      and needs no external supply, so nothing is flagged. Only when the
+--      SCC is NOT self-sustaining do we fall back to the unit-rate snapshot:
+--      compute net flow with every touching recipe at rate 1, and flag any
+--      material whose net consumption exceeds half its total inflow.
 --
--- The uniform-rate + 50% threshold is deliberately coarse. It correctly
--- distinguishes:
---   - Productivity-positive cycles (kovarex): all materials net >= 0,
---     no deficits.
---   - Mass-losing cycles (simple recycling): the ingredients are flagged
---     as deficits, the central recycled product is not (it balances at
---     a non-unit rate ratio).
+-- The self-sustaining gate is exact (an LP feasibility test over rate
+-- *vectors*); the uniform-rate + 50% threshold behind it is a deliberately
+-- coarse way to pick *which* materials to flag once we know the cycle can't
+-- close on its own. Together they distinguish:
+--   - Productivity-positive cycles (kovarex) and mass-positive <grow> loops
+--     (Gleba seed<->plant): self-sustaining, so no deficits even though the
+--     unit-rate snapshot looks deficit-heavy for the grow case.
+--   - Mass-losing cycles (simple recycling): not self-sustaining, so the
+--     heuristic flags the consumed ingredients and leaves the central
+--     recycled product (it balances at a non-unit rate ratio) alone.
 -- For multi-tier cascades the source-SCC gate keeps the deficit set to
 -- the cycle that actually needs external supply (cu/normal + ir/normal
--- in the 5-tier electronic-circuit case). Refining the per-material
--- threshold further is future work and would only matter for
--- intra-cycle stoichiometries that happen to land near 50%.
+-- in the 5-tier electronic-circuit case).
 
 local tn = require "manage/typed_name"
 
@@ -431,7 +436,12 @@ local default_threshold_ratio = 0.5
 ---Identify materials that need external supply. A material qualifies when:
 ---  - It belongs to a cyclic SCC, AND
 ---  - the SCC is a source SCC (no edge enters it from outside), AND
+---  - the SCC is NOT self-sustaining (no positive rate vector balances it;
+---    see is_self_sustaining), AND
 ---  - net < -threshold_ratio * consumption at uniform recipe rates.
+---The self-sustaining gate runs before the unit-rate heuristic so that a
+---mass-positive cycle (kovarex productivity, a Gleba <grow> loop) flags
+---nothing even though its uniform-rate snapshot looks deficit-heavy.
 ---@param production_lines NormalizedProductionLine[]
 ---@param threshold_ratio number?  default 0.5
 ---@return table<string, true> deficits  material variable names
@@ -449,7 +459,8 @@ function M.find_deficit_materials(production_lines, threshold_ratio)
             cyclic_sccs[#cyclic_sccs + 1] = scc
             local scc_set = {}
             for _, m in ipairs(scc) do scc_set[m] = true end
-            if M.is_source_scc(scc_set, adj) then
+            if M.is_source_scc(scc_set, adj)
+                and not M.is_self_sustaining(production_lines, scc) then
                 local net, consumption = M.compute_net_flow(production_lines, scc_set)
                 for _, m in ipairs(scc) do
                     local c = consumption[m]

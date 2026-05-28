@@ -205,7 +205,6 @@ table.insert(cases, {
 
 table.insert(cases, {
     name = "Gleba loop with <grow> seed cycles must not get a spurious |basic_source|bioflux",
-    xfail = true,
     -- Integration test (drives create_problem, not a hand-built Problem) for
     -- the upstream bug the bioflux trace exposed: once the yumako / jellynut
     -- seed->plant->fruit->seed loops are closed by <grow> recipes, those
@@ -224,14 +223,15 @@ table.insert(cases, {
     -- This is a false positive: the seed loops are mass-*positive*
     -- (one seed grows into ~50 fruit, which processes back into >1 seed), so
     -- the chain closes internally and needs no external bioflux supply at all.
-    -- The uniform-rate analysis can't see that because it never scales the
-    -- <grow> virtuals up to their true ~50x ratio (the
-    -- "deliberately coarse" caveat in material_cycles.lua).
+    -- The uniform-rate snapshot can't see that because it never scales the
+    -- <grow> virtuals up to their true ~50x ratio (the "deliberately coarse"
+    -- caveat in material_cycles.lua).
     --
-    -- Desired behaviour (asserted below): the recipe chain runs and no
-    -- bioflux is drawn from a basic_source. This FAILS today (XPASS once
-    -- find_deficit_materials stops flagging bioflux); when it flips, promote
-    -- it to a normal case.
+    -- Fixed by the self-sustaining gate in find_deficit_materials: the SCC
+    -- admits a positive recipe-rate vector that balances every internal
+    -- material (cone_feasible), so it is recognised as needing no external
+    -- supply and bioflux is no longer flagged. Asserted below: the recipe
+    -- chain runs and no bioflux is drawn from a basic_source.
     run = function()
         local lines = {
             line("agricultural-science-pack",
