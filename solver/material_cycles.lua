@@ -257,6 +257,170 @@ function M.compute_net_flow(production_lines, scc_set)
     return net, consumption
 end
 
+---Build the per-recipe net-flow matrix for one SCC. Columns are the recipes
+---that touch the SCC (consume or produce at least one SCC material); rows are
+---the SCC materials in the order given by `scc`. Entry A[i][j] is the net
+---production (products minus ingredients/fuel) of material i by recipe j at
+---unit rate. Unlike compute_net_flow this keeps recipes separate, so callers
+---can reason about rate *vectors* rather than the uniform-rate snapshot.
+---@param production_lines NormalizedProductionLine[]
+---@param scc string[]  SCC materials, sorted (defines row order)
+---@return number[][] A  A[i][j], i=1..#scc materials, j=1..#columns recipes
+local function build_scc_matrix(production_lines, scc)
+    local row_of = {}
+    for i, m in ipairs(scc) do row_of[m] = i end
+
+    local columns = {}
+    for _, line in ipairs(production_lines) do
+        local col = nil
+        local function add(var, amount)
+            local i = row_of[var]
+            if i then
+                if not col then
+                    col = {}
+                    for k = 1, #scc do col[k] = 0 end
+                end
+                col[i] = col[i] + amount
+            end
+        end
+        for _, prod in ipairs(line.products) do
+            add(tn.typed_name_to_variable_name(prod), prod.amount_per_second)
+        end
+        for _, ing in ipairs(line.ingredients) do
+            add(tn.typed_name_to_variable_name(ing), -ing.amount_per_second)
+        end
+        if line.fuel_ingredient then
+            add(tn.typed_name_to_variable_name(line.fuel_ingredient),
+                -line.fuel_ingredient.amount_per_second)
+        end
+        if col then columns[#columns + 1] = col end
+    end
+
+    -- Transpose into A[material][recipe].
+    local A = {}
+    for i = 1, #scc do
+        local row = {}
+        for j = 1, #columns do row[j] = columns[j][i] end
+        A[i] = row
+    end
+    return A
+end
+
+local feasibility_eps = 1e-9
+
+---Phase-1 simplex feasibility test for the cone problem
+---   ∃ x ≥ 0, x ≠ 0, A·x ≥ 0
+---i.e. "can this SCC sustain itself at some positive recipe-rate vector?"
+---A self-sustaining SCC produces at least as much of every internal material
+---as it consumes (kovarex's productivity cycle, or a Gleba <grow> loop that
+---gains mass), so it needs no external supply and must not be flagged.
+---
+---The LP is normalized with Σx = 1 to bound it, then solved as a single-
+---artificial Phase-1: material rows `-Σⱼ A[i][j]·xⱼ + sᵢ = 0` start with the
+---surplus sᵢ in the basis at value 0, and the normalization row `Σⱼ xⱼ + a = 1`
+---starts with one artificial a = 1. Driving a → 0 means a valid x exists.
+---Bland's rule guarantees termination under the heavy degeneracy these
+---all-zero-RHS rows produce.
+---@param A number[][]  A[i][j], i=1..m materials, j=1..n recipes
+---@param m integer
+---@param n integer
+---@return boolean
+local function cone_feasible(A, m, n)
+    if n == 0 then return false end
+    local a_col = n + m + 1
+    local N = a_col
+    local R = m + 1
+    local rhs = N + 1
+
+    local T = {}
+    for i = 1, R do
+        local row = {}
+        for c = 1, rhs do row[c] = 0 end
+        T[i] = row
+    end
+    for i = 1, m do
+        for j = 1, n do T[i][j] = -A[i][j] end
+        T[i][n + i] = 1
+    end
+    for j = 1, n do T[R][j] = 1 end
+    T[R][a_col] = 1
+    T[R][rhs] = 1
+
+    local basis = {}
+    for i = 1, m do basis[i] = n + i end
+    basis[R] = a_col
+
+    -- Reduced cost of column j. Only the artificial carries cost 1, so the
+    -- objective contribution is the artificial's tableau row (if still basic).
+    local function reduced_cost(j)
+        local cj = (j == a_col) and 1 or 0
+        for i = 1, R do
+            if basis[i] == a_col then return cj - T[i][j] end
+        end
+        return cj
+    end
+
+    local max_iter = 1000 + 20 * N
+    for _ = 1, max_iter do
+        local enter = nil
+        for j = 1, N do
+            if reduced_cost(j) < -feasibility_eps then enter = j; break end
+        end
+        if not enter then break end
+
+        local min_ratio = math.huge
+        for i = 1, R do
+            local aij = T[i][enter]
+            if aij > feasibility_eps then
+                local ratio = T[i][rhs] / aij
+                if ratio < min_ratio then min_ratio = ratio end
+            end
+        end
+        if min_ratio == math.huge then break end
+
+        local leave, leave_basis = nil, math.huge
+        for i = 1, R do
+            local aij = T[i][enter]
+            if aij > feasibility_eps then
+                local ratio = T[i][rhs] / aij
+                if ratio <= min_ratio + feasibility_eps and basis[i] < leave_basis then
+                    leave, leave_basis = i, basis[i]
+                end
+            end
+        end
+        if not leave then break end
+
+        local piv = T[leave][enter]
+        for c = 1, rhs do T[leave][c] = T[leave][c] / piv end
+        for i = 1, R do
+            if i ~= leave then
+                local f = T[i][enter]
+                if f ~= 0 then
+                    for c = 1, rhs do T[i][c] = T[i][c] - f * T[leave][c] end
+                end
+            end
+        end
+        basis[leave] = enter
+    end
+
+    local a_val = 0
+    for i = 1, R do
+        if basis[i] == a_col then a_val = T[i][rhs]; break end
+    end
+    return a_val <= feasibility_eps * 100
+end
+
+---True when the SCC can sustain itself at some positive recipe-rate vector
+---(see cone_feasible). Such cycles need no external supply, so none of their
+---materials are deficits regardless of the unit-rate snapshot.
+---@param production_lines NormalizedProductionLine[]
+---@param scc string[]
+---@return boolean
+function M.is_self_sustaining(production_lines, scc)
+    local A = build_scc_matrix(production_lines, scc)
+    return cone_feasible(A, #scc, A[1] and #A[1] or 0)
+end
+
 ---Default deficit threshold: a material is flagged when its net deficit is
 ---more than 50% of its consumption at uniform recipe rates. This excludes
 ---materials that are merely "off by a recipe ratio" (e.g. the recycled
