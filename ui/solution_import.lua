@@ -258,7 +258,7 @@ function handlers.on_import_confirm(event)
 
     local window = assert(common.find_root_element(event.player_index, "factory_solver_main_window"))
     fs_util.dispatch_to_subtree(window, "on_files_changed")
-    fs_util.dispatch_to_subtree(window, "on_selected_solution_changed")
+    common.broadcast(event.player_index, "on_selected_solution_changed")
 
     local re_event = fs_util.create_gui_event(dialog)
     common.on_close_self(re_event)

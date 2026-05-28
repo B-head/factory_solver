@@ -395,6 +395,33 @@ function M.open_gui(player_index, is_dialog, gui_def, append_data)
     return elems, added
 end
 
+---The top-level factory_solver windows that live directly under
+---player.gui.screen. "Player-global" UI events (selected solution changed,
+---etc.) must reach every one of them, not just the main window, now that the
+---build assistant is a second independent root.
+M.root_window_names = {
+    "factory_solver_main_window",
+    "factory_solver_build_assistant",
+}
+
+---Dispatch a UI event to every factory_solver root window the player currently
+---has open. Use this for events that are global to the player's UI state (e.g.
+---on_selected_solution_changed) so a second window like the build assistant
+---stays in sync; per-window or dialog-local events should dispatch to their own
+---subtree instead.
+---@param player_index integer
+---@param event_name string
+---@param data table?
+function M.broadcast(player_index, event_name, data)
+    local screen = game.players[player_index].gui.screen
+    for _, name in ipairs(M.root_window_names) do
+        local window = screen[name]
+        if window then
+            fs_util.dispatch_to_subtree(window, event_name, data)
+        end
+    end
+end
+
 ---comment
 ---@param player_index integer
 ---@param name string

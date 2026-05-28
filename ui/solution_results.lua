@@ -4,6 +4,7 @@ local acc = require "manage/accessor"
 local report = require "manage/report"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
+local bp = require "manage/blueprint"
 local common = require "ui/common"
 local production_line_adder = require "ui/production_line_adder"
 
@@ -167,6 +168,131 @@ function handlers.update_total_pollution_label(event)
     elem.caption = flib_format.number(total_pollution, true, 5)
 end
 
+---Aggregate, across the whole solution, the physical machines / modules /
+---beacons the player must build and carry. Counts are PHYSICAL whole entities:
+---each line's fractional machine count is rounded up (math.ceil), because a
+---2.3-machine line still needs 3 machines' worth of slots filled. Beacon module
+---counts use RAW slot occupancy (slots × beacon_quantity × machines), NOT the
+---effectivity-scaled value acc.get_total_modules reports — the latter is an LP
+---input, not a "how many items to fetch" count. Buckets are keyed by
+---(name × quality) so e.g. normal vs rare modules are listed separately.
+---@param event EventDataTrait
+function handlers.make_build_totals_table(event)
+    local elem = event.element
+    local solution = save.get_selected_solution(event.player_index)
+    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
+
+    elem.clear()
+    if not solution or type(solution.solver_state) == "number" then
+        return
+    end
+
+    local machines, modules, beacons = {}, {}, {}
+    ---@param bucket table<string, { typed_name: TypedName, count: number }>
+    ---@param typed_name TypedName
+    ---@param amount number
+    local function bump(bucket, typed_name, amount)
+        local key = string.format("%s/%s", typed_name.name, typed_name.quality)
+        local entry = bucket[key]
+        if entry then
+            entry.count = entry.count + amount
+        else
+            bucket[key] = { typed_name = typed_name, count = amount }
+        end
+    end
+
+    for _, line in ipairs(solution.production_lines) do
+        if bp.can_pipette(line) then
+            local phys = math.ceil(save.get_quantity_of_machines_required(solution, line.recipe_typed_name)
+                + acc.tolerance)
+            if 0 < phys then
+                local machine = tn.typed_name_to_machine(line.machine_typed_name)
+                bump(machines, line.machine_typed_name, phys)
+
+                local size = machine.module_inventory_size
+                if size and 0 < size then
+                    local trimmed = acc.trim_modules(line.module_typed_names, size)
+                    for index = 1, size do
+                        local module = trimmed[tostring(index)]
+                        if module then bump(modules, module, phys) end
+                    end
+                end
+
+                if acc.is_use_beacon(machine) then
+                    for _, affected_by_beacon in ipairs(line.affected_by_beacons) do
+                        local beacon_typed_name = affected_by_beacon.beacon_typed_name
+                        local beacon = beacon_typed_name and acc.get_beacon(beacon_typed_name.name)
+                        if beacon and beacon_typed_name then
+                            local total = phys * affected_by_beacon.beacon_quantity
+                            bump(beacons, beacon_typed_name, total)
+                            local beacon_size = beacon.module_inventory_size
+                            if beacon_size and 0 < beacon_size then
+                                local beacon_trimmed = acc.trim_modules(affected_by_beacon.module_typed_names, beacon_size)
+                                for index = 1, beacon_size do
+                                    local module = beacon_trimmed[tostring(index)]
+                                    if module then bump(modules, module, total) end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    ---@param caption LocalisedString
+    ---@param bucket table<string, { typed_name: TypedName, count: number }>
+    ---@param is_machine_kind boolean
+    local function render_group(caption, bucket, is_machine_kind)
+        local list = {}
+        for _, entry in pairs(bucket) do
+            table.insert(list, entry)
+        end
+        if #list == 0 then
+            return
+        end
+        table.sort(list, function(a, b)
+            if a.typed_name.name ~= b.typed_name.name then
+                return a.typed_name.name < b.typed_name.name
+            end
+            return a.typed_name.quality < b.typed_name.quality
+        end)
+
+        fs_util.add_gui(elem, {
+            type = "label",
+            style = "caption_label",
+            caption = caption,
+        })
+
+        local buttons = {}
+        for _, entry in ipairs(list) do
+            local craft = is_machine_kind
+                and tn.typed_name_to_machine(entry.typed_name)
+                or tn.typed_name_to_material(entry.typed_name)
+            table.insert(buttons, common.create_decorated_sprite_button {
+                typed_name = entry.typed_name,
+                is_hidden = acc.is_hidden(craft),
+                is_unresearched = acc.is_unresearched(craft, relation_to_recipes),
+                number = entry.count,
+            })
+        end
+        fs_util.add_gui(elem, {
+            type = "frame",
+            style = "factory_solver_result_slot_background_frame",
+            {
+                type = "table",
+                style = "filter_slot_table",
+                column_count = 8,
+                children = buttons,
+            },
+        })
+    end
+
+    render_group({ "factory-solver-machines" }, machines, true)
+    render_group({ "factory-solver-modules" }, modules, false)
+    render_group({ "factory-solver-beacons" }, beacons, true)
+end
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -258,6 +384,25 @@ return {
                     on_calculation_changed = handlers.update_total_pollution_label,
                 },
             },
+        },
+    },
+    {
+        type = "line",
+        style = "factory_solver_line",
+    },
+    {
+        type = "label",
+        style = "caption_label",
+        caption = { "factory-solver-build-totals" },
+    },
+    {
+        type = "flow",
+        direction = "vertical",
+        handler = {
+            on_added = handlers.make_build_totals_table,
+            on_selected_solution_changed = handlers.make_build_totals_table,
+            on_machine_setups_changed = handlers.make_build_totals_table,
+            on_calculation_changed = handlers.make_build_totals_table,
         },
     },
 }

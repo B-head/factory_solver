@@ -181,6 +181,22 @@ data:extend({
         toggleable = true,
         associated_control_input = "factory-solver-toggle-main-window",
     },
+    {
+        type = "custom-input",
+        name = "factory-solver-toggle-build-assistant",
+        key_sequence = "CONTROL + SHIFT + R",
+        order = "b"
+    },
+    {
+        type = "shortcut",
+        name = "factory-solver-toggle-build-assistant",
+        order = "d",
+        action = "lua",
+        icon = "__factory_solver__/graphics/shortcut.png",
+        small_icon = "__factory_solver__/graphics/shortcut.png",
+        toggleable = true,
+        associated_control_input = "factory-solver-toggle-build-assistant",
+    },
 })
 
 data:extend({

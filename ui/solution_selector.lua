@@ -35,8 +35,7 @@ function handlers.on_new_solution(event)
     local root = assert(fs_util.find_upper(event.element, "solution_selector"))
     fs_util.dispatch_to_subtree(root, "on_files_changed")
 
-    local window = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
-    fs_util.dispatch_to_subtree(window, "on_selected_solution_changed")
+    common.broadcast(event.player_index, "on_selected_solution_changed")
 
     common.open_gui(event.player_index, true, constraint_adder)
 end
@@ -66,8 +65,7 @@ function handlers.on_delete_solution(event)
     local root = assert(fs_util.find_upper(event.element, "solution_selector"))
     fs_util.dispatch_to_subtree(root, "on_files_changed")
 
-    local window = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
-    fs_util.dispatch_to_subtree(window, "on_selected_solution_changed")
+    common.broadcast(event.player_index, "on_selected_solution_changed")
 end
 
 ---@param event EventData.on_gui_selection_state_changed
@@ -77,8 +75,7 @@ function handlers.on_selector_state_changed(event)
     local name = elem.items[elem.selected_index] --[[@as string?]]
     player_data.selected_solution = name or ""
 
-    local root = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
-    fs_util.dispatch_to_subtree(root, "on_selected_solution_changed")
+    common.broadcast(event.player_index, "on_selected_solution_changed")
 end
 
 ---@param event EventDataTrait

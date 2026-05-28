@@ -9,6 +9,7 @@ local pre_solve = require "manage/pre_solve"
 local virtual = require "manage/virtual"
 local common = require "ui/common"
 local main_window = require "ui/main_window"
+local build_assistant = require "ui/build_assistant"
 
 -- factoriomod-debug injects __DebugAdapter as a truthy global only when the
 -- VM is running under the debugger. The injection happens before any mod
@@ -82,6 +83,13 @@ script.on_configuration_changed(function(event)
         end
         player_data.opened_gui = {}
         player.set_shortcut_toggled("factory-solver-toggle-main-window", false)
+
+        -- The build assistant is a non-modal persistent window outside the
+        -- opened_gui modal stack, so it is destroyed and untoggled explicitly.
+        if screen["factory_solver_build_assistant"] then
+            screen["factory_solver_build_assistant"].destroy()
+        end
+        player.set_shortcut_toggled("factory-solver-toggle-build-assistant", false)
     end
 
     for _, force in pairs(game.forces) do
@@ -151,6 +159,10 @@ script.on_event(defines.events.on_tick, function(event)
             if window then
                 fs_util.dispatch_to_subtree(window, "on_calculation_changed")
             end
+            local build_window = player.gui.screen["factory_solver_build_assistant"]
+            if build_window then
+                fs_util.dispatch_to_subtree(build_window, "on_calculation_changed")
+            end
         end
     end
 
@@ -174,14 +186,38 @@ local function toggle_main_window(player_index)
     end
 end
 
+-- Unlike the main window, the build assistant is non-modal and persistent: it
+-- coexists with the main window, so it is added/destroyed directly rather than
+-- through common.open_gui (which would push it onto the opened_gui modal stack
+-- and set player.opened, breaking the LIFO close logic for two base windows).
+---@param player_index integer
+local function toggle_build_assistant(player_index)
+    local player = game.players[player_index]
+    local window = player.gui.screen["factory_solver_build_assistant"]
+    if window == nil then
+        local _, added = fs_util.add_gui(player.gui.screen, build_assistant)
+        added.force_auto_center()
+    else
+        fs_util.dispatch_to_subtree(window, "on_close")
+        window.destroy()
+    end
+end
+
 ---@param event EventData.CustomInputEvent
 script.on_event("factory-solver-toggle-main-window", function(event)
     toggle_main_window(event.player_index)
 end)
 
+---@param event EventData.CustomInputEvent
+script.on_event("factory-solver-toggle-build-assistant", function(event)
+    toggle_build_assistant(event.player_index)
+end)
+
 script.on_event(defines.events.on_lua_shortcut, function(event)
     if event.prototype_name == "factory-solver-toggle-main-window" then
         toggle_main_window(event.player_index)
+    elseif event.prototype_name == "factory-solver-toggle-build-assistant" then
+        toggle_build_assistant(event.player_index)
     end
 end)
 
