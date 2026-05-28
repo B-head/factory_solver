@@ -79,6 +79,11 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         log.debug("-- ready solve '%s' --", problem.name)
         log.debug("cost <c>:\n%s", problem:dump_primal(c))
         log.debug("limit <b>:\n%s", problem:dump_dual(b))
+        -- Subject matrix only at trace -- on real factories the dump is large
+        -- (one line per non-zero coefficient) and only needed when capturing
+        -- a fixture for the headless test suite. Stays off under both the
+        -- default info and the __DebugAdapter debug threshold.
+        log.trace("subject <A>:\n%s", problem:dump_subject_matrix())
 
         return 1, raw_variables
     elseif type(solver_state) ~= "number" then

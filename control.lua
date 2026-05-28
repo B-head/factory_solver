@@ -2,6 +2,7 @@ local flib_dictionary = require "__flib__/dictionary"
 local flib_gui = require "__flib__/gui"
 local flib_table = require "__flib__/table"
 
+local fs_log = require "fs_log"
 local fs_util = require "fs_util"
 local save = require "manage/save"
 local pre_solve = require "manage/pre_solve"
@@ -183,6 +184,37 @@ script.on_event(defines.events.on_lua_shortcut, function(event)
         toggle_main_window(event.player_index)
     end
 end)
+
+-- Lets a player (or the server console) raise the fs_log threshold below
+-- `debug` so the A-matrix dump in solver.lp's "ready" block reaches the log.
+-- Intended for fixture capture: turn trace on, trigger a solve, copy the
+-- emitted cost/limit/subject block into a tests/cases/*.lua entry, turn it
+-- back off. Threshold lives in fs_log's module-local state (not storage), so
+-- the change is per-process and does not need to survive save/load; running
+-- the command on every client in MP keeps log threshold consistent across
+-- clients without making it desync-relevant.
+commands.add_command(
+    "factory-solver-log-level",
+    "Set the fs_log threshold (trace | debug | info | warn | error). " ..
+    "With no argument, prints the current level.",
+    function(event)
+        local sink = event.player_index
+            and game.players[event.player_index]
+            or game
+        local arg = event.parameter and event.parameter:match("^%s*(%S+)%s*$")
+        if not arg then
+            sink.print("factory_solver log level: " .. fs_log.get_level())
+            return
+        end
+        local ok = pcall(fs_log.set_level, arg)
+        if ok then
+            sink.print("factory_solver log level set to " .. arg)
+        else
+            sink.print("factory_solver: unknown log level '" .. arg ..
+                "' (expected trace | debug | info | warn | error)")
+        end
+    end
+)
 
 flib_dictionary.handle_events()
 flib_gui.handle_events()

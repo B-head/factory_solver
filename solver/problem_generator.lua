@@ -285,4 +285,52 @@ function M:dump_dual(vector)
     return table.concat(ret)
 end
 
+---Put the subject matrix A in readable form, grouped by dual (constraint
+---row) so each constraint header is followed by the primals that contribute
+---to it.
+---
+---Mirrors the filtering in generate_subject_matrix: a subject_term is
+---included only when both its primal and its dual are registered, so what
+---this dump prints is exactly what the LP solver sees.
+---@return string
+function M:dump_subject_matrix()
+    -- Resolve index -> key for both axes so output can be ordered by index
+    -- (Lua dict iteration order is undefined, but stable indices make
+    -- generated logs reproducible from run to run).
+    local primal_key = {}
+    for k, v in pairs(self.primals) do primal_key[v.index] = k end
+    local dual_key = {}
+    for k, v in pairs(self.duals) do dual_key[v.index] = k end
+
+    local rows = {} ---@type table<integer, table<integer, number>>
+    for p_key, terms in pairs(self.subject_terms) do
+        local p_info = self.primals[p_key]
+        if p_info then
+            for d_key, coeff in pairs(terms) do
+                local d_info = self.duals[d_key]
+                if d_info then
+                    rows[d_info.index] = rows[d_info.index] or {}
+                    rows[d_info.index][p_info.index] = coeff
+                end
+            end
+        end
+    end
+
+    local ret = {}
+    for d_idx = 1, self.dual_length do
+        local row = rows[d_idx]
+        if row then
+            table.insert(ret, string.format("  [%i]%q:\n", d_idx, dual_key[d_idx]))
+            for p_idx = 1, self.primal_length do
+                local coeff = row[p_idx]
+                if coeff then
+                    table.insert(ret, string.format("    [%i]%q = %f\n",
+                        p_idx, primal_key[p_idx], coeff))
+                end
+            end
+        end
+    end
+    return table.concat(ret)
+end
+
 return M

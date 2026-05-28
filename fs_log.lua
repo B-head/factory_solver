@@ -13,8 +13,13 @@
 
 local M = {}
 
-local LEVELS = { debug = 1, info = 2, warn = 3, error = 4 }
-local LEVEL_PREFIXES = { "DEBUG", "INFO", "WARN", "ERROR" }
+-- `trace` sits below `debug` for output that is too bulky to keep on by
+-- default even when a developer asks for verbose logs — the per-solve A-matrix
+-- dump in solver.lp is the motivating case. Opt-in only: even with
+-- __DebugAdapter active the threshold starts at `debug`, so trace lines stay
+-- silent until something calls `set_level("trace")`.
+local LEVELS = { trace = 1, debug = 2, info = 3, warn = 4, error = 5 }
+local LEVEL_PREFIXES = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR" }
 
 local threshold = rawget(_G, "__DebugAdapter") and LEVELS.debug or LEVELS.info
 
@@ -26,14 +31,14 @@ local sink = default_sink
 
 ---Set the minimum level that reaches the sink. Levels strictly below this
 ---are dropped before any formatting work.
----@param name "debug" | "info" | "warn" | "error"
+---@param name "trace" | "debug" | "info" | "warn" | "error"
 function M.set_level(name)
     local n = LEVELS[name]
     assert(n, "fs_log: unknown level " .. tostring(name))
     threshold = n
 end
 
----@return "debug" | "info" | "warn" | "error"
+---@return "trace" | "debug" | "info" | "warn" | "error"
 function M.get_level()
     return LEVEL_PREFIXES[threshold]:lower()
 end
@@ -58,6 +63,7 @@ local function emit(level_num, module_name, fmt, ...)
 end
 
 ---@class FsLogger
+---@field trace fun(fmt: string, ...: any)
 ---@field debug fun(fmt: string, ...: any)
 ---@field info  fun(fmt: string, ...: any)
 ---@field warn  fun(fmt: string, ...: any)
@@ -70,10 +76,11 @@ end
 ---@return FsLogger
 function M.for_module(module_name)
     return {
-        debug = function(fmt, ...) emit(1, module_name, fmt, ...) end,
-        info  = function(fmt, ...) emit(2, module_name, fmt, ...) end,
-        warn  = function(fmt, ...) emit(3, module_name, fmt, ...) end,
-        error = function(fmt, ...) emit(4, module_name, fmt, ...) end,
+        trace = function(fmt, ...) emit(1, module_name, fmt, ...) end,
+        debug = function(fmt, ...) emit(2, module_name, fmt, ...) end,
+        info  = function(fmt, ...) emit(3, module_name, fmt, ...) end,
+        warn  = function(fmt, ...) emit(4, module_name, fmt, ...) end,
+        error = function(fmt, ...) emit(5, module_name, fmt, ...) end,
     }
 end
 

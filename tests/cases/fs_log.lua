@@ -77,4 +77,31 @@ table.insert(cases, {
     end,
 })
 
+table.insert(cases, {
+    name = "trace sits below debug and is opt-in",
+    -- Default threshold is `debug` (under __DebugAdapter) or `info`, so trace
+    -- lines must stay silent unless explicitly enabled, and once enabled
+    -- they render with a TRACE marker.
+    run = function()
+        local lines = with_capture(function()
+            fs_log.set_level("debug")
+            local log = fs_log.for_module("test.trace")
+            log.trace("hidden")
+            log.debug("visible")
+        end)
+        harness.assert_eq(#lines, 1, "trace dropped at debug threshold")
+        harness.assert_true(lines[1]:find("DEBUG", 1, true) ~= nil, "the surviving line is debug")
+
+        lines = with_capture(function()
+            fs_log.set_level("trace")
+            local log = fs_log.for_module("test.trace")
+            log.trace("now %d", 7)
+            log.debug("also visible")
+        end)
+        harness.assert_eq(#lines, 2, "both lines pass at trace threshold")
+        harness.assert_true(lines[1]:find("TRACE", 1, true) ~= nil, "trace marker present")
+        harness.assert_true(lines[1]:find("now 7", 1, true) ~= nil, "trace body formatted")
+    end,
+})
+
 return cases

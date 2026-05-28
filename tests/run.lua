@@ -77,6 +77,7 @@ local case_files = {
     "lp_scale_invariance",
     "lp_tiebreak",
     "material_cycles",
+    "problem_dump",
 }
 
 local total, passed, failed = 0, 0, 0
