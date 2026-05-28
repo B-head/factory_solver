@@ -83,6 +83,8 @@ local case_files = {
     "lp_gleba_loop",
     "lp_asteroid_upcycling",
     "lp_fusion_loop",
+    "lp_solver_properties",
+    "lp_material_kinds",
     "material_cycles",
     "problem_dump",
 }

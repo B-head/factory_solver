@@ -1,51 +1,37 @@
--- Space Age asteroid quality upcycling, captured from a real save as the
--- LP create_problem produces it TODAY. This pins the *current* (undesired)
--- behaviour: a large (54 primal x 24 dual) ill-conditioned system where the
--- upcycle cascade cannot run and the shortage_source gate fires on the top
--- tier instead. The intended end-state is the upcycle actually computing --
--- see the "what should happen" note below.
+-- Space Age asteroid quality upcycling. This file holds two cases that
+-- together establish what actually happens (an earlier "false negative in
+-- find_deficit_materials" reading of this case was WRONG -- corrected below
+-- after driving create_problem on the reconstructed recipes).
 --
--- Setup: three advanced-*-asteroid-crushing/legendary recipes are pinned at
--- rate 1 (|limit| = 1 with a 2^20 slack, forcing equality). Each crush
--- consumes 0.19 of its legendary chunk and emits legendary ores
--- (iron/copper/carbon/sulfur/ice/calcite). The 12 *-asteroid-reprocessing
--- recipes (normal/uncommon/rare/epic of three types) form a 5-tier x 3-type
--- quality cascade: each reprocess consumes one chunk and emits small
--- probabilistic amounts of higher-quality chunks of the same type plus
--- same-tier chunks of the other two types. The cascade is mass-LOSING (each
--- reprocess leaks ~13% of its mass up a quality tier) and create_problem
--- supplies NO external chunk source.
+-- The cascade: three advanced-*-asteroid-crushing/legendary recipes consume
+-- 0.19 of their legendary chunk and emit legendary ores. Twelve
+-- *-asteroid-reprocessing recipes (normal/uncommon/rare/epic x three types)
+-- form a 5-tier x 3-type quality cascade -- each reprocess consumes one chunk
+-- and emits small probabilistic amounts of higher-quality chunks of the same
+-- type plus same-tier chunks of the other two types. Mass leaks upward, so
+-- the cascade needs an external base chunk supply to run.
 --
--- What happens today (asserted below): with no base chunk supply the cascade
--- cannot bootstrap -- running any reprocessing recipe only burns chunks it
--- doesn't have -- so the cost-minimal answer leaves all 12 reprocessing
--- recipes idle and pays |shortage_source| for exactly the 0.19 legendary
--- chunk each crush demands.
+-- EMPIRICAL finding (2026-05-28): driving create_problem on these recipes in
+-- isolation, find_deficit_materials DOES flag oxide-asteroid-chunk/normal
+-- (oxide reprocessing consumes 0.585 vs 0.2925 for metallic/carbonic, so o/
+-- norm's unit-rate net is -73%, over the 50% threshold; m/norm and c/norm are
+-- only -19% and stay unflagged). That single |basic_source|o/norm is enough:
+-- oxide reprocessing cross-produces metallic and carbonic chunks too, so the
+-- LP bootstraps the WHOLE cascade from oxide normal chunks and the upcycle
+-- runs to completion with zero shortage. See the second case below.
 --
--- What SHOULD happen (not yet implemented): the user wants the upcycle to
--- actually compute -- normal chunks fed in (representing asteroid-collector
--- output), reprocessed up the quality cascade, crushed at legendary. That
--- needs a create_problem fix: recognise the bottom-tier chunk cross-cycle as
--- a material that needs a base |basic_source|. It is NOT flagged today
--- because material_cycles.find_deficit_materials only sees the bottom tier's
--- near-balanced cross-cycle (m/norm net at unit rate is just -19% of its
--- consumption, well under the 50% deficit threshold) and cannot see the
--- cross-TIER upward mass leak that makes the cascade genuinely need external
--- input. This is the false-NEGATIVE face of the same coarse per-SCC
--- uniform-rate heuristic whose false-POSITIVE face the Gleba bioflux xfail
--- (lp_gleba_loop.lua) documents. See [[deficit-false-positive-grow-loops]].
+-- So why did the in-game trace show shortage on legendary and an idle
+-- cascade? Because in the full factory find_deficit ran over ALL lines and
+-- o/norm came back `pre_reachable` (some other line produces it), so the
+-- `deficits MINUS pre_reachable` filter in create_problem dropped it -- yet
+-- that producing line was not in THIS solve's active set, leaving the active
+-- LP with no chunk source. That is a reachability-vs-active-lines context
+-- mismatch, separate from the deficit heuristic, and not reproducible without
+-- the full-factory state. The first case below pins that captured in-game
+-- matrix (no chunk source -> shortage) as a numerical-robustness + behaviour
+-- snapshot; it is NOT a statement that the cascade "should" fail.
 --
--- Because this fixture is a hand-built Problem (the exact matrix create_
--- problem emits today), it cannot be an xfail that flips when create_problem
--- is fixed -- the matrix here would not change. It stays a NORMAL case
--- pinning two still-true facts: (1) the IPM converges on a 54x24 system whose
--- coefficients span 0.000011 .. 2.0 alongside the 1024 / 2^20 cost tiers, and
--- (2) given a matrix with no chunk source, the shortage signal stays
--- precisely localized to the demanded tier rather than smearing. The
--- create_problem fix, when it lands, gets its own create_problem-driven test.
---
--- Variable names are shortened for readability (the test only needs unique
--- keys); the mapping to the in-game typed names is:
+-- Variable names in the first (pg.new) case are shortened; mapping:
 --   recipe/{m,c,o}-crush       = advanced-{metallic,carbonic,oxide}-asteroid-crushing/legendary
 --   recipe/{m,c,o}-rp/<tier>    = {metallic,carbonic,oxide}-asteroid-reprocessing/<tier>
 --   {m,c,o}/<tier>             = {metallic,carbonic,oxide}-asteroid-chunk/<tier>
@@ -53,11 +39,24 @@
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local pg = require "solver/problem_generator"
+local cp = require "solver/create_problem"
+
+-- Helpers for the create_problem-driven case.
+local function ci(name, q, amt)
+    return { type = "item", name = name, quality = q, amount_per_second = amt }
+end
+local function cl(rname, q, products, ingredients)
+    return {
+        recipe_typed_name = { type = "recipe", name = rname, quality = q },
+        products = products, ingredients = ingredients,
+        power_per_second = 0, pollution_per_second = 0,
+    }
+end
 
 local cases = {}
 
 table.insert(cases, {
-    name = "asteroid upcycling, current behaviour: no base chunk source so cascade idles and shortage fires on legendary (intended fix is in create_problem)",
+    name = "asteroid upcycling, in-game matrix snapshot: no chunk source so cascade idles and shortage fires on legendary (54x24 numerical robustness)",
     run = function()
         local p = pg.new("asteroid-upcycle-no-source")
 
@@ -327,6 +326,124 @@ table.insert(cases, {
         harness.assert_near(vars.x["|final_sink|sulfur"], 0.4, 1e-3, "sulfur output")
         harness.assert_near(vars.x["|final_sink|ice"],    0.6, 1e-3, "ice output")
         harness.assert_near(vars.x["|final_sink|calcite"],0.4, 1e-3, "calcite output")
+    end,
+})
+
+table.insert(cases, {
+    name = "asteroid upcycle, isolated cascade via create_problem: find_deficit flags o/norm and the whole upcycle runs",
+    -- The empirical counterpart to the snapshot above: the SAME cascade fed
+    -- through create_problem from recipe fixtures. find_deficit_materials
+    -- flags only oxide-asteroid-chunk/normal (-73% at unit rate), which gets
+    -- a |basic_source|. Oxide reprocessing cross-produces metallic/carbonic
+    -- chunks, so that single base supply bootstraps the entire cascade: all
+    -- 12 reprocessing recipes run, every tier upcycles, the three crushers
+    -- hit their pinned rate, and NO shortage_source fires.
+    --
+    -- This is the "upcycle works" regression: it pins that the deficit /
+    -- reachability / shortage gating in create_problem produces a usable
+    -- upcycle on the isolated cascade. It is the control proving the in-game
+    -- shortage was a full-factory reachability artifact, not a property of
+    -- the cascade itself. NOTE: if the planned find_deficit_materials
+    -- feasibility fix changes which chunk(s) get the base supply, the exact
+    -- per-recipe rates below may shift -- the load-bearing assertions are
+    -- "crushers pinned, all reprocessing > 0, no shortage", which any
+    -- correct supply choice must satisfy.
+    run = function()
+        local m = function(q, amt) return ci("metallic-asteroid-chunk", q, amt) end
+        local c = function(q, amt) return ci("carbonic-asteroid-chunk", q, amt) end
+        local o = function(q, amt) return ci("oxide-asteroid-chunk", q, amt) end
+
+        local lines = {
+            cl("advanced-metallic-asteroid-crushing", "legendary",
+                { ci("iron-ore","legendary",2.0), ci("copper-ore","legendary",0.8) },
+                { m("legendary",0.19) }),
+            cl("advanced-carbonic-asteroid-crushing", "legendary",
+                { ci("carbon","legendary",1.0), ci("sulfur","legendary",0.4) },
+                { c("legendary",0.19) }),
+            cl("advanced-oxide-asteroid-crushing", "legendary",
+                { ci("ice","legendary",0.6), ci("calcite","legendary",0.4) },
+                { o("legendary",0.19) }),
+            cl("metallic-asteroid-reprocessing","epic",
+                { m("legendary",0.0225), c("epic",0.07875), c("legendary",0.01125), o("epic",0.07875), o("legendary",0.01125) },
+                { m("epic",0.2925) }),
+            cl("metallic-asteroid-reprocessing","rare",
+                { m("legendary",0.00225), m("epic",0.02025), c("epic",0.010125), c("legendary",0.001125), c("rare",0.07875), o("epic",0.010125), o("legendary",0.001125), o("rare",0.07875) },
+                { m("rare",0.2925) }),
+            cl("metallic-asteroid-reprocessing","uncommon",
+                { m("legendary",0.000225), m("epic",0.002025), m("rare",0.02025), c("epic",0.001012), c("legendary",0.000112), c("rare",0.010125), c("uncommon",0.07875), o("epic",0.001012), o("legendary",0.000112), o("rare",0.010125), o("uncommon",0.07875) },
+                { m("uncommon",0.2925) }),
+            cl("metallic-asteroid-reprocessing","normal",
+                { m("legendary",0.000022), m("epic",0.000202), m("rare",0.002025), m("uncommon",0.02025), c("epic",0.000101), c("legendary",0.000011), c("rare",0.001012), c("uncommon",0.010125), c("normal",0.07875), o("epic",0.000101), o("legendary",0.000011), o("rare",0.001012), o("uncommon",0.010125), o("normal",0.07875) },
+                { m("normal",0.2925) }),
+            cl("carbonic-asteroid-reprocessing","epic",
+                { m("legendary",0.01125), m("epic",0.07875), c("legendary",0.0225), o("epic",0.07875), o("legendary",0.01125) },
+                { c("epic",0.2925) }),
+            cl("carbonic-asteroid-reprocessing","rare",
+                { m("legendary",0.001125), m("epic",0.010125), m("rare",0.07875), c("legendary",0.00225), c("epic",0.02025), o("epic",0.010125), o("legendary",0.001125), o("rare",0.07875) },
+                { c("rare",0.2925) }),
+            cl("carbonic-asteroid-reprocessing","uncommon",
+                { m("legendary",0.000112), m("epic",0.001012), m("rare",0.010125), m("uncommon",0.07875), c("epic",0.002025), c("legendary",0.000225), c("rare",0.02025), o("epic",0.001012), o("legendary",0.000112), o("rare",0.010125), o("uncommon",0.07875) },
+                { c("uncommon",0.2925) }),
+            cl("carbonic-asteroid-reprocessing","normal",
+                { m("legendary",0.000011), m("epic",0.000101), m("rare",0.001012), m("uncommon",0.010125), m("normal",0.07875), c("epic",0.000202), c("legendary",0.000022), c("rare",0.002025), c("uncommon",0.02025), o("epic",0.000101), o("legendary",0.000011), o("rare",0.001012), o("uncommon",0.010125), o("normal",0.07875) },
+                { c("normal",0.2925) }),
+            cl("oxide-asteroid-reprocessing","epic",
+                { m("legendary",0.0225), m("epic",0.1575), c("legendary",0.0225), c("epic",0.1575), o("legendary",0.045) },
+                { o("epic",0.585) }),
+            cl("oxide-asteroid-reprocessing","rare",
+                { m("legendary",0.00225), m("epic",0.02025), m("rare",0.1575), c("legendary",0.00225), c("epic",0.02025), c("rare",0.1575), o("legendary",0.0045), o("epic",0.0405) },
+                { o("rare",0.585) }),
+            cl("oxide-asteroid-reprocessing","uncommon",
+                { m("legendary",0.000225), m("epic",0.002025), m("rare",0.02025), m("uncommon",0.1575), c("legendary",0.000225), c("epic",0.002025), c("rare",0.02025), c("uncommon",0.1575), o("legendary",0.00045), o("epic",0.00405), o("rare",0.0405) },
+                { o("uncommon",0.585) }),
+            cl("oxide-asteroid-reprocessing","normal",
+                { m("legendary",0.000022), m("epic",0.000202), m("rare",0.002025), m("uncommon",0.02025), m("normal",0.1575), c("legendary",0.000022), c("epic",0.000202), c("rare",0.002025), c("uncommon",0.02025), c("normal",0.1575), o("legendary",0.000045), o("epic",0.000405), o("rare",0.00405), o("uncommon",0.0405) },
+                { o("normal",0.585) }),
+        }
+        local constraints = {
+            { type = "recipe", name = "advanced-metallic-asteroid-crushing", quality = "legendary",
+              limit_type = "equal", limit_amount_per_second = 1 },
+            { type = "recipe", name = "advanced-carbonic-asteroid-crushing", quality = "legendary",
+              limit_type = "equal", limit_amount_per_second = 1 },
+            { type = "recipe", name = "advanced-oxide-asteroid-crushing", quality = "legendary",
+              limit_type = "equal", limit_amount_per_second = 1 },
+        }
+
+        local problem = cp.create_problem("asteroid-upcycle-isolated", constraints, lines)
+        local state, vars = harness.solve_to_completion(lp, problem,
+            { tolerance = 1e-6, iterate_limit = 600 })
+
+        harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "expected packed variables on finished state")
+
+        -- Crushers pinned at the requested rate.
+        harness.assert_near(vars.x["recipe/advanced-metallic-asteroid-crushing/legendary"], 1, 1e-3, "metallic crush pinned")
+        harness.assert_near(vars.x["recipe/advanced-carbonic-asteroid-crushing/legendary"], 1, 1e-3, "carbonic crush pinned")
+        harness.assert_near(vars.x["recipe/advanced-oxide-asteroid-crushing/legendary"],    1, 1e-3, "oxide crush pinned")
+
+        -- The whole cascade runs: every reprocessing recipe is active.
+        for _, r in ipairs({
+            "metallic-asteroid-reprocessing", "carbonic-asteroid-reprocessing", "oxide-asteroid-reprocessing",
+        }) do
+            for _, q in ipairs({ "normal", "uncommon", "rare", "epic" }) do
+                local key = "recipe/" .. r .. "/" .. q
+                harness.assert_true((vars.x[key] or 0) > 0.1,
+                    key .. " must run (upcycle active, got " .. tostring(vars.x[key]) .. ")")
+            end
+        end
+
+        -- A base chunk supply bootstraps the cascade (today: o/norm).
+        harness.assert_true((vars.x["|basic_source|item/oxide-asteroid-chunk/normal"] or 0) > 0.1,
+            "a base chunk |basic_source| is active to seed the cascade")
+
+        -- Crucially: NO shortage anywhere. The upcycle is fully supplied by
+        -- the recipe chain off the base chunk(s).
+        for _, t in ipairs({ "metallic", "carbonic", "oxide" }) do
+            for _, q in ipairs({ "normal", "uncommon", "rare", "epic", "legendary" }) do
+                local key = "|shortage_source|item/" .. t .. "-asteroid-chunk/" .. q
+                harness.assert_near(vars.x[key] or 0, 0, 1e-3, key .. " idle (no shortage; cascade supplies itself)")
+            end
+        end
     end,
 })
 

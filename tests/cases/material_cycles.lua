@@ -217,4 +217,44 @@ table.insert(cases, {
     end,
 })
 
+table.insert(cases, {
+    name = "mass-positive grow loop must not flag any deficit",
+    xfail = true,
+    -- Minimal reproduction of the Gleba <grow> false positive (see
+    -- [[deficit-false-positive-grow-loops]] and lp_gleba_loop's bioflux
+    -- xfail). A seed<->plant cycle that GAINS mass:
+    --   grow:    0.003333 seed -> 0.166667 plant   (one seed grows ~50x)
+    --   process: 2 plant       -> 0.06 seed + 6 mash
+    -- Per closed loop: ~0.04 seed in -> 0.06 seed out, a 1.5x mass gain, so
+    -- the cycle is self-sustaining and needs NO external supply.
+    --
+    -- The current uniform-rate + 50% heuristic misjudges it: at rate 1 the
+    -- grow recipe makes only 0.166667 plant while process consumes 2, so
+    -- plant's net is -1.833 (-92% of consumption) and gets flagged as a
+    -- deficit -- even though at the TRUE optimum grow runs ~12x more than
+    -- process and plant balances. The spurious |basic_source|plant this
+    -- produces is what lets the LP bypass the recipe chain in-game.
+    --
+    -- Desired behaviour (asserted below): a self-sustaining cycle flags
+    -- nothing. This FAILS today; it should XPASS once find_deficit_materials
+    -- gates flagging on a "can this SCC sustain itself at some positive
+    -- rate vector?" feasibility test instead of the unit-rate snapshot.
+    run = function()
+        local lines = {
+            line("grow", "normal",
+                { item("plant", "normal", 0.166667) },
+                { item("seed", "normal", 0.003333) }),
+            line("process", "normal",
+                { item("seed", "normal", 0.06), item("mash", "normal", 6) },
+                { item("plant", "normal", 2) }),
+        }
+        local deficits, cyclic = mc.find_deficit_materials(lines)
+        harness.assert_eq(#cyclic, 1, "one cyclic SCC")
+        harness.assert_eq(#cyclic[1], 2, "SCC is {seed, plant}")
+        harness.assert_eq(set_size(deficits), 0,
+            "self-sustaining grow loop flags nothing (got " ..
+            table.concat(set_keys(deficits), ", ") .. ")")
+    end,
+})
+
 return cases
