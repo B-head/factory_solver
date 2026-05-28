@@ -423,8 +423,8 @@ styles.factory_solver_production_line_table = {
     },
 }
 
--- Build assistant's compact 3-column rows (recipe | required | machine). Same
--- row striping and spacing as the main production-line table, but its own
+-- Build assistant's compact rows (done | recipe | required | machine | beacons).
+-- Same row striping and spacing as the main production-line table, but its own
 -- column alignments: the Required number is right-aligned to read identically
 -- to the main window's Required column, and the padding is trimmed (left/right
 -- only) so rows sit close to the docked panel's edges.
@@ -443,10 +443,14 @@ styles.factory_solver_build_assistant_table = {
         },
         {
             column = 2,
-            alignment = "right",
+            alignment = "center",
         },
         {
             column = 3,
+            alignment = "right",
+        },
+        {
+            column = 4,
             alignment = "right",
         },
     },

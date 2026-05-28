@@ -439,6 +439,41 @@ function M.get_quantity_of_machines_required(solution, typed_name)
     return 1
 end
 
+---Build-progress "done" flags for the build assistant's TODO column. Keyed by
+---the recipe variable name (the same per-line identity the solver uses), so
+---they survive line reordering and never collide. Stored on the Solution
+---because the flags describe progress on a shared (force-scoped) factory plan,
+---not per-player state.
+---@param solution Solution
+---@param recipe_typed_name TypedName
+---@return boolean
+function M.is_line_done(solution, recipe_typed_name)
+    local set = solution.done_lines
+    if not set then
+        return false
+    end
+    local key = string.format("%s/%s/%s", recipe_typed_name.type, recipe_typed_name.name, recipe_typed_name.quality)
+    return set[key] == true
+end
+
+---@param solution Solution
+---@param recipe_typed_name TypedName
+---@param done boolean
+function M.set_line_done(solution, recipe_typed_name, done)
+    local key = string.format("%s/%s/%s", recipe_typed_name.type, recipe_typed_name.name, recipe_typed_name.quality)
+    local set = solution.done_lines
+    if not set then
+        set = {}
+        solution.done_lines = set
+    end
+    set[key] = done or nil
+end
+
+---@param solution Solution
+function M.reset_done(solution)
+    solution.done_lines = nil
+end
+
 ---comment
 ---@param solutions table<string, Solution>
 ---@param solution_name string?

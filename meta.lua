@@ -114,6 +114,7 @@ __factory_solver__storage = {}
 ---@field problem Problem?
 ---@field solver_state SolverState
 ---@field raw_variables PackedVariables?
+---@field done_lines table<string, true>?
 
 ---@class Constraint
 ---@field type FilterType

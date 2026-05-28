@@ -52,7 +52,19 @@ function handlers.make_build_table(event)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local count = save.get_quantity_of_machines_required(solution, line.recipe_typed_name)
 
-        -- Column 1: recipe icon as the row identity (the machine icon alone is
+        -- Column 1: done checkbox — a build-progress TODO marker (BA only). For
+        -- big plans (pyanodon can be ~100 lines) this lets the user tick off
+        -- placed rows. State lives on the Solution, keyed by recipe identity.
+        fs_util.add_gui(elem, {
+            type = "checkbox",
+            state = save.is_line_done(solution, line.recipe_typed_name),
+            tags = { line_index = line_index },
+            handler = {
+                [defines.events.on_gui_checked_state_changed] = handlers.on_done_toggled,
+            },
+        })
+
+        -- Column 2: recipe icon as the row identity (the machine icon alone is
         -- ambiguous when several recipes share a machine type).
         fs_util.add_gui(elem, common.create_decorated_sprite_button {
             typed_name = line.recipe_typed_name,
@@ -60,7 +72,7 @@ function handlers.make_build_table(event)
             is_unresearched = acc.is_unresearched(recipe, relation_to_recipes),
         })
 
-        -- Column 2: required machine count, same value/format/alignment/tint as
+        -- Column 3: required machine count, same value/format/alignment/tint as
         -- the main window's "Required" column so a row reads identically in both
         -- windows (lower cognitive load than re-deriving from icons).
         fs_util.add_gui(elem, {
@@ -72,7 +84,7 @@ function handlers.make_build_table(event)
             },
         })
 
-        -- Column 3: machine icon. This is the pipette button when the line maps
+        -- Column 4: machine icon. This is the pipette button when the line maps
         -- to a placeable, configured machine.
         local beacon_buttons = {}
         if bp.can_pipette(line) then
@@ -123,7 +135,7 @@ function handlers.make_build_table(event)
             })
         end
 
-        -- Column 4: beacons affecting this line (each a pipette for a single
+        -- Column 5: beacons affecting this line (each a pipette for a single
         -- configured beacon). Unlike the main window, which has no beacon
         -- column; the build assistant serves the build phase, where beacons are
         -- placed too. Empty flow keeps the row's cell count aligned.
@@ -185,6 +197,17 @@ function handlers.on_beacon_pipette_click(event)
     end
 end
 
+---@param event EventData.on_gui_checked_state_changed
+function handlers.on_done_toggled(event)
+    local solution = save.get_selected_solution(event.player_index)
+    if not solution then return end
+    local line = solution.production_lines[event.element.tags.line_index --[[@as integer]]]
+    if not line then return end
+    -- Persist only; the engine already flipped the checkbox visual, and the
+    -- state is re-read from the Solution when the table next rebuilds.
+    save.set_line_done(solution, line.recipe_typed_name, event.element.state)
+end
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -213,7 +236,7 @@ return {
         {
             type = "table",
             style = "factory_solver_build_assistant_table",
-            column_count = 4,
+            column_count = 5,
             handler = {
                 on_added = handlers.make_build_table,
                 on_selected_solution_changed = handlers.make_build_table,

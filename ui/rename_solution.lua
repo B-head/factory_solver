@@ -42,6 +42,20 @@ function handlers.on_rename_confirm(event)
     common.on_close_self(re_event)
 end
 
+---@param event EventData.on_gui_click
+function handlers.on_reset_done(event)
+    local solution = save.get_selected_solution(event.player_index)
+    if not solution then return end
+    save.reset_done(solution)
+
+    -- Rebuild the build assistant (if open) so its Done checkboxes re-read the
+    -- now-cleared state. The main window has no Done column, so it is skipped.
+    local build_assistant = common.find_root_element(event.player_index, "factory_solver_build_assistant")
+    if build_assistant then
+        fs_util.dispatch_to_subtree(build_assistant, "on_selected_solution_changed")
+    end
+end
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -62,7 +76,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = { "factory-solver-rename-solution" },
+            caption = { "factory-solver-edit-solution" },
             ignored_by_interaction = true,
         },
         {
@@ -76,6 +90,11 @@ return {
         style = "inside_shallow_frame_with_padding",
         direction = "vertical",
         {
+            type = "label",
+            style = "caption_label",
+            caption = { "factory-solver-solution-name" },
+        },
+        {
             type = "textfield",
             name = "rename_textfield",
             style = "factory_solver_rename_textfield",
@@ -85,6 +104,21 @@ return {
                 [defines.events.on_gui_text_changed] = handlers.on_rename_textfield_changed,
                 [defines.events.on_gui_confirmed] = handlers.on_rename_confirm,
             }
+        },
+        -- Build-progress reset lives here, buried behind an explicitly-opened
+        -- dialog, so it cannot be misfired from the build assistant's per-row
+        -- checkboxes. Applies immediately (it is its own labelled action,
+        -- independent of the rename Confirm/Cancel below).
+        {
+            type = "line",
+            style = "factory_solver_line",
+        },
+        {
+            type = "button",
+            caption = { "factory-solver-reset-done" },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_reset_done,
+            },
         },
     },
     {
