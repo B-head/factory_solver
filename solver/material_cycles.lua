@@ -30,7 +30,8 @@
 --      and needs no external supply, so nothing is flagged. Only when the
 --      SCC is NOT self-sustaining do we fall back to the unit-rate snapshot:
 --      compute net flow with every touching recipe at rate 1, and flag any
---      material whose net consumption exceeds half its total inflow.
+--      material the cycle consumes more than 1.5x faster than it produces
+--      (net deficit > half its internal production).
 --
 -- The self-sustaining gate is exact (an LP feasibility test over rate
 -- *vectors*); the uniform-rate + 50% threshold behind it is a deliberately
@@ -427,10 +428,14 @@ function M.is_self_sustaining(production_lines, scc)
 end
 
 ---Default deficit threshold: a material is flagged when its net deficit is
----more than 50% of its consumption at uniform recipe rates. This excludes
----materials that are merely "off by a recipe ratio" (e.g. the recycled
----product itself, which balances at non-unit rates) while still catching
----genuine mass-losing ingredients.
+---more than 50% of its internal PRODUCTION at uniform recipe rates (the cycle
+---consumes it more than 1.5x faster than it produces it). Measuring against
+---production rather than consumption keeps the ratio meaningful when a recipe
+---re-emits the material it consumes (asteroid reprocessing's same-tier
+---self-roll): self-production cancels out of `net` but would otherwise pad the
+---consumption denominator and hide the deficit. This still excludes materials
+---that merely balance at a non-unit recipe ratio (the recycled product itself)
+---while catching genuine mass-losing ingredients.
 local default_threshold_ratio = 0.5
 
 ---Identify materials that need external supply. A material qualifies when:
@@ -438,7 +443,8 @@ local default_threshold_ratio = 0.5
 ---  - the SCC is a source SCC (no edge enters it from outside), AND
 ---  - the SCC is NOT self-sustaining (no positive rate vector balances it;
 ---    see is_self_sustaining), AND
----  - net < -threshold_ratio * consumption at uniform recipe rates.
+---  - net < -threshold_ratio * production at uniform recipe rates (production
+---    = net + consumption; see default_threshold_ratio for why production).
 ---The self-sustaining gate runs before the unit-rate heuristic so that a
 ---mass-positive cycle (kovarex productivity, a Gleba <grow> loop) flags
 ---nothing even though its uniform-rate snapshot looks deficit-heavy.
@@ -463,8 +469,18 @@ function M.find_deficit_materials(production_lines, threshold_ratio)
                 and not M.is_self_sustaining(production_lines, scc) then
                 local net, consumption = M.compute_net_flow(production_lines, scc_set)
                 for _, m in ipairs(scc) do
-                    local c = consumption[m]
-                    if c > 0 and net[m] < -threshold_ratio * c then
+                    -- Measure the deficit against the material's internal
+                    -- PRODUCTION, not its consumption. A recipe that consumes
+                    -- and re-emits the same material at the same tier (asteroid
+                    -- reprocessing, which crushes 0.9 oxide/normal and re-rolls
+                    -- 0.315 back) inflates consumption with mass it immediately
+                    -- replaces, masking a genuine deficit under a consumption
+                    -- ratio. production = net + consumption (compute_net_flow
+                    -- gives net and consumption); flag when the cycle consumes
+                    -- this material more than (1 + threshold)x faster than it
+                    -- can produce it internally.
+                    local production = net[m] + consumption[m]
+                    if production > 0 and net[m] < -threshold_ratio * production then
                         deficits[m] = true
                     end
                 end

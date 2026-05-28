@@ -452,8 +452,7 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "asteroid upcycle, REAL in-game recipes (self-production): cascade should run, not idle on a legendary shortage",
-    xfail = true,
+    name = "asteroid upcycle, REAL in-game recipes (self-production): cascade runs, no legendary shortage",
     -- The faithful capture of the in-game 'Solution 6' input (dumped via
     -- create_problem.dump_normalized_lines, 2026-05-28). It differs from the
     -- isolated case above in two ways that the isolated fixture had silently
@@ -464,28 +463,27 @@ table.insert(cases, {
     --     0.1575, oxide 0.315) and consumes the gross 0.45 / 0.9, instead of
     --     the netted 0.2925 / 0.585 with no self-product.
     --
-    -- EMPIRICAL finding (drove create_problem on this exact input):
-    --   - find_deficit_materials flags NOTHING. The normal SCC is the only
-    --     source SCC and is correctly not self-sustaining, so the unit-rate
-    --     heuristic runs -- but the self-production inflates each material's
-    --     consumption denominator, so the deficit ratios are
-    --       o/norm  net -0.4275 / cons 0.90 = -0.475   (just under -0.5!)
-    --       m/norm, c/norm  net -0.05625 / cons 0.45 = -0.125
-    --     None clear the 50% threshold, so no |basic_source| is created.
-    --   - compute_reachable_materials is EMPTY (every chunk has a producer
-    --     via reprocessing's self-product, so there is no open-boundary seed).
-    --     The `deficits MINUS pre_reachable` filter is therefore irrelevant
-    --     here -- this is NOT the reachability-vs-active-lines artifact the
-    --     first case's header hypothesised; it reproduces in a single solve.
-    --   - With no base supply the cascade idles and the LP eats a 0.19
-    --     |shortage_source| on each legendary chunk (matches the in-game LP).
+    -- EMPIRICAL finding that motivated the fix (drove create_problem on this
+    -- exact input). With the OLD consumption-denominator heuristic,
+    -- find_deficit_materials flagged NOTHING: the normal SCC is the only source
+    -- SCC and is correctly not self-sustaining, so the unit-rate heuristic ran,
+    -- but the same-tier self-production padded each material's consumption
+    -- denominator and the deficit ratios came out
+    --     o/norm  net -0.4275 / cons 0.90 = -0.475   (just under -0.5!)
+    --     m/norm, c/norm  net -0.05625 / cons 0.45 = -0.125
+    -- so nothing cleared the 50% threshold, no |basic_source| was created, the
+    -- cascade idled and the LP ate a 0.19 shortage on each legendary chunk
+    -- (matching the in-game LP). compute_reachable_materials is EMPTY here, so
+    -- the `deficits MINUS pre_reachable` filter was never the cause -- this is
+    -- NOT a reachability artifact, it reproduces in a single solve.
     --
-    -- DESIRED behaviour (asserted below, currently FAILS): a base normal-chunk
-    -- supply seeds the cascade, every reprocessing recipe runs, and no
-    -- legendary shortage fires. This should XPASS once find_deficit_materials
-    -- stops being fooled by same-tier self-production (e.g. measuring the
-    -- deficit against net throughput rather than gross consumption, or picking
-    -- the cycle entry point by feasibility rather than the unit-rate ratio).
+    -- THE FIX: find_deficit_materials now measures the deficit against internal
+    -- PRODUCTION instead of consumption (production = net + consumption), so
+    -- self-production cancels out of the ratio: o/norm becomes -0.4275 / 0.4725
+    -- = -0.905, clearing the threshold. o/norm gets a |basic_source|, oxide
+    -- reprocessing cross-produces metallic/carbonic, and the whole cascade
+    -- bootstraps. Asserted below: every reprocessing recipe runs and no
+    -- legendary shortage fires.
     run = function()
         local m = function(q, amt) return ci("metallic-asteroid-chunk", q, amt) end
         local c = function(q, amt) return ci("carbonic-asteroid-chunk", q, amt) end

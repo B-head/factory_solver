@@ -101,12 +101,18 @@ table.insert(cases, {
     -- reachability gate must therefore give it a |shortage_source| so the LP
     -- can still satisfy the `out` demand instead of being forced to all-zero.
     --
-    -- spin: 1 loop + 1 seedless-raw... no -- to make it genuinely unreachable
-    -- the cycle has no external producer at all: spin consumes `loop` and
-    -- produces `loop` + `out`, mass-losing (2 loop in, 1 loop + 1 out back).
+    -- spin consumes `loop` and produces `loop` + `out`, mass-losing
+    -- (2 loop in, 1.5 loop + 1 out back). The loss is deliberately MILD: net
+    -- -0.5 against production 1.5 is a -0.33 ratio, under find_deficit's 50%
+    -- threshold, so the deficit heuristic does NOT promote `loop` to a
+    -- |basic_source| -- it stays an "uncertain" intermediate and falls through
+    -- to the shortage escape hatch. (A strongly mass-losing self-loop, e.g.
+    -- 2 in -> 1 back, IS now caught as a basic_source cycle input, same as the
+    -- asteroid base chunk; the escape hatch is for losses the heuristic can't
+    -- confidently call a raw input.)
     run = function()
         local lines = {
-            line("spin", { item("loop", 1), item("out", 1) }, { item("loop", 2) }),
+            line("spin", { item("loop", 1.5), item("out", 1) }, { item("loop", 2) }),
         }
         local constraints = {
             { type = "item", name = "out", quality = "normal",
