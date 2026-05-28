@@ -1,6 +1,9 @@
 local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
 local material_cycles = require "solver/material_cycles"
+local fs_log = require "fs_log"
+
+local log = fs_log.for_module("solver.create_problem")
 
 local slack_cost = 0
 -- Small per-unit cost on |basic_source| (external material supply). It sits
@@ -360,6 +363,107 @@ function M.compute_active_lines(all_lines, constraints)
     return active, inactive_vars
 end
 
+-- Serializers below emit loadable Lua so an in-game solve can be captured
+-- verbatim and dropped into a headless test fixture. `load()`-ing the string
+-- reconstructs the exact NormalizedProductionLine[] / Constraint[] create_problem
+-- received, which matters for reachability work where the active/inactive line
+-- split and the precise per-second amounts decide the LP shape. %.17g keeps the
+-- round-trip lossless; %q keeps names/qualities valid under any future escaping.
+
+---@param n number
+---@return string
+local function num_literal(n)
+    return string.format("%.17g", n)
+end
+
+---@param amount NormalizedAmount
+---@return string
+local function amount_literal(amount)
+    local parts = {
+        string.format("type = %q", amount.type),
+        string.format("name = %q", amount.name),
+        string.format("quality = %q", amount.quality),
+        "amount_per_second = " .. num_literal(amount.amount_per_second),
+    }
+    if amount.temperature ~= nil then
+        parts[#parts + 1] = "temperature = " .. num_literal(amount.temperature)
+    end
+    if amount.minimum_temperature ~= nil then
+        parts[#parts + 1] = "minimum_temperature = " .. num_literal(amount.minimum_temperature)
+    end
+    if amount.maximum_temperature ~= nil then
+        parts[#parts + 1] = "maximum_temperature = " .. num_literal(amount.maximum_temperature)
+    end
+    return "{ " .. table.concat(parts, ", ") .. " }"
+end
+
+---@param amounts NormalizedAmount[]
+---@param indent string
+---@return string
+local function amounts_literal(amounts, indent)
+    if #amounts == 0 then return "{}" end
+    local lines = { "{" }
+    for _, a in ipairs(amounts) do
+        lines[#lines + 1] = indent .. "  " .. amount_literal(a) .. ","
+    end
+    lines[#lines + 1] = indent .. "}"
+    return table.concat(lines, "\n")
+end
+
+---Serialize NormalizedProductionLine[] to a `load()`-able Lua chunk that
+---`return`s an equivalent array. See the serializer note above.
+---@param production_lines NormalizedProductionLine[]
+---@return string
+function M.dump_normalized_lines(production_lines)
+    local out = { "return {" }
+    for _, line in ipairs(production_lines) do
+        local rtn = line.recipe_typed_name
+        out[#out + 1] = "  {"
+        out[#out + 1] = string.format(
+            "    recipe_typed_name = { type = %q, name = %q, quality = %q },",
+            rtn.type, rtn.name, rtn.quality)
+        out[#out + 1] = "    products = " .. amounts_literal(line.products, "    ") .. ","
+        out[#out + 1] = "    ingredients = " .. amounts_literal(line.ingredients, "    ") .. ","
+        if line.fuel_ingredient then
+            out[#out + 1] = "    fuel_ingredient = " .. amount_literal(line.fuel_ingredient) .. ","
+        end
+        out[#out + 1] = "    power_per_second = " .. num_literal(line.power_per_second) .. ","
+        out[#out + 1] = "    pollution_per_second = " .. num_literal(line.pollution_per_second) .. ","
+        out[#out + 1] = "  },"
+    end
+    out[#out + 1] = "}"
+    return table.concat(out, "\n")
+end
+
+---Serialize Constraint[] to a `load()`-able Lua chunk. Paired with
+---dump_normalized_lines, this captures the full create_problem input.
+---@param constraints Constraint[]
+---@return string
+function M.dump_constraints(constraints)
+    local out = { "return {" }
+    for _, c in ipairs(constraints) do
+        local parts = {
+            string.format("type = %q", c.type),
+            string.format("name = %q", c.name),
+            string.format("quality = %q", c.quality),
+            string.format("limit_type = %q", c.limit_type),
+            "limit_amount_per_second = " .. num_literal(c.limit_amount_per_second),
+        }
+        if c.temperature ~= nil then
+            parts[#parts + 1] = "temperature = " .. num_literal(c.temperature)
+        end
+        if c.minimum_temperature ~= nil then
+            parts[#parts + 1] = "minimum_temperature = " .. num_literal(c.minimum_temperature)
+        end
+        if c.maximum_temperature ~= nil then
+            parts[#parts + 1] = "maximum_temperature = " .. num_literal(c.maximum_temperature)
+        end
+        out[#out + 1] = "  { " .. table.concat(parts, ", ") .. " },"
+    end
+    out[#out + 1] = "}"
+    return table.concat(out, "\n")
+end
+
 ---Create linear programming problems.
 ---@param solution_name string
 ---@param constraints Constraint[]
@@ -367,6 +471,16 @@ end
 ---@return Problem
 function M.create_problem(solution_name, constraints, production_lines)
     local problem = problem_generator.new(solution_name)
+
+    -- trace-only: capture the exact input so an in-game solve can be replayed
+    -- as a headless fixture (enable with `/factory-solver-log-level trace`).
+    -- Guarded because the dumps build O(lines) strings eagerly — fs_log args
+    -- are evaluated by the caller even when the level would filter the emit.
+    if fs_log.get_level() == "trace" then
+        log.trace("-- create_problem input '%s' --", solution_name)
+        log.trace("constraints:\n%s", M.dump_constraints(constraints))
+        log.trace("normalized lines:\n%s", M.dump_normalized_lines(production_lines))
+    end
 
     local bridges = M.create_temperature_bridges(production_lines)
     -- Bridges are not part of solution.production_lines but their flows do
