@@ -215,6 +215,50 @@ table.insert(cases, {
     end,
 })
 
+-- Collect the generated bridge names into a set for membership checks.
+-- Tests the bridge-generation logic directly (like the deterministic-order
+-- case) to bypass compute_active_lines pruning, which would drop every line
+-- in a constraint-less fixture.
+local function bridge_name_set(lines)
+    local set = {}
+    for _, b in ipairs(cp.create_temperature_bridges(lines)) do
+        set[b.recipe_typed_name.name] = true
+    end
+    return set
+end
+
+table.insert(cases, {
+    name = "one single feeding two overlapping ranges -> a bridge to each",
+    -- steam@165 is consumed by two generators with ranges [15,200] and
+    -- [100,300]. 165 falls inside both, so the inner single x range loop must
+    -- emit a separate bridge per range (not just the first match).
+    run = function()
+        local names = bridge_name_set({
+            recipe("pump", { fluid_single("steam", 165, 1) }, { item("w", 1) }),
+            recipe("gen-a", { item("pa", 1) }, { fluid_range("steam", 15, 200, 1) }),
+            recipe("gen-b", { item("pb", 1) }, { fluid_range("steam", 100, 300, 1) }),
+        })
+        harness.assert_true(names["|bridge|fluid/steam@165->[15,200]"], "bridge 165 -> [15,200] exists")
+        harness.assert_true(names["|bridge|fluid/steam@165->[100,300]"], "bridge 165 -> [100,300] exists")
+    end,
+})
+
+table.insert(cases, {
+    name = "range membership is inclusive at both endpoints",
+    -- steam@200 feeds a range that ends at 200 ([15,200], t == max) and one
+    -- that starts at 200 ([200,300], t == min). The `min <= t and t <= max`
+    -- test is inclusive, so both bridges must be created.
+    run = function()
+        local names = bridge_name_set({
+            recipe("pump", { fluid_single("steam", 200, 1) }, { item("w", 1) }),
+            recipe("gen-lo", { item("pa", 1) }, { fluid_range("steam", 15, 200, 1) }),
+            recipe("gen-hi", { item("pb", 1) }, { fluid_range("steam", 200, 300, 1) }),
+        })
+        harness.assert_true(names["|bridge|fluid/steam@200->[15,200]"], "t == max boundary bridges")
+        harness.assert_true(names["|bridge|fluid/steam@200->[200,300]"], "t == min boundary bridges")
+    end,
+})
+
 table.insert(cases, {
     name = "create_problem attaches bridge lines to the resulting Problem",
     run = function()
