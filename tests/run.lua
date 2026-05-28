@@ -85,6 +85,8 @@ local case_files = {
     "lp_fusion_loop",
     "lp_solver_properties",
     "lp_material_kinds",
+    "lp_constraint_types",
+    "lp_material_classification",
     "material_cycles",
     "problem_dump",
 }
