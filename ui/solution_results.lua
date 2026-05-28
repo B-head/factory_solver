@@ -240,16 +240,15 @@ function handlers.make_build_totals_table(event)
         end
     end
 
-    ---@param caption LocalisedString
+    -- One flat slot table for all three kinds (machines, then modules, then
+    -- beacons). The icons themselves distinguish the kinds, so per-group labels
+    -- and frames would only waste vertical space.
     ---@param bucket table<string, { typed_name: TypedName, count: number }>
     ---@param is_machine_kind boolean
-    local function render_group(caption, bucket, is_machine_kind)
+    local function append(bucket, is_machine_kind)
         local list = {}
         for _, entry in pairs(bucket) do
             table.insert(list, entry)
-        end
-        if #list == 0 then
-            return
         end
         table.sort(list, function(a, b)
             if a.typed_name.name ~= b.typed_name.name then
@@ -258,39 +257,22 @@ function handlers.make_build_totals_table(event)
             return a.typed_name.quality < b.typed_name.quality
         end)
 
-        fs_util.add_gui(elem, {
-            type = "label",
-            style = "caption_label",
-            caption = caption,
-        })
-
-        local buttons = {}
         for _, entry in ipairs(list) do
             local craft = is_machine_kind
                 and tn.typed_name_to_machine(entry.typed_name)
                 or tn.typed_name_to_material(entry.typed_name)
-            table.insert(buttons, common.create_decorated_sprite_button {
+            fs_util.add_gui(elem, common.create_decorated_sprite_button {
                 typed_name = entry.typed_name,
                 is_hidden = acc.is_hidden(craft),
                 is_unresearched = acc.is_unresearched(craft, relation_to_recipes),
                 number = entry.count,
             })
         end
-        fs_util.add_gui(elem, {
-            type = "frame",
-            style = "factory_solver_result_slot_background_frame",
-            {
-                type = "table",
-                style = "filter_slot_table",
-                column_count = 8,
-                children = buttons,
-            },
-        })
     end
 
-    render_group({ "factory-solver-machines" }, machines, true)
-    render_group({ "factory-solver-modules" }, modules, false)
-    render_group({ "factory-solver-beacons" }, beacons, true)
+    append(machines, true)
+    append(modules, false)
+    append(beacons, true)
 end
 
 fs_util.add_handlers(handlers)
@@ -396,13 +378,18 @@ return {
         caption = { "factory-solver-build-totals" },
     },
     {
-        type = "flow",
-        direction = "vertical",
-        handler = {
-            on_added = handlers.make_build_totals_table,
-            on_selected_solution_changed = handlers.make_build_totals_table,
-            on_machine_setups_changed = handlers.make_build_totals_table,
-            on_calculation_changed = handlers.make_build_totals_table,
+        type = "frame",
+        style = "factory_solver_result_slot_background_frame",
+        {
+            type = "table",
+            style = "filter_slot_table",
+            column_count = 8,
+            handler = {
+                on_added = handlers.make_build_totals_table,
+                on_selected_solution_changed = handlers.make_build_totals_table,
+                on_machine_setups_changed = handlers.make_build_totals_table,
+                on_calculation_changed = handlers.make_build_totals_table,
+            },
         },
     },
 }
