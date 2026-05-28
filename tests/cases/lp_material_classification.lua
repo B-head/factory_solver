@@ -82,6 +82,7 @@ table.insert(cases, {
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 300 })
         harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "packed variables returned")
         harness.assert_near(vars.x["recipe/r1/normal"], 5, 0.05, "r1 rate")
         harness.assert_near(vars.x["recipe/r2/normal"], 5, 0.05, "r2 rate")
         harness.assert_near(vars.x["|basic_source|item/raw/normal"], 5, 0.05, "raw drawn")
@@ -122,11 +123,56 @@ table.insert(cases, {
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 400 })
         harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "packed variables returned")
         -- The demand is met by paying the shortage rather than returning zero.
         harness.assert_true((vars.x["recipe/spin/normal"] or 0) > 0.5,
             "spin runs to make `out` (got " .. tostring(vars.x["recipe/spin/normal"]) .. ")")
         harness.assert_true((vars.x["|shortage_source|item/loop/normal"] or 0) > 0.1,
             "the dead-end loop is fed by the shortage_source escape hatch")
+    end,
+})
+
+table.insert(cases, {
+    name = "the same cycle with an external producer is fed by the producer, not a shortage_source",
+    -- The counterpart to the dead-end case: the same mass-losing `spin` cycle,
+    -- but now a `feed` recipe produces `loop` from a raw input. That external
+    -- edge into the cycle makes its SCC non-source, so find_deficit_materials
+    -- does NOT flag `loop`; and because `loop` is now reachable from `raw`,
+    -- the reachability gate adds NO shortage_source. The cycle is supplied by
+    -- the real producer chain instead -- which is exactly what adding an
+    -- asteroid-collector / ingredient source does for a starved loop in game.
+    run = function()
+        local lines = {
+            line("spin", { item("loop", 1), item("out", 1) }, { item("loop", 2) }),
+            line("feed", { item("loop", 1) }, { item("raw", 1) }),
+        }
+        local constraints = {
+            { type = "item", name = "out", quality = "normal",
+              limit_type = "equal", limit_amount_per_second = 1 },
+        }
+
+        local problem = cp.create_problem("fed-cycle", constraints, lines)
+
+        -- loop is produced + consumed -> surplus_sink, but with a real
+        -- producer it is neither sourced externally nor short.
+        harness.assert_true(problem.primals["|surplus_sink|item/loop/normal"] ~= nil,
+            "loop -> surplus_sink")
+        harness.assert_true(problem.primals["|shortage_source|item/loop/normal"] == nil,
+            "no shortage_source: loop is reachable from raw via feed")
+        harness.assert_true(problem.primals["|basic_source|item/loop/normal"] == nil,
+            "no basic_source: loop has a real producer (not a source-SCC deficit)")
+        harness.assert_true(problem.primals["|basic_source|item/raw/normal"] ~= nil,
+            "raw is the genuine external input")
+
+        local state, vars = harness.solve_to_completion(lp, problem,
+            { tolerance = 1e-6, iterate_limit = 400 })
+        harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "packed variables returned")
+        -- spin makes 1 out; the cycle's net -1 loop/run is covered by feed
+        -- from raw, not by a shortage.
+        harness.assert_near(vars.x["recipe/spin/normal"], 1, 0.05, "spin makes the out demand")
+        harness.assert_near(vars.x["recipe/feed/normal"], 1, 0.1, "feed supplies the loop deficit from raw")
+        harness.assert_near(vars.x["|basic_source|item/raw/normal"], 1, 0.1, "raw drawn to feed the cycle")
     end,
 })
 
