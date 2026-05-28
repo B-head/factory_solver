@@ -40,13 +40,23 @@ end
 function handlers.make_build_table(event)
     local elem = event.element
     local solution = save.get_selected_solution(event.player_index)
-    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
-    elem.clear()
-    if not solution or type(solution.solver_state) == "number" then
+    -- on_calculation_changed fires every tick while the solver iterates
+    -- (solver_state is the numeric in-progress enum). Rebuilding then would
+    -- empty this fit-to-content docked panel each tick, collapsing it to just
+    -- the title until the solve lands. So during a mid-solve state keep the
+    -- last-rendered rows untouched and rebuild only when a final state arrives;
+    -- a missing solution still clears to empty.
+    if solution and type(solution.solver_state) == "number" then
         return
     end
 
+    elem.clear()
+    if not solution then
+        return
+    end
+
+    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
     for line_index, line in ipairs(solution.production_lines) do
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
