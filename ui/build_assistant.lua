@@ -74,6 +74,7 @@ function handlers.make_build_table(event)
 
         -- Column 3: machine icon. This is the pipette button when the line maps
         -- to a placeable, configured machine.
+        local beacon_buttons = {}
         if bp.can_pipette(line) then
             fs_util.add_gui(elem, common.create_decorated_sprite_button {
                 typed_name = line.machine_typed_name,
@@ -84,6 +85,29 @@ function handlers.make_build_table(event)
                     [defines.events.on_gui_click] = handlers.on_pipette_click,
                 },
             })
+
+            -- Collect this line's beacon groups for column 4. Each group can
+            -- have a different beacon/module config, so all are shown. Gated by
+            -- is_use_beacon (and can_pipette above) so beacon reads never touch
+            -- the entity-ghost / plant sentinels.
+            if acc.is_use_beacon(machine) then
+                for beacon_index, affected_by_beacon in ipairs(line.affected_by_beacons) do
+                    local beacon_typed_name = affected_by_beacon.beacon_typed_name
+                    local beacon = beacon_typed_name and tn.typed_name_to_machine(beacon_typed_name)
+                    if beacon and beacon.type == "beacon" then
+                        table.insert(beacon_buttons, common.create_decorated_sprite_button {
+                            typed_name = beacon_typed_name,
+                            is_hidden = acc.is_hidden(beacon),
+                            is_unresearched = acc.is_unresearched(beacon, relation_to_recipes),
+                            number = affected_by_beacon.beacon_quantity,
+                            tags = { line_index = line_index, beacon_index = beacon_index },
+                            handler = {
+                                [defines.events.on_gui_click] = handlers.on_beacon_pipette_click,
+                            },
+                        })
+                    end
+                end
+            end
         else
             -- Plant (1 craft = 1 plant slot) and spoilage (time-driven) lines
             -- have no placeable machine. Show a non-interactive indicator so
@@ -98,6 +122,15 @@ function handlers.make_build_table(event)
                 ignored_by_interaction = true,
             })
         end
+
+        -- Column 4: beacons affecting this line (each a pipette for a single
+        -- configured beacon). Unlike the main window, which has no beacon
+        -- column; the build assistant serves the build phase, where beacons are
+        -- placed too. Empty flow keeps the row's cell count aligned.
+        fs_util.add_gui(elem, {
+            type = "flow",
+            children = beacon_buttons,
+        })
     end
 end
 
@@ -121,6 +154,32 @@ function handlers.on_pipette_click(event)
     if not (cursor and cursor.valid) then return end
 
     local entities = bp.build_machine_blueprint_entities(line)
+    if cursor.set_stack { name = "blueprint" } then
+        cursor.set_blueprint_entities(entities)
+    end
+end
+
+---@param event EventData.on_gui_click
+function handlers.on_beacon_pipette_click(event)
+    if common.try_open_factoriopedia(event) then return end
+    if event.button ~= defines.mouse_button_type.left then return end
+
+    local tags = event.element.tags
+    local solution = save.get_selected_solution(event.player_index)
+    if not solution then return end
+    local line = solution.production_lines[tags.line_index --[[@as integer]]]
+    if not line then return end
+    local affected_by_beacon = line.affected_by_beacons[tags.beacon_index --[[@as integer]]]
+    if not affected_by_beacon then return end
+
+    local entities = bp.build_beacon_blueprint_entities(affected_by_beacon)
+    if not entities then return end
+
+    -- Same multiplayer reasoning as on_pipette_click: act unconditionally on
+    -- the event player's own cursor; entities are built deterministically.
+    local cursor = game.players[event.player_index].cursor_stack
+    if not (cursor and cursor.valid) then return end
+
     if cursor.set_stack { name = "blueprint" } then
         cursor.set_blueprint_entities(entities)
     end
@@ -154,7 +213,7 @@ return {
         {
             type = "table",
             style = "factory_solver_build_assistant_table",
-            column_count = 3,
+            column_count = 4,
             handler = {
                 on_added = handlers.make_build_table,
                 on_selected_solution_changed = handlers.make_build_table,

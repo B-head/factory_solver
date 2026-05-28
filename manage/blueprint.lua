@@ -17,7 +17,9 @@ local M = {}
 function M.module_inventory_for(machine)
     local inv = defines.inventory
     local t = machine.type
-    if t == "lab" then
+    if t == "beacon" then
+        return inv.beacon_modules
+    elseif t == "lab" then
         return inv.lab_modules
     elseif t == "mining-drill" then
         return inv.mining_drill_modules
@@ -29,6 +31,40 @@ function M.module_inventory_for(machine)
         -- assembling-machine and any other module-bearing crafter
         return inv.crafter_modules or inv.assembling_machine_modules
     end
+end
+
+---Build the BlueprintInsertPlan `items` array for an entity's module slots, or
+---nil when there are none. Slots are walked in ascending order so the result
+---is deterministic across multiplayer clients; blueprint stack indices are
+---0-based while this mod's module slot keys are 1-based.
+---@param entity_proto LuaEntityPrototype
+---@param module_typed_names table<string, TypedName>
+---@return BlueprintInsertPlan[]?
+local function build_module_items(entity_proto, module_typed_names)
+    local size = entity_proto.module_inventory_size
+    if not size or size <= 0 then
+        return nil
+    end
+    local inventory = M.module_inventory_for(entity_proto)
+    if not inventory then
+        return nil
+    end
+    local trimmed = acc.trim_modules(module_typed_names, size)
+    local items = {}
+    for index = 1, size do
+        local module = trimmed[tostring(index)]
+        if module then
+            table.insert(items, {
+                id = { name = module.name, quality = module.quality },
+                items = {
+                    in_inventory = {
+                        { inventory = inventory, stack = index - 1, count = 1 },
+                    },
+                },
+            })
+        end
+    end
+    return 0 < #items and items or nil
 end
 
 ---True when a production line's machine can be handed to the player as a
@@ -80,30 +116,40 @@ function M.build_machine_blueprint_entities(line)
         end
     end
 
-    local size = machine.module_inventory_size
-    if size and 0 < size then
-        local inventory = M.module_inventory_for(machine)
-        local trimmed = acc.trim_modules(line.module_typed_names, size)
-        local items = {}
-        for index = 1, size do
-            local module = trimmed[tostring(index)]
-            if module and inventory then
-                table.insert(items, {
-                    id = { name = module.name, quality = module.quality },
-                    items = {
-                        in_inventory = {
-                            -- Blueprint stack indices are 0-based; this mod's
-                            -- module slot keys are 1-based.
-                            { inventory = inventory, stack = index - 1, count = 1 },
-                        },
-                    },
-                })
-            end
-        end
-        if 0 < #items then
-            entity.items = items
-        end
+    entity.items = build_module_items(machine, line.module_typed_names)
+
+    return { entity }
+end
+
+---Build the BlueprintEntity list for a single configured beacon: the beacon at
+---the origin with its quality and its modules. Beacons have no recipe. One
+---entity is returned (the badge tells the user how many to place), mirroring
+---the single-machine pipette. Returns nil when the group has no resolvable
+---beacon prototype.
+---@param affected_by_beacon AffectedByBeacon
+---@return BlueprintEntity[]?
+function M.build_beacon_blueprint_entities(affected_by_beacon)
+    local beacon_typed_name = affected_by_beacon.beacon_typed_name
+    if not beacon_typed_name then
+        return nil
     end
+    local beacon = tn.typed_name_to_machine(beacon_typed_name)
+    if beacon.type ~= "beacon" then
+        return nil
+    end
+
+    ---@type BlueprintEntity
+    local entity = {
+        entity_number = 1,
+        name = beacon.name,
+        position = { x = 0, y = 0 },
+    }
+
+    if beacon_typed_name.quality ~= "normal" then
+        entity.quality = beacon_typed_name.quality
+    end
+
+    entity.items = build_module_items(beacon, affected_by_beacon.module_typed_names)
 
     return { entity }
 end
