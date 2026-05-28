@@ -139,6 +139,51 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
+    name = "a strongly mass-losing dead-end self-loop is fed by basic_source and does not degenerate",
+    -- Companion to the mild-loss escape-hatch case above, and the guard that
+    -- the production-denominator deficit fix did not trade one degeneracy for
+    -- another. Here the self-loop loses heavily: spin consumes 2 loop and
+    -- returns 1 loop + 1 out (consumption = 2x production), so
+    -- find_deficit_materials classifies `loop` as a genuine cycle entry input
+    -- and gives it a |basic_source| (cons > 1.5x prod) rather than the
+    -- shortage escape hatch. The load-bearing check is that the LP STILL meets
+    -- the `out` demand from that base supply -- it must not collapse to the
+    -- all-zero solution. (This is the exact recipe the old consumption-
+    -- denominator heuristic left to shortage_source; the fix reclassifies it
+    -- to basic_source, and the demand must still be served either way.)
+    run = function()
+        local lines = {
+            line("spin", { item("loop", 1), item("out", 1) }, { item("loop", 2) }),
+        }
+        local constraints = {
+            { type = "item", name = "out", quality = "normal",
+              limit_type = "equal", limit_amount_per_second = 1 },
+        }
+
+        local problem = cp.create_problem("deadend-strong-loss", constraints, lines)
+
+        harness.assert_true(problem.primals["|basic_source|item/loop/normal"] ~= nil,
+            "strongly mass-losing loop -> basic_source cycle input")
+        harness.assert_true(problem.primals["|shortage_source|item/loop/normal"] == nil,
+            "no shortage_source: the deficit heuristic claims loop as a basic_source")
+        harness.assert_true(problem.primals["|surplus_sink|item/loop/normal"] ~= nil,
+            "still gets its surplus_sink as a produced + consumed material")
+
+        local state, vars = harness.solve_to_completion(lp, problem,
+            { tolerance = 1e-6, iterate_limit = 400 })
+        harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "packed variables returned")
+        -- NON-DEGENERATE: the out demand is served, not collapsed to zero.
+        harness.assert_near(vars.x["recipe/spin/normal"], 1, 0.05,
+            "spin runs at the demanded rate (got " .. tostring(vars.x["recipe/spin/normal"]) .. ")")
+        harness.assert_near(vars.x["|final_sink|item/out/normal"], 1, 0.05, "out output")
+        -- spin's net -1 loop/run is covered by the base supply, no shortage.
+        harness.assert_near(vars.x["|basic_source|item/loop/normal"], 1, 0.05,
+            "basic_source feeds the loop's net consumption")
+    end,
+})
+
+table.insert(cases, {
     name = "the same cycle with an external producer is fed by the producer, not a shortage_source",
     -- The counterpart to the dead-end case: the same mass-losing `spin` cycle,
     -- but now a `feed` recipe produces `loop` from a raw input. That external
