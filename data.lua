@@ -36,9 +36,70 @@ if mods["debugadapter"] and mods["base"] then
     data:extend({ universal_heater })
 end
 
+-- ============================================================
+-- TEST: FluidBox.maximum_temperature は受け入れをゲートするか?
+-- 設置はマップエディタ (Editor > Entities で "fbtest" 検索)。item/recipe 不要。
+-- 給湯は infinity-pipe (エディタ) で steam を任意温度に固定。
+-- generator は電力負荷がないと回らないので、ランプ等を同電力網に置く。
+-- ============================================================
+local function make_fbtest(name, temp_field, temp_value)
+    local e = table.deepcopy(data.raw.generator["steam-engine"])
+    e.name = name
+    e.localised_name = name
+    e.minable = nil
+    e.next_upgrade = nil
+    e.placeable_by = nil
+    -- generator 自身の上限は「探りたい対象でない」ので高く逃がす:
+    e.maximum_temperature = 1000
+    -- 作動流体 FluidBox を filter + 片側の温度境界だけにする:
+    e.fluid_box.filter = "steam"
+    e.fluid_box.minimum_temperature = nil
+    e.fluid_box.maximum_temperature = nil
+    e.fluid_box[temp_field] = temp_value
+    return e
+end
+
+-- TEST: CraftingMachine の FluidEnergySource の FluidBox に付けた温度境界は
+-- 燃料の受け入れをゲートするか? (energy_source.maximum_temperature フィールド
+-- 自体は「非ゲート＝抽出頭打ち」と確定済み。ここで見るのは energy_source.fluid_box
+-- レベルの min/max。) energy_source 自身の maximum_temperature は 1000 に逃がし、
+-- fluid_box の境界だけを単独で効かせる。burns_fluid=false (steam を熱源として使用)。
+local function make_fes_test(name, temp_field, temp_value)
+    local e = table.deepcopy(data.raw["assembling-machine"]["assembling-machine-2"])
+    e.name = name
+    e.localised_name = name
+    e.minable = nil
+    e.next_upgrade = nil
+    e.placeable_by = nil
+    e.energy_usage = "100kW"
+    e.energy_source = {
+        type = "fluid",
+        burns_fluid = false,
+        scale_fluid_usage = true,
+        destroy_non_fuel_fluid = false,
+        maximum_temperature = 1000, -- energy_source 側は高く逃がす(探りたい対象でない)
+        effectivity = 1,
+        fluid_box = {
+            volume = 200,
+            production_type = "input",
+            pipe_connections = {}, -- insert_fluid で直接注入するのでパイプ接続不要(衝突回避)
+            filter = "steam",
+            [temp_field] = temp_value, -- ★ 検証対象: energy_source.fluid_box の温度境界
+        },
+    }
+    return e
+end
+
 if mods["debugadapter"] then
     -- Test data --
     data:extend({
+        -- 対照群: minimum_temperature は受け入れゲートとして確定済み
+        make_fbtest("fbtest-min-100", "minimum_temperature", 100),
+        -- 本命(不明): maximum_temperature は同じようにゲートするか?
+        make_fbtest("fbtest-max-100", "maximum_temperature", 100),
+        -- CraftingMachine の FluidEnergySource.fluid_box 温度境界の検証用
+        make_fes_test("fes-min-100", "minimum_temperature", 100),
+        make_fes_test("fes-max-100", "maximum_temperature", 100),
         {
             type = "recipe",
             name = "fs-test-base",
