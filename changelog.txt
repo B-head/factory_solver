@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.1
-Date: ????
+Date: 2026-05-30
   Gui:
     - Add a fuel quality selector to the machine settings dialog's Fuel
       section, mirroring the machine quality row. Gated to item fuels,
