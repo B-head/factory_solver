@@ -268,7 +268,7 @@ function M:dump_primal(vector)
     local list = vector:to_list()
     local ret = {}
     for k, v in pairs(self.primals) do
-        table.insert(ret, string.format("  [%i]%q = %f\n", v.index, k, list[v.index]))
+        table.insert(ret, string.format("  [%i]%q = %.17g\n", v.index, k, list[v.index]))
     end
     return table.concat(ret)
 end
@@ -280,7 +280,7 @@ function M:dump_dual(vector)
     local list = vector:to_list()
     local ret = {}
     for k, v in pairs(self.duals) do
-        table.insert(ret, string.format("  [%i]%q = %f\n", v.index, k, list[v.index]))
+        table.insert(ret, string.format("  [%i]%q = %.17g\n", v.index, k, list[v.index]))
     end
     return table.concat(ret)
 end
