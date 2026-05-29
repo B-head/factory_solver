@@ -90,6 +90,34 @@ local function make_fes_test(name, temp_field, temp_value)
     return e
 end
 
+-- ============================================================
+-- TEST: 503efbb（実レシピの Recipes-for-fuel 温度フィルタ）の一対一検証。
+-- 専用 crafting category に「テストレシピ1件」と「steam を下限100℃で受ける
+-- 流体燃料 assembling-machine」だけを割り当て、他レシピの混入を排除する
+-- (factory_solver は fixed_recipe を見ず crafting_category 単位で機械を解決
+-- するため、隔離には専用カテゴリが必要)。
+-- 手順: External source で steam を作り Recipes for fuel を開く。
+--   steam@15  → fs-test-fuel-filter-recipe は出ないはず (機械が15を拒否)。
+--   steam@165 (≥100) → 出るはず。出方が温度で切り替われば 503efbb が効いている。
+-- ============================================================
+if mods["debugadapter"] then
+    local ffm = make_fes_test("fs-test-fuel-filter-machine", "minimum_temperature", 100)
+    ffm.crafting_categories = { "fs-test-fuel-filter" }
+    data:extend({
+        { type = "recipe-category", name = "fs-test-fuel-filter" },
+        ffm,
+        {
+            type = "recipe",
+            name = "fs-test-fuel-filter-recipe",
+            category = "fs-test-fuel-filter",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "efficiency-module", amount = 1 } },
+            results = { { type = "item", name = "speed-module", amount = 1 } },
+        },
+    })
+end
+
 if mods["debugadapter"] then
     -- Test data --
     data:extend({
