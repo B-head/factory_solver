@@ -831,6 +831,49 @@ function handlers.on_fuel_change_toggle(event)
     elem.toggled = tn.equals_typed_name(fuel_typed_name, typed_name, true)
 end
 
+---Fuel quality only applies to item fuels; fluid fuels are always normal
+---quality (create_typed_name pins fluids to "normal"), so the selector is
+---hidden whenever the chosen fuel is a fluid or its temperature variant.
+---@param event EventDataTrait
+function handlers.on_fuel_quality_visible(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local fuel_typed_name = dialog.tags.fuel_typed_name --[[@as TypedName?]]
+    elem.visible = script.feature_flags.quality
+        and fuel_typed_name ~= nil
+        and fuel_typed_name.type == "item"
+end
+
+---Rebuilt on every fuel change so the toggled button tracks the current
+---fuel_typed_name.quality. Picking a different fuel resets quality to
+---"normal" (the clicked fuel button carries a fresh normal TypedName), which
+---is why this clears and re-reads rather than building once on_added.
+---@param event EventDataTrait
+function handlers.on_make_fuel_quality_buttons(event)
+    local elem = event.element
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local fuel_typed_name = dialog.tags.fuel_typed_name --[[@as TypedName?]]
+    local initial_value = fuel_typed_name and fuel_typed_name.quality or "normal"
+
+    elem.clear()
+    common.make_quality_buttons(elem, initial_value, handlers.on_fuel_quality_clicked)
+end
+
+---@param event EventData.on_gui_click
+function handlers.on_fuel_quality_clicked(event)
+    local quality_name = common.on_quality_button_clicked(event.element)
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
+
+    local dialog_tags = dialog.tags
+    local fuel_typed_name = dialog_tags.fuel_typed_name --[[@as TypedName?]]
+    if fuel_typed_name then
+        fuel_typed_name.quality = quality_name
+        dialog.tags = dialog_tags
+    end
+end
+
 ---@param event EventData.on_gui_click
 function handlers.on_machine_setups_confirm(event)
     local solution = assert(save.get_selected_solution(event.player_index))
@@ -1099,6 +1142,25 @@ return {
                         column_count = 6,
                         handler = {
                             on_machine_setup_changed = handlers.on_make_fuel_table,
+                        },
+                    },
+                },
+                -- Fuel quality selector. Mirrors the machine quality row but is
+                -- gated to item fuels (on_fuel_quality_visible) and rebuilt on
+                -- on_fuel_setup_changed so it tracks the selected fuel.
+                {
+                    type = "flow",
+                    style = "factory_solver_centering_horizontal_flow",
+                    direction = "horizontal",
+                    handler = {
+                        on_fuel_setup_changed = handlers.on_fuel_quality_visible,
+                    },
+                    {
+                        type = "flow",
+                        direction = "horizontal",
+                        style_mods = { horizontal_spacing = 0 },
+                        handler = {
+                            on_fuel_setup_changed = handlers.on_make_fuel_quality_buttons,
                         },
                     },
                 },
