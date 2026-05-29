@@ -294,13 +294,26 @@ end
 ---@param name string
 ---@return TypedName?
 local function decode_fluid_temperature_virtual(name)
-    local fluid_name, single = string.match(name, "^fluid/(.-)@(%-?%d+%.?%d*)$")
-    if fluid_name then
-        return M.create_typed_name("fluid", fluid_name, nil, tonumber(single))
-    end
-    local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
+    -- Capture the raw token between the delimiters and let tonumber parse it,
+    -- rather than a digit-only pattern: temperatures are emitted with "%g",
+    -- which switches to scientific notation at >=1e6 (fusion plasma keys look
+    -- like "fluid/plasma@[1e+06,1e+07]"). A "%d+%.?%d*" pattern silently fails
+    -- to match the "e+06" exponent, leaving the variant undecoded — the picker
+    -- then treats plasma as a virtual_material that binds to no recipe. Try the
+    -- range form first so the permissive single pattern can't swallow it.
+    local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[([^,]+),([^%]]+)%]$")
     if fluid_name2 then
-        return M.create_typed_name("fluid", fluid_name2, nil, nil, tonumber(lo), tonumber(hi))
+        local l, h = tonumber(lo), tonumber(hi)
+        if l and h then
+            return M.create_typed_name("fluid", fluid_name2, nil, nil, l, h)
+        end
+    end
+    local fluid_name, single = string.match(name, "^fluid/(.-)@(.+)$")
+    if fluid_name then
+        local t = tonumber(single)
+        if t then
+            return M.create_typed_name("fluid", fluid_name, nil, t)
+        end
     end
     return nil
 end
