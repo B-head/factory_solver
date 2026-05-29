@@ -68,6 +68,13 @@ function handlers.make_production_line_table(event)
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local n, effectivity = acc.normalize_production_line(line, bonuses)
+        -- Resolve bare fluid temperatures (product -> default, ingredient ->
+        -- [default,max]) the same way the LP does, so the per-line slots show the
+        -- concrete temperature instead of a blank "bare" label. A blank
+        -- temperature then means only one thing in the UI: a temperature-agnostic
+        -- (aggregate) constraint. normalize_production_line returns a fresh table,
+        -- so the in-place mutation is local to this render.
+        pre_solve.resolve_bare_fluids({ n })
         local recipe_tags = flib_table.deep_merge { { line_index = line_index }, line }
 
         do
