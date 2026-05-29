@@ -771,13 +771,28 @@ function M.try_get_fixed_fuel(machine)
         return tn.create_typed_name("virtual_material", "<heat>")
     elseif machine.fluid_energy_source_prototype then
         local energy = assert(machine.fluid_energy_source_prototype)
-        local fluidbox_filter = energy.fluid_box.filter
-        if not fluidbox_filter then
+        local fluidbox = energy.fluid_box
+        local filter = fluidbox.filter
+        if not filter then
             return nil
         end
-        local min_temp = fluidbox_filter.default_temperature
-        local max_temp = energy.maximum_temperature or fluidbox_filter.max_temperature
-        return tn.create_typed_name("fluid", fluidbox_filter.name, nil, min_temp, max_temp)
+        -- The ACCEPTANCE range is the fuel fluidbox's own temperature filter,
+        -- NOT energy.maximum_temperature. maximum_temperature is only the
+        -- energy-conversion cap: fluid hotter than it is still accepted, with the
+        -- excess heat wasted (get_fuel_amount_per_second applies that cap). Using
+        -- it as the acceptance ceiling wrongly bars the machine from taking hotter
+        -- fuel (e.g. a Pyanodons nuclear-reactor-mk01, cap 250, accepts uf6 up to
+        -- its physical 10000). Same rule as the generator branch below; tame the
+        -- FLT sentinels Factorio returns for unset fluidbox temperature bounds.
+        local min_temp = fluidbox.minimum_temperature
+        local max_temp = fluidbox.maximum_temperature
+        if not min_temp or min_temp < filter.default_temperature then
+            min_temp = filter.default_temperature
+        end
+        if not max_temp or max_temp > filter.max_temperature then
+            max_temp = filter.max_temperature
+        end
+        return tn.create_typed_name("fluid", filter.name, nil, min_temp, max_temp)
     elseif machine.type == "generator" then
         -- The ACCEPTANCE range is the input fluidbox's own temperature filter,
         -- NOT machine.maximum_temperature. maximum_temperature is only the
