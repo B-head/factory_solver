@@ -82,6 +82,13 @@ function M.create_decorated_sprite_button(data)
     local typed_name = assert(data.typed_name) --[[@as TypedName]]
     local is_hidden = data.is_hidden or false
     local is_unresearched = data.is_unresearched or false
+    -- Temperature shown on the slot defaults to the typed_name's own fields, but
+    -- external source/sink fluid recipes carry the temperature on their single
+    -- product / ingredient instead (the recipe's typed_name is just a name), so
+    -- pull it from there below to keep the temperature variants distinguishable.
+    local temperature = typed_name.temperature
+    local minimum_temperature = typed_name.minimum_temperature
+    local maximum_temperature = typed_name.maximum_temperature
     local top_right_sprite = data.top_right_sprite --[[@as string?]]
     if not top_right_sprite and typed_name.type == "virtual_recipe" then
         local recipe = storage.virtuals.recipe[typed_name.name]
@@ -92,14 +99,23 @@ function M.create_decorated_sprite_button(data)
                 top_right_sprite = "factory-solver-spoilage-overlay"
             elseif recipe.is_source then
                 top_right_sprite = "factory-solver-source-overlay"
+                local product = recipe.products[1]
+                if product and product.type == "fluid" then
+                    temperature = product.temperature
+                end
             elseif recipe.is_sink then
                 top_right_sprite = "factory-solver-sink-overlay"
+                local ingredient = recipe.ingredients[1]
+                if ingredient and ingredient.type == "fluid" then
+                    minimum_temperature = ingredient.minimum_temperature
+                    maximum_temperature = ingredient.maximum_temperature
+                end
             end
         end
     end
     local children = {}
 
-    if typed_name.temperature ~= nil then
+    if temperature ~= nil then
         flib_table.insert(children, {
             type = "flow",
             direction = "vertical",
@@ -109,12 +125,12 @@ function M.create_decorated_sprite_button(data)
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = string.format("%g°", typed_name.temperature),
+                    caption = string.format("%g°", temperature),
                     ignored_by_interaction = true,
                 },
             },
         })
-    elseif typed_name.minimum_temperature ~= nil then
+    elseif minimum_temperature ~= nil then
         flib_table.insert(children, {
             type = "flow",
             direction = "vertical",
@@ -124,13 +140,13 @@ function M.create_decorated_sprite_button(data)
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = string.format("%g°~", typed_name.minimum_temperature),
+                    caption = string.format("%g°~", minimum_temperature),
                     ignored_by_interaction = true,
                 },
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = string.format("%g°", typed_name.maximum_temperature),
+                    caption = string.format("%g°", maximum_temperature),
                     ignored_by_interaction = true,
                 },
             },
