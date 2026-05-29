@@ -197,11 +197,31 @@ function handlers.on_make_constraint_picker(event)
                 end
             end
             for _, value in pairs(storage.virtuals.recipe) do
-                if value.subgroup_name == subgroup.name then
+                -- Source/sink belong to the External tab; keep them out of the
+                -- Virtual tab so the genuine virtual recipes are not buried.
+                if value.subgroup_name == subgroup.name
+                    and not (value.is_source or value.is_sink) then
                     flib_table.insert(virtuals, value)
                 end
             end
             local sorted = fs_util.sort_prototypes(virtuals)
+
+            for _, value in ipairs(sorted) do
+                local is_hidden = acc.is_hidden(value)
+                local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
+                local typed_name = tn.craft_to_typed_name(value)
+                add(typed_name, is_hidden, is_unresearched)
+            end
+        elseif filter_type == "external" then
+            ---@type VirtualRecipe[]
+            local externals = {}
+            for _, value in pairs(storage.virtuals.recipe) do
+                if value.subgroup_name == subgroup.name
+                    and (value.is_source or value.is_sink) then
+                    flib_table.insert(externals, value)
+                end
+            end
+            local sorted = fs_util.sort_prototypes(externals)
 
             for _, value in ipairs(sorted) do
                 local is_hidden = acc.is_hidden(value)
@@ -343,6 +363,7 @@ return {
                     "fluid",
                     "recipe",
                     "virtual_recipe",
+                    "external",
                 },
             },
             handler = {
@@ -352,6 +373,7 @@ return {
             {
                 tab = {
                     type = "tab",
+                    style = "factory_solver_filter_group_tab",
                     caption = { "factory-solver-item" },
                 },
                 content = {
@@ -375,6 +397,7 @@ return {
             {
                 tab = {
                     type = "tab",
+                    style = "factory_solver_filter_group_tab",
                     caption = { "factory-solver-fluid" },
                 },
                 content = {
@@ -398,6 +421,7 @@ return {
             {
                 tab = {
                     type = "tab",
+                    style = "factory_solver_filter_group_tab",
                     caption = { "factory-solver-recipe" },
                 },
                 content = {
@@ -421,6 +445,7 @@ return {
             {
                 tab = {
                     type = "tab",
+                    style = "factory_solver_filter_group_tab",
                     caption = { "factory-solver-virtual" },
                 },
                 content = {
@@ -441,89 +466,117 @@ return {
                     },
                 },
             },
+            {
+                tab = {
+                    type = "tab",
+                    style = "factory_solver_filter_group_tab",
+                    caption = { "factory-solver-external" },
+                },
+                content = {
+                    type = "frame",
+                    style = "factory_solver_filter_group_background_frame",
+                    {
+                        type = "table",
+                        name = "external_filter_group",
+                        style = "slot_table",
+                        column_count = 6,
+                        tags = {
+                            filter_type = "external",
+                        },
+                        handler = {
+                            on_added = handlers.on_make_filter_group,
+                            on_craft_visible_changed = handlers.on_make_filter_group,
+                        },
+                    },
+                },
+            },
         },
         {
             type = "frame",
             style = "factory_solver_filter_picker_frame",
             direction = "vertical",
             {
-                type = "scroll-pane",
-                style = "factory_solver_filter_scroll_pane",
-                horizontal_scroll_policy = "never",
-                vertical_scroll_policy = "auto-and-reserve-space",
+                type = "flow",
+                style = "factory_solver_centering_vertical_flow",
+                direction = "vertical",
                 {
-                    type = "frame",
-                    style = "factory_solver_filter_background_frame",
+                    type = "scroll-pane",
+                    style = "factory_solver_filter_scroll_pane",
+                    horizontal_scroll_policy = "never",
+                    vertical_scroll_policy = "auto-and-reserve-space",
+                    {
+                        type = "frame",
+                        style = "factory_solver_filter_background_frame",
+                        {
+                            type = "table",
+                            name = "constraint_picker",
+                            style = "filter_slot_table",
+                            column_count = 10,
+                            handler = {
+                                on_added = handlers.on_make_constraint_picker,
+                                on_filter_type_changed = handlers.on_make_constraint_picker,
+                                on_filter_group_changed = handlers.on_make_constraint_picker,
+                                on_craft_visible_changed = handlers.on_make_constraint_picker,
+                            },
+                        },
+                    },
+                },
+                {
+                    type = "flow",
+                    style_mods = { horizontal_spacing = 0, horizontally_stretchable = true },
+                    direction = "horizontal",
+                    visible = script.feature_flags.quality,
+                    handler = {
+                        on_added = handlers.on_make_craft_quality_buttons,
+                    },
+                },
+                {
+                    type = "flow",
+                    style = "factory_solver_craft_visible_control_flow",
                     {
                         type = "table",
-                        name = "constraint_picker",
-                        style = "filter_slot_table",
-                        column_count = 10,
-                        handler = {
-                            on_added = handlers.on_make_constraint_picker,
-                            on_filter_type_changed = handlers.on_make_constraint_picker,
-                            on_filter_group_changed = handlers.on_make_constraint_picker,
-                            on_craft_visible_changed = handlers.on_make_constraint_picker,
+                        name = "craft_visible_control",
+                        style = "factory_solver_craft_visible_control_table",
+                        column_count = 2,
+                        {
+                            type = "label",
+                            caption = { "factory-solver-unresearched" },
                         },
-                    },
-                },
-            },
-            {
-                type = "flow",
-                style = "factory_solver_centering_horizontal_flow",
-                style_mods = { horizontal_spacing = 0 },
-                direction = "horizontal",
-                visible = script.feature_flags.quality,
-                handler = {
-                    on_added = handlers.on_make_craft_quality_buttons,
-                },
-            },
-            {
-                type = "flow",
-                style = "factory_solver_craft_visible_control_flow",
-                {
-                    type = "table",
-                    name = "craft_visible_control",
-                    style = "factory_solver_craft_visible_control_table",
-                    column_count = 2,
-                    {
-                        type = "label",
-                        caption = { "factory-solver-unresearched" },
-                    },
-                    {
-                        type = "switch",
-                        name = "craft_visible_unresearched_switch",
-                        switch_state = "right",
-                        left_label_caption = { "factory-solver-show" },
-                        right_label_caption = { "factory-solver-hide" },
-                        tags = {
-                            root_gui = "factory_solver_constraint_adder",
-                            state_name = "unresearched_craft_visible",
+                        {
+                            type = "switch",
+                            name = "craft_visible_unresearched_switch",
+                            switch_state = "right",
+                            left_label_caption = { "factory-solver-show" },
+                            right_label_caption = { "factory-solver-hide" },
+                            tags = {
+                                root_gui = "factory_solver_constraint_adder",
+                                state_name = "unresearched_craft_visible",
+                            },
+                            handler = {
+                                [defines.events.on_gui_switch_state_changed] = common
+                                    .on_craft_visible_switch_state_changed,
+                                on_added = common.on_craft_visible_switch_added,
+                            },
                         },
-                        handler = {
-                            [defines.events.on_gui_switch_state_changed] = common
-                                .on_craft_visible_switch_state_changed,
-                            on_added = common.on_craft_visible_switch_added,
+                        {
+                            type = "label",
+                            caption = { "factory-solver-hidden" },
                         },
-                    },
-                    {
-                        type = "label",
-                        caption = { "factory-solver-hidden" },
-                    },
-                    {
-                        type = "switch",
-                        name = "craft_visible_hidden_switch",
-                        switch_state = "right",
-                        left_label_caption = { "factory-solver-show" },
-                        right_label_caption = { "factory-solver-hide" },
-                        tags = {
-                            root_gui = "factory_solver_constraint_adder",
-                            state_name = "hidden_craft_visible",
-                        },
-                        handler = {
-                            [defines.events.on_gui_switch_state_changed] = common
-                                .on_craft_visible_switch_state_changed,
-                            on_added = common.on_craft_visible_switch_added,
+                        {
+                            type = "switch",
+                            name = "craft_visible_hidden_switch",
+                            switch_state = "right",
+                            left_label_caption = { "factory-solver-show" },
+                            right_label_caption = { "factory-solver-hide" },
+                            tags = {
+                                root_gui = "factory_solver_constraint_adder",
+                                state_name = "hidden_craft_visible",
+                            },
+                            handler = {
+                                [defines.events.on_gui_switch_state_changed] = common
+                                    .on_craft_visible_switch_state_changed,
+                                on_added = common.on_craft_visible_switch_added,
+                            },
                         },
                     },
                 },

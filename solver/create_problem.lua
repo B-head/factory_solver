@@ -39,6 +39,7 @@ local function source_cost_for(variable_name)
 end
 
 local bridge_prefix = "|bridge|"
+local source_prefix = "<source>"
 
 local M = {}
 
@@ -46,6 +47,20 @@ local M = {}
 ---@return boolean
 local function is_bridge_line(line)
     return string.sub(line.recipe_typed_name.name, 1, #bridge_prefix) == bridge_prefix
+end
+
+---A user-placed infinite source virtual recipe (manage/virtual.lua). It has no
+---ingredients and emits one material, so it behaves like a declared external
+---input: its recipe variable is priced at source_cost (below elastic_cost) so
+---the LP draws on it freely instead of running the producer chain, while the
+---zero-ingredient shape seeds reachability and suppresses the automatic
+---|shortage_source| for that material. The companion <sink> recipe needs no
+---special handling -- it is an ordinary free virtual recipe (slack_cost = 0)
+---that consumes a material and emits nothing.
+---@param line NormalizedProductionLine
+---@return boolean
+local function is_source_line(line)
+    return string.sub(line.recipe_typed_name.name, 1, #source_prefix) == source_prefix
 end
 
 ---Iterate every ingredient consumed by the line: real recipe ingredients first,
@@ -545,7 +560,15 @@ function M.create_problem(solution_name, constraints, production_lines)
         if bridge then
             problem:add_objective(objective_name, slack_cost, false)
         else
-            problem:add_objective(objective_name, slack_cost, true)
+            -- A user source recipe is priced at source_cost on its product so
+            -- the LP treats it like a declared external input rather than a
+            -- free fountain. Sinks (and every other virtual recipe) stay at
+            -- slack_cost = 0.
+            local recipe_cost = slack_cost
+            if is_source_line(line) and line.products[1] then
+                recipe_cost = source_cost_for(tn.typed_name_to_variable_name(line.products[1]))
+            end
+            problem:add_objective(objective_name, recipe_cost, true)
             problem:add_subject_term(objective_name, "|limit|" .. objective_name, 1)
         end
         ::continue_line::

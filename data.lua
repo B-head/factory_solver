@@ -244,6 +244,22 @@ data:extend({
         height = 32,
         flags = { "gui-icon" },
     },
+    {
+        type = "sprite",
+        name = "factory-solver-source-overlay",
+        filename = "__factory_solver__/graphics/external_source.png",
+        width = 32,
+        height = 32,
+        flags = { "gui-icon" },
+    },
+    {
+        type = "sprite",
+        name = "factory-solver-sink-overlay",
+        filename = "__factory_solver__/graphics/external_sink.png",
+        width = 32,
+        height = 32,
+        flags = { "gui-icon" },
+    },
 })
 
 local styles = data.raw["gui-style"].default
@@ -295,6 +311,11 @@ styles.factory_solver_craft_visible_control_table = {
 styles.factory_solver_centering_horizontal_flow = {
     type = "horizontal_flow_style",
     vertical_align = "center",
+}
+
+styles.factory_solver_centering_vertical_flow = {
+    type = "vertical_flow_style",
+    horizontal_align = "center",
 }
 
 styles.factory_solver_no_spacing_vertical_flow_style = {
@@ -569,6 +590,11 @@ styles.factory_solver_filter_type_tabbed_pane = {
     horizontally_stretchable = "on",
 }
 
+styles.factory_solver_filter_group_tab = {
+    type = "tab_style",
+    minimal_width = 80,
+}
+
 styles.factory_solver_filter_group_background_frame = {
     type = "frame_style",
     parent = "slot_button_deep_frame",
@@ -631,7 +657,7 @@ styles.factory_solver_dialog_fit_scroll_pane = {
 styles.factory_solver_filter_background_frame = {
     type = "frame_style",
     parent = "factory_solver_slot_background_frame",
-    minimal_width = 400,
+    width = 400,
     minimal_height = 360,
 }
 

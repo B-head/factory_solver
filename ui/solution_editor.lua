@@ -164,7 +164,13 @@ function handlers.make_production_line_table(event)
             -- recipe. Plain-table VirtualRecipes have no `object_name`.
             local is_spoilage_recipe = recipe and recipe.object_name == nil
                 and recipe.is_spoilage == true
-            if machine.type ~= "plant" and not is_spoilage_recipe then
+            -- Source / sink virtual recipes are equally machineless (entity-
+            -- unknown sentinel). Hide the machine button like spoilage, but
+            -- they get no placeholder sprite below -- the source/sink overlay
+            -- on the recipe icon already conveys what the row does.
+            local is_source_sink_recipe = recipe and recipe.object_name == nil
+                and (recipe.is_source == true or recipe.is_sink == true)
+            if machine.type ~= "plant" and not is_spoilage_recipe and not is_source_sink_recipe then
                 local def = common.create_decorated_sprite_button {
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,

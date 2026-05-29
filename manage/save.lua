@@ -24,6 +24,7 @@ function M.init_player_data(player_index)
                 fluid = "",
                 recipe = "",
                 virtual_recipe = "",
+                external = "",
             },
             unresearched_craft_visible = __DebugAdapter ~= nil,
             hidden_craft_visible = __DebugAdapter ~= nil,
@@ -129,7 +130,7 @@ function M.init_force_data(force_index)
         storage.forces[force_index] = {
             relation_to_recipes = { enabled_recipe = {}, item = {}, fluid = {}, virtual_recipe = {}, virtual_recipe_researched = {} },
             relation_to_recipes_needs_updating = true,
-            group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {} },
+            group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {}, external = {} },
             group_infos_needs_updating = true,
             solutions = {},
             research_bonuses = M.default_research_bonuses(),

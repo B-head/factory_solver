@@ -155,6 +155,8 @@ function M.create_virtuals()
 
     M.add_fluid_temperature_virtuals(materials, recipes)
 
+    M.create_source_sink_virtuals(materials, recipes)
+
     ---@type Virtuals
     return {
         material = materials,
@@ -263,6 +265,167 @@ function M.register_fluid_temperature_range(materials, fluid_name, min_temperatu
         hidden = fluid_proto.hidden,
         source_fluid_name = fluid_name,
     }
+end
+
+---Materialize user-controlled infinite source / sink virtual recipes for every
+---item, fluid (bare + each registered temperature variant) and <heat>. A
+---`<source>X` recipe has no ingredients and emits 1 X per craft; a `<sink>X`
+---recipe consumes 1 X per craft and emits nothing. Both use the entity-unknown
+---machine sentinel + crafting_speed_cap = 1 (same "no real machine, rate 1:1"
+---shape as spoilage), so one recipe variable == one unit/sec of flow. Quality
+---is left unstamped and follows the production line's recipe quality at solve
+---time (accessor.raw_product_to_amount / raw_ingredient_to_amount). The LP cost
+---asymmetry (source priced at source_cost, sink free) lives in create_problem;
+---here the recipes are plain virtual recipes flagged is_source / is_sink.
+---
+---Fluid temperature follows the LP encoding: sources produce a single
+---temperature (default_temperature plus every registered single variant), sinks
+---consume a temperature range ([default, max] plus every registered range
+---variant). The single/range split is read back out of the temperature-variant
+---VirtualMaterial names add_fluid_temperature_virtuals already registered, so
+---this must run after it. Recipe names are deterministic and the recipes table
+---is name-keyed, so the bare default and a coincident registered variant
+---dedupe automatically.
+---@param materials table<string, VirtualMaterial>
+---@param recipes table<string, VirtualRecipe>
+function M.create_source_sink_virtuals(materials, recipes)
+    local source_count, sink_count = 0, 0
+    local function add_recipe(recipe)
+        recipes[recipe.name] = recipe
+        if recipe.is_source then
+            source_count = source_count + 1
+        else
+            sink_count = sink_count + 1
+        end
+    end
+
+    local entity_unknown_machine = { type = "machine", name = "entity-unknown", quality = "normal" }
+
+    ---@param is_source boolean
+    ---@param name string
+    ---@param material_amount Product|Ingredient
+    ---@param display { sprite_path: string, elem_tooltip: ElemID?, material_localised: LocalisedString, order: string, group_name: string, subgroup_name: string, hidden: boolean }
+    local function build(is_source, name, material_amount, display)
+        ---@type VirtualRecipe
+        local recipe = {
+            type = "virtual_recipe",
+            name = name,
+            sprite_path = display.sprite_path,
+            elem_tooltip = display.elem_tooltip,
+            tooltip = {
+                "",
+                { is_source and "factory-solver-source-recipe" or "factory-solver-sink-recipe",
+                    display.material_localised },
+                "\n",
+                { "factory-solver-external-recipe-description" },
+            },
+            order = display.order,
+            group_name = display.group_name,
+            subgroup_name = display.subgroup_name,
+            products = is_source and { material_amount } or {},
+            ingredients = is_source and {} or { material_amount },
+            fixed_crafting_machine = entity_unknown_machine,
+            crafting_speed_cap = 1,
+            hidden = display.hidden,
+            is_source = is_source or nil,
+            is_sink = (not is_source) or nil,
+        }
+        add_recipe(recipe)
+    end
+
+    for _, item in pairs(prototypes.item) do
+        if not item.parameter then
+            local display = {
+                sprite_path = "item/" .. item.name,
+                elem_tooltip = { type = "item", name = item.name },
+                material_localised = item.localised_name,
+                order = item.order,
+                group_name = item.group.name,
+                subgroup_name = item.subgroup.name,
+                hidden = item.hidden,
+            }
+            build(true, "<source>item/" .. item.name,
+                { type = "item", name = item.name, amount = 1, probability = 1 }, display)
+            build(false, "<sink>item/" .. item.name,
+                { type = "item", name = item.name, amount = 1 }, display)
+        end
+    end
+
+    -- Read the registered temperature-variant materials back into per-fluid
+    -- single-temperature and range sets, mirroring the names
+    -- register_fluid_temperature_single / _range emit.
+    local singles = {} ---@type table<string, table<string, number>>
+    local ranges = {}   ---@type table<string, table<string, number[]>>
+    for _, m in pairs(materials) do
+        if m.source_fluid_name then
+            local fname, t = string.match(m.name, "^fluid/(.-)@(%-?%d+%.?%d*)$")
+            if fname then
+                singles[fname] = singles[fname] or {}
+                singles[fname][t] = tonumber(t)
+            else
+                local fn2, lo, hi = string.match(m.name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
+                if fn2 then
+                    ranges[fn2] = ranges[fn2] or {}
+                    ranges[fn2][lo .. "," .. hi] = { tonumber(lo), tonumber(hi) }
+                end
+            end
+        end
+    end
+
+    for _, fluid in pairs(prototypes.fluid) do
+        if not fluid.parameter then
+            local display = {
+                sprite_path = "fluid/" .. fluid.name,
+                elem_tooltip = { type = "fluid", name = fluid.name },
+                material_localised = fluid.localised_name,
+                order = fluid.order,
+                group_name = fluid.group.name,
+                subgroup_name = fluid.subgroup.name,
+                hidden = fluid.hidden,
+            }
+
+            local temp_set = {} ---@type table<string, number>
+            temp_set[string.format("%g", fluid.default_temperature)] = fluid.default_temperature
+            for k, v in pairs(singles[fluid.name] or {}) do temp_set[k] = v end
+            for _, t in pairs(temp_set) do
+                display.order = fluid.order .. string.format("@%020.6f", t)
+                build(true, string.format("<source>fluid/%s@%g", fluid.name, t),
+                    { type = "fluid", name = fluid.name, amount = 1, probability = 1, temperature = t },
+                    display)
+            end
+
+            local range_set = {} ---@type table<string, number[]>
+            range_set["default"] = { fluid.default_temperature, fluid.max_temperature }
+            for k, v in pairs(ranges[fluid.name] or {}) do range_set[k] = v end
+            for _, r in pairs(range_set) do
+                local lo, hi = r[1], r[2]
+                display.order = fluid.order .. string.format("@z[%020.6f,%020.6f]", lo, hi)
+                build(false, string.format("<sink>fluid/%s@[%g,%g]", fluid.name, lo, hi),
+                    { type = "fluid", name = fluid.name, amount = 1,
+                        minimum_temperature = lo, maximum_temperature = hi },
+                    display)
+            end
+        end
+    end
+
+    local heat = materials["<heat>"]
+    if heat then
+        local display = {
+            sprite_path = heat.sprite_path,
+            elem_tooltip = heat.elem_tooltip,
+            material_localised = heat.tooltip,
+            order = heat.order,
+            group_name = heat.group_name,
+            subgroup_name = heat.subgroup_name,
+            hidden = heat.hidden,
+        }
+        build(true, "<source><heat>",
+            { type = "virtual_material", name = "<heat>", amount = 1, probability = 1 }, display)
+        build(false, "<sink><heat>",
+            { type = "virtual_material", name = "<heat>", amount = 1 }, display)
+    end
+
+    log.info("registered %d source + %d sink virtual recipes", source_count, sink_count)
 end
 
 ---comment

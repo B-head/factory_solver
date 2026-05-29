@@ -2,6 +2,10 @@
 ---@module "solver/problem_generator"
 
 ---@alias FilterType "item"|"fluid"|"recipe"|"machine"|"virtual_material"|"virtual_recipe"|"transfer"
+-- Constraint-picker tab selector. "external" is a UI-only view over virtual_recipe
+-- (the source/sink recipes), not a real material/recipe FilterType — the typed
+-- names it yields are still "virtual_recipe".
+---@alias FilterTab FilterType|"external"
 ---@alias LimitType "upper"|"lower"|"equal"
 ---@alias TimeScale "second"|"five_seconds"|"minute"|"ten_minutes"|"hour"|"ten_hours"|"fifty_hours"|"two_hundred_fifty_hours"|"thousand_hours"
 ---@alias AmountUnit "time"|"belt"|"storage"
@@ -27,8 +31,8 @@ __factory_solver__storage = {}
 
 ---@class PlayerLocalData
 ---@field selected_solution string
----@field selected_filter_type FilterType
----@field selected_filter_group table<FilterType, string>
+---@field selected_filter_type FilterTab
+---@field selected_filter_group table<FilterTab, string>
 ---@field unresearched_craft_visible boolean
 ---@field hidden_craft_visible boolean
 ---@field time_scale TimeScale
@@ -99,6 +103,7 @@ __factory_solver__storage = {}
 ---@field fluid table<string, GroupInfo>
 ---@field recipe table<string, GroupInfo>
 ---@field virtual_recipe table<string, GroupInfo>
+---@field external table<string, GroupInfo>
 
 ---@class GroupInfo
 ---@field hidden_count integer
@@ -222,6 +227,8 @@ __factory_solver__storage = {}
 ---@field source_entity_name string?
 ---@field source_planet_names string[]?
 ---@field is_spoilage boolean?
+---@field is_source boolean?
+---@field is_sink boolean?
 
 ---@class VirtualProduct
 ---@field type "virtual_material"

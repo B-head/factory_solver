@@ -90,6 +90,10 @@ function M.create_decorated_sprite_button(data)
                 top_right_sprite = "factory-solver-research-overlay"
             elseif recipe.is_spoilage then
                 top_right_sprite = "factory-solver-spoilage-overlay"
+            elseif recipe.is_source then
+                top_right_sprite = "factory-solver-source-overlay"
+            elseif recipe.is_sink then
+                top_right_sprite = "factory-solver-sink-overlay"
             end
         end
     end

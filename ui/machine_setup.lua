@@ -167,9 +167,11 @@ function handlers.on_hide_for_plant(event)
     -- Guard with `object_name == nil`: real LuaRecipePrototype userdata
     -- raises on access to unknown keys, so probing `recipe.is_spoilage`
     -- on a non-virtual recipe would crash.
-    local is_spoilage = recipe.object_name == nil
-        and (recipe --[[@as VirtualRecipe]]).is_spoilage == true
-    if machine.type == "plant" or is_spoilage then
+    local is_machineless = recipe.object_name == nil
+        and ((recipe --[[@as VirtualRecipe]]).is_spoilage == true
+            or (recipe --[[@as VirtualRecipe]]).is_source == true
+            or (recipe --[[@as VirtualRecipe]]).is_sink == true)
+    if machine.type == "plant" or is_machineless then
         elem.visible = false
     end
 end
@@ -185,9 +187,11 @@ function handlers.on_no_configurable_items_visible(event)
 
     local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
     local recipe = tn.typed_name_to_recipe(recipe_typed_name)
-    local is_spoilage = recipe.object_name == nil
-        and (recipe --[[@as VirtualRecipe]]).is_spoilage == true
-    elem.visible = is_spoilage
+    local is_machineless = recipe.object_name == nil
+        and ((recipe --[[@as VirtualRecipe]]).is_spoilage == true
+            or (recipe --[[@as VirtualRecipe]]).is_source == true
+            or (recipe --[[@as VirtualRecipe]]).is_sink == true)
+    elem.visible = is_machineless
 end
 
 ---One sprite-button per tile in plant.autoplace_specification.tile_restriction.

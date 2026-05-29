@@ -270,12 +270,18 @@ function M.create_group_infos(force_index, relation_to_recipes)
     local fluids = {} ---@type table<string, GroupInfo>
     local recipes = {} ---@type table<string, GroupInfo>
     local virtuals = {} ---@type table<string, GroupInfo>
+    -- External source/sink recipes are split off into their own group counts so
+    -- they populate the constraint picker's dedicated "External" tab and stop
+    -- burying the genuine virtual recipes (boiler / mining / spoilage / ...) in
+    -- the Virtual tab.
+    local externals = {} ---@type table<string, GroupInfo>
 
     for key, _ in pairs(prototypes.item_group) do
         items[key] = { hidden_count = 0, researched_count = 0, unresearched_count = 0 }
         fluids[key] = { hidden_count = 0, researched_count = 0, unresearched_count = 0 }
         recipes[key] = { hidden_count = 0, researched_count = 0, unresearched_count = 0 }
         virtuals[key] = { hidden_count = 0, researched_count = 0, unresearched_count = 0 }
+        externals[key] = { hidden_count = 0, researched_count = 0, unresearched_count = 0 }
     end
 
     for _, recipe in pairs(force.recipes) do
@@ -329,7 +335,10 @@ function M.create_group_infos(force_index, relation_to_recipes)
     end
 
     for _, virtual_recipe in pairs(storage.virtuals.recipe) do
-        local virtual_group = virtuals[virtual_recipe.group_name]
+        -- Route source/sink into the External group counts; everything else
+        -- stays in the Virtual counts.
+        local bucket = (virtual_recipe.is_source or virtual_recipe.is_sink) and externals or virtuals
+        local virtual_group = bucket[virtual_recipe.group_name]
         if acc.is_hidden(virtual_recipe) then
             virtual_group.hidden_count = virtual_group.hidden_count + 1
         elseif acc.is_unresearched(virtual_recipe, relation_to_recipes) then
@@ -339,7 +348,7 @@ function M.create_group_infos(force_index, relation_to_recipes)
         end
     end
 
-    return { item = items, fluid = fluids, recipe = recipes, virtual_recipe = virtuals }
+    return { item = items, fluid = fluids, recipe = recipes, virtual_recipe = virtuals, external = externals }
 end
 
 return M

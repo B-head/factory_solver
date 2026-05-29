@@ -17,6 +17,8 @@ A powerful solver based on interior-point methods for linear programming allows 
   ingredients.
 - Supports Factorio 2.0 / Space Age (quality tiers).
 - Splits per-fluid recipes by temperature and bridges them automatically.
+- Lets you declare external sources and sinks for any material to steer or
+  unstick loop solutions.
 
 Warning: Multiplayer games have not been tested. Note that solution data may be lost if the mod is used in multiplayer.
 
@@ -61,6 +63,33 @@ Qualities above normal start locked, so quality modules have no effect on the ca
 3. Click "Confirm" to apply.
 
 The solver then expands recipes into the quality cascade, and quality modules shift production toward the higher tiers.
+
+## External source / sink
+
+factory_solver provides a *source* and a *sink* for every item, fluid, and
+heat. A source supplies its material from outside the factory; a sink
+discharges its material out of the factory. Material drawn from a source is
+added to "Initial ingredients", and material sent to a sink is added to "Final
+products".
+
+You can add one from the dedicated "External" tab in the constraint picker, or
+straight from a material in the recipe picker — a material's source appears
+under "Recipes for product" and its sink under "Recipes for ingredient".
+
+You normally don't need these — the solver already balances surplus and
+shortage on its own. They are a manual override for the cases where you want to
+decide the factory boundary yourself:
+
+- In a chain that contains a cycle (loop), use them to hand-pick which
+  materials or products are supplied from / discharged outside the factory,
+  instead of leaving the choice to the solver.
+- When the solver returns a solution that is mostly zero (a degenerate loop it
+  cannot anchor), inserting a source or sink inside the cycle gives it the
+  external input/output it needs and can fix the result.
+
+Source recipes are priced like an ordinary external input, so the solver only
+draws on them when it helps; sink recipes are free, so surplus flows into them
+freely.
 
 ## Why does the UI look like Factory Planner?
 

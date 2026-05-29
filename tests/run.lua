@@ -76,6 +76,7 @@ local case_files = {
     "isolated_line",
     "lp_scale_invariance",
     "lp_tiebreak",
+    "lp_source_sink",
     "lp_extreme_coefficients",
     "lp_branched_targets",
     "lp_dual_resource_caps",

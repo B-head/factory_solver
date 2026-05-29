@@ -49,6 +49,18 @@ function M.get_total_amounts(player_index, solution)
     for _, n in ipairs(normalized_lines) do
         local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, n.recipe_typed_name)
 
+        -- External source / sink recipes are factory boundaries, not internal
+        -- producers/consumers, so they are excluded from the net here. A source
+        -- only emits, so dropping it leaves the downstream consumption
+        -- uncanceled -> the material lands in Initial Ingredients (it came from
+        -- outside). A sink only consumes, so dropping it leaves the upstream
+        -- production uncanceled -> the material lands in Final Products (it left
+        -- the factory). Detected by the same name prefix create_problem uses.
+        local rname = n.recipe_typed_name.name
+        if string.sub(rname, 1, 8) == "<source>" or string.sub(rname, 1, 6) == "<sink>" then
+            goto continue_line
+        end
+
         for _, amount in ipairs(n.products) do
             local filter_type = amount.type
             local name = amount.name
@@ -103,6 +115,8 @@ function M.get_total_amounts(player_index, solution)
                 add(virtual_totals, tn.create_typed_name("virtual_material", "<material-unknown>"), amount_per_second)
             end
         end
+
+        ::continue_line::
     end
 
     -- Temperature bridges are injected by create_problem at solve time and do
