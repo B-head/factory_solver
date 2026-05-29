@@ -290,7 +290,7 @@ function M.create_source_sink_virtuals(materials, recipes)
     ---@param is_source boolean
     ---@param name string
     ---@param material_amount Product|Ingredient
-    ---@param display { sprite_path: string, elem_tooltip: ElemID?, material_localised: LocalisedString, order: string, group_name: string, subgroup_name: string, hidden: boolean }
+    ---@param display { sprite_path: string, elem_tooltip: ElemID?, material_localised: LocalisedString, order: string, group_name: string, subgroup_name: string }
     local function build(is_source, name, material_amount, display)
         ---@type VirtualRecipe
         local recipe = {
@@ -312,7 +312,10 @@ function M.create_source_sink_virtuals(materials, recipes)
             ingredients = is_source and {} or { material_amount },
             fixed_crafting_machine = entity_unknown_machine,
             crafting_speed_cap = 1,
-            hidden = display.hidden,
+            -- External (source/sink) recipes are always hidden regardless of the
+            -- underlying material's hidden flag — they're user-controlled infinite
+            -- I/O, not real production, so they stay out of the default picker.
+            hidden = true,
             is_source = is_source or nil,
             is_sink = (not is_source) or nil,
         }
@@ -328,7 +331,6 @@ function M.create_source_sink_virtuals(materials, recipes)
                 order = item.order,
                 group_name = item.group.name,
                 subgroup_name = item.subgroup.name,
-                hidden = item.hidden,
             }
             build(true, "<source>item/" .. item.name,
                 { type = "item", name = item.name, amount = 1, probability = 1 }, display)
@@ -366,7 +368,6 @@ function M.create_source_sink_virtuals(materials, recipes)
                 order = fluid.order,
                 group_name = fluid.group.name,
                 subgroup_name = fluid.subgroup.name,
-                hidden = fluid.hidden,
             }
 
             local temp_set = {} ---@type table<string, number>
@@ -408,7 +409,6 @@ function M.create_source_sink_virtuals(materials, recipes)
             order = heat.order,
             group_name = heat.group_name,
             subgroup_name = heat.subgroup_name,
-            hidden = heat.hidden,
         }
         build(true, "<source><heat>",
             { type = "virtual_material", name = "<heat>", amount = 1, probability = 1 }, display)

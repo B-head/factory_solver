@@ -76,6 +76,10 @@ You can add one from the dedicated "External" tab in the constraint picker, or
 straight from a material in the recipe picker — a material's source appears
 under "Recipes for product" and its sink under "Recipes for ingredient".
 
+These source and sink recipes are generated as hidden recipes, so they are
+filtered out of the recipe picker by default. Flip the picker's "Hidden" toggle
+to "Show" to reveal them alongside the regular recipes.
+
 You normally don't need these — the solver already balances surplus and
 shortage on its own. They are a manual override for the cases where you want to
 decide the factory boundary yourself:
