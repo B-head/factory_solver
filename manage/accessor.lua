@@ -932,10 +932,18 @@ function M.get_default_fluid_fuel_variant(machine)
     end
     if cap and cap <= 0 then cap = nil end
 
+    -- Temperature variant names are range-only ("fluid/x@[lo,hi]"); rank a fuel
+    -- variant by its upper bound (hottest). tonumber handles the "%g" scientific
+    -- notation used for large temperatures. The legacy single form "@T" is still
+    -- accepted as a fallback.
     ---@param v VirtualMaterial
     ---@return number?
     local function temp_of(v)
-        return tonumber(string.match(v.name, "@(%-?[%d.]+)$"))
+        local hi = string.match(v.name, "@%[[^,]+,([^%]]+)%]$")
+        if hi then
+            return tonumber(hi)
+        end
+        return tonumber(string.match(v.name, "@(.+)$"))
     end
 
     local best, best_t

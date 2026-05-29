@@ -345,10 +345,14 @@ function M.create_source_sink_virtuals(materials, recipes)
     local ranges = {}   ---@type table<string, table<string, number[]>>
     for _, m in pairs(materials) do
         if m.source_fluid_name then
-            local fn2, lo, hi = string.match(m.name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
-            if fn2 then
+            -- Permissive capture + tonumber: "%g" keys go scientific at >=1e6
+            -- (e.g. "fluid/plasma@[1e+06,1e+07]"), which a digit-only pattern
+            -- would silently skip.
+            local fn2, lo, hi = string.match(m.name, "^fluid/(.-)@%[([^,]+),([^%]]+)%]$")
+            local lo_n, hi_n = tonumber(lo), tonumber(hi)
+            if fn2 and lo_n and hi_n then
                 ranges[fn2] = ranges[fn2] or {}
-                ranges[fn2][lo .. "," .. hi] = { tonumber(lo), tonumber(hi) }
+                ranges[fn2][lo .. "," .. hi] = { lo_n, hi_n }
             end
         end
     end
@@ -811,6 +815,16 @@ function M.create_fusion_generator_virtual(fusion_generator_prototype)
     local input_box = fusion_generator_prototype.fluidbox_prototypes[1]
     local in_min_temp = input_box and input_box.minimum_temperature
     local in_max_temp = input_box and input_box.maximum_temperature
+    -- Factorio returns the FLT sentinels (±3.4e38) for unset fluidbox temperature
+    -- bounds; left raw they leak into the LP variable name and the slot label
+    -- (flib formats 3.4e38 as a 9-digit "...Q" that overflows the slot). Clamp to
+    -- the input fluid's physical range so the recipe carries a real temperature.
+    if in_min_temp and in_min_temp < input_filter.default_temperature then
+        in_min_temp = input_filter.default_temperature
+    end
+    if in_max_temp and in_max_temp > input_filter.max_temperature then
+        in_max_temp = input_filter.max_temperature
+    end
 
     -- Per-craft ratio of 1 against acc.get_virtual_recipe_rates(fusion-generator, q)
     -- = get_fluid_usage_per_tick(q) * second_per_tick. Quality scaling is

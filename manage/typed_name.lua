@@ -1,4 +1,19 @@
+local flib_format = require "__flib__/format"
+
 local M = {}
+
+---Format a fluid temperature for display through flib's number formatter so
+---very large values (fusion plasma at 1e6-1e7 °C) get an SI suffix ("1M")
+---instead of scientific notation ("1e+06"). flib's third arg is a fixed display
+---width that rounds badly (1500 -> "2 k"), so it is omitted; flib then floors to
+---one decimal. The suffix carries a leading space ("1.5 k") that is stripped to
+---keep slot labels compact ("1.5k"). Shared by the constraint slot labels
+---(ui/common) and the fluid tooltip so both render identically.
+---@param temperature number
+---@return string
+function M.format_temperature(temperature)
+    return (flib_format.number(temperature, true):gsub(" ", ""))
+end
 
 ---comment
 ---@param elem_type ElemType
@@ -39,12 +54,12 @@ function M.typed_name_to_tooltip(typed_name)
             -- point temperature reads as "T°", not "T°~T°".
             if typed_name.minimum_temperature == typed_name.maximum_temperature then
                 return { "factory-solver-fluid-temperature-single",
-                    fluid.localised_name, string.format("%g", typed_name.minimum_temperature) }
+                    fluid.localised_name, M.format_temperature(typed_name.minimum_temperature) }
             end
             return { "factory-solver-fluid-temperature-range",
                 fluid.localised_name,
-                string.format("%g", typed_name.minimum_temperature),
-                string.format("%g", typed_name.maximum_temperature) }
+                M.format_temperature(typed_name.minimum_temperature),
+                M.format_temperature(typed_name.maximum_temperature) }
         else
             return nil
         end
@@ -304,14 +319,24 @@ end
 ---@param name string
 ---@return TypedName?
 local function decode_fluid_temperature_virtual(name)
-    local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
+    -- Capture the raw token between the delimiters and let tonumber parse it,
+    -- rather than a digit-only pattern: temperatures are emitted with "%g",
+    -- which switches to scientific notation at >=1e6 (fusion plasma keys look
+    -- like "fluid/plasma@[1e+06,1e+07]"). A "%d+%.?%d*" pattern silently fails
+    -- to match the "e+06" exponent, leaving the variant undecoded.
+    local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[([^,]+),([^%]]+)%]$")
     if fluid_name2 then
-        return M.create_typed_name("fluid", fluid_name2, nil, tonumber(lo), tonumber(hi))
+        local l, h = tonumber(lo), tonumber(hi)
+        if l and h then
+            return M.create_typed_name("fluid", fluid_name2, nil, l, h)
+        end
     end
-    local fluid_name, single = string.match(name, "^fluid/(.-)@(%-?%d+%.?%d*)$")
+    local fluid_name, single = string.match(name, "^fluid/(.-)@(.+)$")
     if fluid_name then
         local t = tonumber(single)
-        return M.create_typed_name("fluid", fluid_name, nil, t, t)
+        if t then
+            return M.create_typed_name("fluid", fluid_name, nil, t, t)
+        end
     end
     return nil
 end

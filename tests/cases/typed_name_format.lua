@@ -140,6 +140,26 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
+    name = "large temperatures format in scientific notation (%g) and round-trip",
+    -- Fusion plasma sits at 1e6-1e7 °C; "%g" emits these as "1e+06" / "1e+07".
+    -- The variable name, the registered material key and the decode path must
+    -- all agree on that representation or the picker can't bind plasma.
+    run = function()
+        local t = tn.create_typed_name("fluid", "fusion-plasma", nil, 1000000, 10000000)
+        local var = tn.typed_name_to_variable_name(t)
+        harness.assert_eq(var, "fluid/fusion-plasma@[1e+06,1e+07]")
+
+        local virtual_material = { type = "virtual_material", name = var }
+        local decoded = tn.craft_to_typed_name(virtual_material)
+        harness.assert_eq(decoded.type, "fluid")
+        harness.assert_eq(decoded.name, "fusion-plasma")
+        harness.assert_eq(decoded.minimum_temperature, 1000000)
+        harness.assert_eq(decoded.maximum_temperature, 10000000)
+        harness.assert_eq(tn.typed_name_to_variable_name(decoded), var)
+    end,
+})
+
+table.insert(cases, {
     name = "craft_to_typed_name decodes legacy fluid/X@T to a degenerate range",
     run = function()
         local virtual_material = { type = "virtual_material", name = "fluid/steam@165" }
