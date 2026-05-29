@@ -1,7 +1,27 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.1
 Date: ????
-  Changes:
+  Gui:
+    - Add a fuel quality selector to the machine settings dialog's Fuel
+      section, mirroring the machine quality row. Gated to item fuels,
+      since fluid fuels are pinned to normal quality.
+    - Resolve a production line's fluids before rendering the per-line
+      product / ingredient slots, so a bare ingredient shows its
+      [default, max] temperature range and a bare product shows its
+      default temperature. A blank temperature label now unambiguously
+      means a temperature-agnostic (aggregate) constraint.
+  Bugfixes:
+    - Read a generator's accepted steam range from its input fluidbox
+      temperature filter instead of the machine's energy-conversion cap,
+      so hotter fuel (e.g. a 100-5000 C turbine) is no longer barred.
+    - Derive a picked fluid fuel's temperature from the machine's intake
+      range rather than the clicked reference material, so creating a
+      line via the fuel category no longer pins the fuel to the
+      producer's temperature (e.g. steam@165 limiting a generator to
+      that single temperature). Only new lines are corrected.
+    - Decode scientific-notation fluid temperature keys (e.g. fusion
+      plasma at 1e6-1e7 C), which previously failed to parse and resolved
+      to a temperature-less virtual material bound to no recipe.
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.0
 Date: 2026-05-28
