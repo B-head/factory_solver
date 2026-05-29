@@ -546,11 +546,15 @@ local function unpack_fuel_typed_name(factory)
         return nil
     end
     local fuel_type = infer_item_or_fluid(name)
+    -- Helmod carries a single fuel temperature; the range-only model stores it as
+    -- the degenerate range [T,T].
+    local fuel_temp = (fuel_type == "fluid") and temperature or nil
     return {
         type = fuel_type,
         name = name,
         quality = read_quality(factory.fuel_quality),
-        temperature = (fuel_type == "fluid") and temperature or nil,
+        minimum_temperature = fuel_temp,
+        maximum_temperature = fuel_temp,
     }
 end
 
@@ -909,21 +913,30 @@ local function solution_to_packed_model(solution)
                     "factory-solver-helmod-export-warning-upper-bound-product", c.name,
                 }
             end
-            if c.temperature or c.minimum_temperature or c.maximum_temperature then
+            if c.minimum_temperature or c.maximum_temperature then
                 warnings[#warnings + 1] = {
                     "factory-solver-helmod-export-warning-constraint-temperature", c.name,
                 }
             end
-            local key = table_key(c.name, c.quality, c.temperature,
-                c.minimum_temperature, c.maximum_temperature)
+            -- factory_solver is range-only; Helmod represents an exact temperature
+            -- as a single `#T` key (Product:getTableKey), so collapse a degenerate
+            -- range [T,T] back to Helmod's single form and keep real ranges as
+            -- `#min#max`.
+            local single_temp = nil
+            if c.minimum_temperature and c.minimum_temperature == c.maximum_temperature then
+                single_temp = c.minimum_temperature
+            end
+            local key = table_key(c.name, c.quality, single_temp,
+                single_temp and nil or c.minimum_temperature,
+                single_temp and nil or c.maximum_temperature)
             local entry = {
                 key = key,
                 name = c.name,
                 type = c.type,
                 quality = c.quality or "normal",
-                temperature = c.temperature,
-                minimum_temperature = c.minimum_temperature,
-                maximum_temperature = c.maximum_temperature,
+                temperature = single_temp,
+                minimum_temperature = single_temp and nil or c.minimum_temperature,
+                maximum_temperature = single_temp and nil or c.maximum_temperature,
                 amount = 0,
                 -- state=1 marks "main product" in Helmod (see
                 -- ModelCompute.prepareBlockElements). It gets recomputed
@@ -1065,7 +1078,9 @@ local function solution_to_packed_model(solution)
                     if machine_proto and acc.is_use_fuel(machine_proto) then
                         factory.fuel = {
                             name = pl.fuel_typed_name.name,
-                            temperature = pl.fuel_typed_name.temperature,
+                            -- Range-only model: a fluid fuel's temperature is the
+                            -- degenerate range [T,T]; Helmod wants the single T.
+                            temperature = pl.fuel_typed_name.minimum_temperature,
                         }
                         factory.fuel_quality = pl.fuel_typed_name.quality or "normal"
                     end

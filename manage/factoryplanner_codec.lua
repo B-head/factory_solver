@@ -709,7 +709,7 @@ local function solution_to_packed_factory(solution)
             end
             -- FP has no fluid-temperature dimension on products, so any
             -- temperature constraint factory_solver carries is discarded.
-            if c.temperature or c.minimum_temperature or c.maximum_temperature then
+            if c.minimum_temperature or c.maximum_temperature then
                 warnings[#warnings + 1] = {
                     "factory-solver-fp-export-warning-constraint-temperature", c.name,
                 }

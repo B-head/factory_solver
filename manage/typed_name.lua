@@ -34,10 +34,13 @@ function M.typed_name_to_tooltip(typed_name)
     elseif typed_name.type == "fluid" then
         local fluid = prototypes.fluid[typed_name.name]
         if not fluid then return nil end
-        if typed_name.temperature then
-            return { "factory-solver-fluid-temperature-single",
-                fluid.localised_name, string.format("%g", typed_name.temperature) }
-        elseif typed_name.minimum_temperature then
+        if typed_name.minimum_temperature then
+            -- Collapse a degenerate range (min == max) to the single form so a
+            -- point temperature reads as "T°", not "T°~T°".
+            if typed_name.minimum_temperature == typed_name.maximum_temperature then
+                return { "factory-solver-fluid-temperature-single",
+                    fluid.localised_name, string.format("%g", typed_name.minimum_temperature) }
+            end
             return { "factory-solver-fluid-temperature-range",
                 fluid.localised_name,
                 string.format("%g", typed_name.minimum_temperature),
@@ -75,19 +78,17 @@ end
 ---@return boolean
 function M.is_bare_fluid(typed_name)
     return typed_name.type == "fluid"
-        and typed_name.temperature == nil
         and typed_name.minimum_temperature == nil
         and typed_name.maximum_temperature == nil
 end
 
 ---Formats the trailing temperature suffix for an LP variable name.
----Returns "" for bare, "@<temperature>" for single, "@[<min>,<max>]" for range.
+---Returns "" for bare and "@[<min>,<max>]" for any temperature (a point is the
+---degenerate range [T,T], e.g. "@[165,165]").
 ---@param typed_name TypedName
 ---@return string
 function M.format_temperature_suffix(typed_name)
-    if typed_name.temperature ~= nil then
-        return string.format("@%g", typed_name.temperature)
-    elseif typed_name.minimum_temperature ~= nil then
+    if typed_name.minimum_temperature ~= nil then
         return string.format("@[%g,%g]", typed_name.minimum_temperature, typed_name.maximum_temperature)
     else
         return ""
@@ -109,11 +110,10 @@ end
 ---@param filter_type FilterType
 ---@param name string
 ---@param quality string?
----@param temperature number?
 ---@param minimum_temperature number?
 ---@param maximum_temperature number?
 ---@return TypedName
-function M.create_typed_name(filter_type, name, quality, temperature, minimum_temperature, maximum_temperature)
+function M.create_typed_name(filter_type, name, quality, minimum_temperature, maximum_temperature)
     if filter_type == "fluid" then
         quality = "normal"
     else
@@ -123,7 +123,6 @@ function M.create_typed_name(filter_type, name, quality, temperature, minimum_te
         type = filter_type,
         name = name,
         quality = quality,
-        temperature = temperature,
         minimum_temperature = minimum_temperature,
         maximum_temperature = maximum_temperature,
     }
@@ -139,9 +138,6 @@ function M.equals_typed_name(value1, value2, ignore_quality)
         return false
     end
     if not ignore_quality and value1.quality ~= value2.quality then
-        return false
-    end
-    if value1.temperature ~= value2.temperature then
         return false
     end
     if value1.minimum_temperature ~= value2.minimum_temperature then
@@ -223,6 +219,19 @@ function M.typed_name_migration(typed_name)
         quality = "normal"
     end
 
+    -- The LP layer dropped the single-value `temperature` field in favour of a
+    -- range-only model; a saved point temperature becomes the degenerate range
+    -- [T,T]. Without this, an old constraint's temperature would be ignored and
+    -- its variable name would silently fall back to the bare fluid.
+    local legacy_temperature = (typed_name --[[@as table]]).temperature
+    if legacy_temperature ~= nil then
+        if typed_name.minimum_temperature == nil and typed_name.maximum_temperature == nil then
+            typed_name.minimum_temperature = legacy_temperature
+            typed_name.maximum_temperature = legacy_temperature
+        end
+        ;(typed_name --[[@as table]]).temperature = nil
+    end
+
     typed_name.type = type
     typed_name.name = name
     typed_name.quality = quality
@@ -283,24 +292,26 @@ function M.typed_name_to_machine(typed_name)
     end
 end
 
----Temperature-variant VirtualMaterial entries are registered under names
----like "fluid/steam@165" or "fluid/steam@[15,1000]" so the constraint
----picker can surface them in the virtual tab. When the user selects one
----we want the resulting TypedName to point at the underlying fluid
----variable, not at the virtual_material shell — otherwise the constraint
----would not match the LP variable produced by typed_name_to_variable_name
----for a real fluid output. Return nil if the name does not match the
----temperature-variant shape.
+---Temperature-variant VirtualMaterial entries are registered under range-form
+---names like "fluid/steam@[15,1000]" (a point temperature is "fluid/steam@[165,165]")
+---so the constraint picker can surface them in the virtual tab. When the user
+---selects one we want the resulting TypedName to point at the underlying fluid
+---variable, not at the virtual_material shell — otherwise the constraint would
+---not match the LP variable produced by typed_name_to_variable_name for a real
+---fluid output. Return nil if the name does not match the temperature-variant
+---shape. The legacy single form "fluid/steam@165" is still decoded (mapped to
+---the degenerate range [165,165]) so stale keys round-trip safely.
 ---@param name string
 ---@return TypedName?
 local function decode_fluid_temperature_virtual(name)
-    local fluid_name, single = string.match(name, "^fluid/(.-)@(%-?%d+%.?%d*)$")
-    if fluid_name then
-        return M.create_typed_name("fluid", fluid_name, nil, tonumber(single))
-    end
     local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
     if fluid_name2 then
-        return M.create_typed_name("fluid", fluid_name2, nil, nil, tonumber(lo), tonumber(hi))
+        return M.create_typed_name("fluid", fluid_name2, nil, tonumber(lo), tonumber(hi))
+    end
+    local fluid_name, single = string.match(name, "^fluid/(.-)@(%-?%d+%.?%d*)$")
+    if fluid_name then
+        local t = tonumber(single)
+        return M.create_typed_name("fluid", fluid_name, nil, t, t)
     end
     return nil
 end

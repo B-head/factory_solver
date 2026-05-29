@@ -63,7 +63,7 @@ function handlers.on_make_constraints_table(event)
         do
             local typed_name = tn.create_typed_name(
                 data.type, data.name, data.quality,
-                data.temperature, data.minimum_temperature, data.maximum_temperature)
+                data.minimum_temperature, data.maximum_temperature)
 
             local def = common.create_decorated_sprite_button{
                 typed_name = typed_name,
@@ -142,7 +142,6 @@ function handlers.on_constraint_button_click(event)
         tags.type --[[@as FilterType]],
         tags.name --[[@as string]],
         tags.quality --[[@as string?]],
-        tags.temperature --[[@as number?]],
         tags.minimum_temperature --[[@as number?]],
         tags.maximum_temperature --[[@as number?]])
 
@@ -177,7 +176,6 @@ function handlers.on_limit_amount_confirmed(event)
         tags.type --[[@as FilterType]],
         tags.name --[[@as string]],
         tags.quality --[[@as string?]],
-        tags.temperature --[[@as number?]],
         tags.minimum_temperature --[[@as number?]],
         tags.maximum_temperature --[[@as number?]])
     local player_data = save.get_player_data(event.player_index)
@@ -206,7 +204,6 @@ function handlers.on_limit_type_changed(event)
         tags.type --[[@as FilterType]],
         tags.name --[[@as string]],
         tags.quality --[[@as string?]],
-        tags.temperature --[[@as number?]],
         tags.minimum_temperature --[[@as number?]],
         tags.maximum_temperature --[[@as number?]])
     local solution = assert(save.get_selected_solution(event.player_index))

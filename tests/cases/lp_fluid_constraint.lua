@@ -12,12 +12,14 @@ local function item(name, amount)
     return { type = "item", name = name, quality = "normal", amount_per_second = amount }
 end
 
+-- A point temperature is the degenerate range [T,T] in the range-only model.
 local function fluid_single(name, temperature, amount)
     return {
         type = "fluid",
         name = name,
         quality = "normal",
-        temperature = temperature,
+        minimum_temperature = temperature,
+        maximum_temperature = temperature,
         amount_per_second = amount,
     }
 end
@@ -171,7 +173,7 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 10 },
             -- Only the low boiler should be capped.
             { type = "fluid", name = "steam", quality = "normal",
-              temperature = 165,
+              minimum_temperature = 165, maximum_temperature = 165,
               limit_type = "upper", limit_amount_per_second = 1 },
         }
 

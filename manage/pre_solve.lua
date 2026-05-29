@@ -100,9 +100,8 @@ end
 function M.resolve_bare_fluids(normalized_production_lines)
     local function resolve_ingredient(amount)
         if amount.type ~= "fluid" then return end
-        amount.temperature, amount.minimum_temperature, amount.maximum_temperature =
+        amount.minimum_temperature, amount.maximum_temperature =
             acc.resolve_bare_fluid_ingredient(amount.name,
-                amount.temperature,
                 amount.minimum_temperature,
                 amount.maximum_temperature)
     end
@@ -110,9 +109,8 @@ function M.resolve_bare_fluids(normalized_production_lines)
     for _, line in ipairs(normalized_production_lines) do
         for _, product in ipairs(line.products) do
             if product.type == "fluid" then
-                product.temperature, product.minimum_temperature, product.maximum_temperature =
+                product.minimum_temperature, product.maximum_temperature =
                     acc.resolve_bare_fluid_product(product.name,
-                        product.temperature,
                         product.minimum_temperature,
                         product.maximum_temperature)
             end
@@ -181,7 +179,6 @@ function M.quality_decomposition(normalized_amount, effectivity_quality, unlocke
             name = normalized_amount.name,
             quality = current_quality,
             amount_per_second = (current_probability - next_probability) * normalized_amount.amount_per_second,
-            temperature = normalized_amount.temperature,
             minimum_temperature = normalized_amount.minimum_temperature,
             maximum_temperature = normalized_amount.maximum_temperature,
         }

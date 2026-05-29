@@ -278,7 +278,7 @@ function handlers.make_production_line_table(event)
                 for _, amount in ipairs(pre_solve.quality_decomposition(product, effectivity.quality, unlocked)) do
                     local typed_name = tn.create_typed_name(
                         amount.type, amount.name, amount.quality,
-                        amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
+                        amount.minimum_temperature, amount.maximum_temperature)
                     local craft = tn.typed_name_to_material(typed_name)
                     local is_hidden = acc.is_hidden(craft)
                     local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
@@ -318,7 +318,7 @@ function handlers.make_production_line_table(event)
             for _, amount in ipairs(n.ingredients) do
                 local typed_name = tn.create_typed_name(
                     amount.type, amount.name, amount.quality,
-                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature)
+                    amount.minimum_temperature, amount.maximum_temperature)
                 local craft = tn.typed_name_to_material(typed_name)
                 local is_hidden = acc.is_hidden(craft)
                 local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)

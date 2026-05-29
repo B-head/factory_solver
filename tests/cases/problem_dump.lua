@@ -104,7 +104,7 @@ table.insert(cases, {
                 products = {
                     { type = "item", name = "plate", quality = "uncommon", amount_per_second = 2.5 },
                     { type = "fluid", name = "steam", quality = "normal",
-                      amount_per_second = 60, temperature = 165 },
+                      amount_per_second = 60, minimum_temperature = 165, maximum_temperature = 165 },
                 },
                 ingredients = {
                     { type = "item", name = "ore", quality = "normal", amount_per_second = 1 },

@@ -11,12 +11,14 @@ local function item(name, amount)
     return { type = "item", name = name, quality = "normal", amount_per_second = amount }
 end
 
+-- A point temperature is the degenerate range [T,T] in the range-only model.
 local function fluid_single(name, temperature, amount)
     return {
         type = "fluid",
         name = name,
         quality = "normal",
-        temperature = temperature,
+        minimum_temperature = temperature,
+        maximum_temperature = temperature,
         amount_per_second = amount,
     }
 end
@@ -42,10 +44,11 @@ local function recipe(name, products, ingredients)
     }
 end
 
+-- A point producer is the degenerate range [temperature,temperature].
 local function bridge_primal_key(fluid, temperature, min, max)
     return string.format(
-        "virtual_recipe/|bridge|fluid/%s@%g->[%g,%g]/normal",
-        fluid, temperature, min, max
+        "virtual_recipe/|bridge|fluid/%s@[%g,%g]->[%g,%g]/normal",
+        fluid, temperature, temperature, min, max
     )
 end
 
@@ -209,9 +212,9 @@ table.insert(cases, {
         -- Expected order: steam comes before water alphabetically; within
         -- steam, 165 comes before 500 numerically.
         harness.assert_eq(#names, 3, "three bridges")
-        harness.assert_eq(names[1], "|bridge|fluid/steam@165->[15,1000]")
-        harness.assert_eq(names[2], "|bridge|fluid/steam@500->[15,1000]")
-        harness.assert_eq(names[3], "|bridge|fluid/water@50->[0,100]")
+        harness.assert_eq(names[1], "|bridge|fluid/steam@[165,165]->[15,1000]")
+        harness.assert_eq(names[2], "|bridge|fluid/steam@[500,500]->[15,1000]")
+        harness.assert_eq(names[3], "|bridge|fluid/water@[50,50]->[0,100]")
     end,
 })
 
@@ -238,8 +241,8 @@ table.insert(cases, {
             recipe("gen-a", { item("pa", 1) }, { fluid_range("steam", 15, 200, 1) }),
             recipe("gen-b", { item("pb", 1) }, { fluid_range("steam", 100, 300, 1) }),
         })
-        harness.assert_true(names["|bridge|fluid/steam@165->[15,200]"], "bridge 165 -> [15,200] exists")
-        harness.assert_true(names["|bridge|fluid/steam@165->[100,300]"], "bridge 165 -> [100,300] exists")
+        harness.assert_true(names["|bridge|fluid/steam@[165,165]->[15,200]"], "bridge 165 -> [15,200] exists")
+        harness.assert_true(names["|bridge|fluid/steam@[165,165]->[100,300]"], "bridge 165 -> [100,300] exists")
     end,
 })
 
@@ -254,8 +257,8 @@ table.insert(cases, {
             recipe("gen-lo", { item("pa", 1) }, { fluid_range("steam", 15, 200, 1) }),
             recipe("gen-hi", { item("pb", 1) }, { fluid_range("steam", 200, 300, 1) }),
         })
-        harness.assert_true(names["|bridge|fluid/steam@200->[15,200]"], "t == max boundary bridges")
-        harness.assert_true(names["|bridge|fluid/steam@200->[200,300]"], "t == min boundary bridges")
+        harness.assert_true(names["|bridge|fluid/steam@[200,200]->[15,200]"], "t == max boundary bridges")
+        harness.assert_true(names["|bridge|fluid/steam@[200,200]->[200,300]"], "t == min boundary bridges")
     end,
 })
 
@@ -274,9 +277,10 @@ table.insert(cases, {
         harness.assert_eq(#problem.bridges, 1, "one bridge attached")
         local bridge = problem.bridges[1]
         harness.assert_eq(bridge.recipe_typed_name.name,
-            "|bridge|fluid/steam@500->[15,1000]", "bridge name")
+            "|bridge|fluid/steam@[500,500]->[15,1000]", "bridge name")
         harness.assert_eq(#bridge.ingredients, 1, "bridge has one ingredient")
-        harness.assert_eq(bridge.ingredients[1].temperature, 500, "ingredient single temp")
+        harness.assert_eq(bridge.ingredients[1].minimum_temperature, 500, "ingredient point min")
+        harness.assert_eq(bridge.ingredients[1].maximum_temperature, 500, "ingredient point max")
         harness.assert_eq(#bridge.products, 1, "bridge has one product")
         harness.assert_eq(bridge.products[1].minimum_temperature, 15, "product range min")
         harness.assert_eq(bridge.products[1].maximum_temperature, 1000, "product range max")

@@ -103,72 +103,80 @@ local function bare_fluid_limit_dual(variable_name)
     return "|limit|" .. string.sub(variable_name, 1, at - 1)
 end
 
----For every (single_temperature, temperature_range) pair found in the production
----line set where the single value falls inside the range, emit a zero-cost
----virtual recipe that converts the single-temperature fluid variable into the
----range-temperature one. The LP solves the otherwise-disconnected variables
----through these bridges (e.g. steam@165 from a boiler feeding a generator that
----accepts steam@[15,1000]).
+---For every (product_range Rp, ingredient_range Ri) pair found in the production
+---line set where Rp is a strict subset of Ri, emit a zero-cost virtual recipe
+---that converts the Rp fluid variable into the Ri one. The LP solves the
+---otherwise-disconnected variables through these bridges (e.g. steam@[165,165]
+---from a boiler feeding a generator that accepts steam@[15,1000]). A point
+---temperature is the degenerate range [T,T]; an Rp that equals Ri is the same LP
+---variable and needs no bridge.
 ---@param production_lines NormalizedProductionLine[]
 ---@return NormalizedProductionLine[]
 function M.create_temperature_bridges(production_lines)
-    local singles = {}  -- fluid_name -> { temperature = true, ... }
-    local ranges = {}   -- fluid_name -> { "min,max" -> { min, max } }
+    local product_ranges = {}     -- fluid_name -> { "min,max" -> { min, max } }
+    local ingredient_ranges = {}  -- fluid_name -> { "min,max" -> { min, max } }
+
+    local function collect(into, name, min, max)
+        local r = into[name]
+        if not r then
+            r = {}
+            into[name] = r
+        end
+        r[string.format("%g,%g", min, max)] = { min, max }
+    end
 
     for _, line in ipairs(production_lines) do
         for _, product in ipairs(line.products) do
-            if product.type == "fluid" and product.temperature then
-                local s = singles[product.name]
-                if not s then
-                    s = {}
-                    singles[product.name] = s
-                end
-                s[product.temperature] = true
+            if product.type == "fluid" and product.minimum_temperature then
+                collect(product_ranges, product.name,
+                    product.minimum_temperature, product.maximum_temperature)
             end
         end
         for _, ingredient in each_ingredient(line) do
             if ingredient.type == "fluid" and ingredient.minimum_temperature then
-                local r = ranges[ingredient.name]
-                if not r then
-                    r = {}
-                    ranges[ingredient.name] = r
-                end
-                local key = string.format("%g,%g", ingredient.minimum_temperature, ingredient.maximum_temperature)
-                r[key] = { ingredient.minimum_temperature, ingredient.maximum_temperature }
+                collect(ingredient_ranges, ingredient.name,
+                    ingredient.minimum_temperature, ingredient.maximum_temperature)
             end
         end
     end
 
     local fluid_names = {}
     local seen = {}
-    for name, _ in pairs(singles) do
+    for name, _ in pairs(product_ranges) do
         if not seen[name] then seen[name] = true; fluid_names[#fluid_names + 1] = name end
     end
-    for name, _ in pairs(ranges) do
+    for name, _ in pairs(ingredient_ranges) do
         if not seen[name] then seen[name] = true; fluid_names[#fluid_names + 1] = name end
     end
     table.sort(fluid_names)
 
     local bridges = {}
     for _, fluid_name in ipairs(fluid_names) do
-        local s = singles[fluid_name]
-        local r = ranges[fluid_name]
-        if s and r then
-            local single_temps = {}
-            for t in pairs(s) do single_temps[#single_temps + 1] = t end
-            table.sort(single_temps)
+        local p = product_ranges[fluid_name]
+        local i = ingredient_ranges[fluid_name]
+        if p and i then
+            local p_keys = {}
+            for k in pairs(p) do p_keys[#p_keys + 1] = k end
+            table.sort(p_keys)
 
-            local range_keys = {}
-            for k in pairs(r) do range_keys[#range_keys + 1] = k end
-            table.sort(range_keys)
+            local i_keys = {}
+            for k in pairs(i) do i_keys[#i_keys + 1] = k end
+            table.sort(i_keys)
 
-            for _, temperature in ipairs(single_temps) do
-                for _, range_key in ipairs(range_keys) do
-                    local range = r[range_key]
-                    local min, max = range[1], range[2]
-                    if min <= temperature and temperature <= max then
-                        local bridge_name = string.format("%sfluid/%s@%g->[%g,%g]",
-                            bridge_prefix, fluid_name, temperature, min, max)
+            for _, p_key in ipairs(p_keys) do
+                local pr = p[p_key]
+                local pmin, pmax = pr[1], pr[2]
+                for _, i_key in ipairs(i_keys) do
+                    local ir = i[i_key]
+                    local imin, imax = ir[1], ir[2]
+                    -- Rp strictly inside Ri: producible fluid qualifies for the
+                    -- wider acceptance range. Identical ranges are the same
+                    -- variable (no bridge).
+                    local subset = imin <= pmin and pmax <= imax
+                    local same = pmin == imin and pmax == imax
+                    if subset and not same then
+                        local bridge_name = string.format("%sfluid/%s@[%g,%g]->[%g,%g]",
+                            bridge_prefix, fluid_name, pmin, pmax, imin, imax)
                         ---@type NormalizedProductionLine
                         local bridge_line = {
                             recipe_typed_name = {
@@ -180,15 +188,16 @@ function M.create_temperature_bridges(production_lines)
                                 type = "fluid",
                                 name = fluid_name,
                                 quality = "normal",
-                                minimum_temperature = min,
-                                maximum_temperature = max,
+                                minimum_temperature = imin,
+                                maximum_temperature = imax,
                                 amount_per_second = 1,
                             } },
                             ingredients = { {
                                 type = "fluid",
                                 name = fluid_name,
                                 quality = "normal",
-                                temperature = temperature,
+                                minimum_temperature = pmin,
+                                maximum_temperature = pmax,
                                 amount_per_second = 1,
                             } },
                             power_per_second = 0,
@@ -400,9 +409,6 @@ local function amount_literal(amount)
         string.format("quality = %q", amount.quality),
         "amount_per_second = " .. num_literal(amount.amount_per_second),
     }
-    if amount.temperature ~= nil then
-        parts[#parts + 1] = "temperature = " .. num_literal(amount.temperature)
-    end
     if amount.minimum_temperature ~= nil then
         parts[#parts + 1] = "minimum_temperature = " .. num_literal(amount.minimum_temperature)
     end
@@ -464,9 +470,6 @@ function M.dump_constraints(constraints)
             string.format("limit_type = %q", c.limit_type),
             "limit_amount_per_second = " .. num_literal(c.limit_amount_per_second),
         }
-        if c.temperature ~= nil then
-            parts[#parts + 1] = "temperature = " .. num_literal(c.temperature)
-        end
         if c.minimum_temperature ~= nil then
             parts[#parts + 1] = "minimum_temperature = " .. num_literal(c.minimum_temperature)
         end

@@ -12,7 +12,11 @@
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
 ---@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
 ---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
----@alias TypedName { type: FilterType, name: string, quality: string, temperature: number?, minimum_temperature: number?, maximum_temperature: number? }
+-- Fluid temperature is carried range-only: a point temperature is the degenerate
+-- range minimum_temperature == maximum_temperature. There is no single-value
+-- `temperature` field; that asymmetry lived only in the raw recipe layer
+-- (Product.temperature) and is collapsed to [T,T] at the normalization boundary.
+---@alias TypedName { type: FilterType, name: string, quality: string, minimum_temperature: number?, maximum_temperature: number? }
 ---@alias ProductEx Product|VirtualProduct
 ---@alias IngredientEx Ingredient|VirtualIngredient
 
@@ -125,7 +129,6 @@ __factory_solver__storage = {}
 ---@field type FilterType
 ---@field name string
 ---@field quality string
----@field temperature number?
 ---@field minimum_temperature number?
 ---@field maximum_temperature number?
 ---@field limit_type LimitType
@@ -173,7 +176,6 @@ __factory_solver__storage = {}
 ---@field name string
 ---@field quality string
 ---@field amount_per_second number
----@field temperature number?
 ---@field minimum_temperature number?
 ---@field maximum_temperature number?
 

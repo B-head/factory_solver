@@ -70,7 +70,7 @@ function M.get_total_amounts(player_index, solution)
                 add(item_totals, tn.create_typed_name("item", name, amount.quality), amount_per_second)
             elseif filter_type == "fluid" then
                 add(fluid_totals, tn.create_typed_name("fluid", name, nil,
-                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
+                    amount.minimum_temperature, amount.maximum_temperature),
                     amount_per_second)
             elseif filter_type == "virtual_material" then
                 add(virtual_totals, tn.create_typed_name("virtual_material", name, amount.quality), amount_per_second)
@@ -88,7 +88,7 @@ function M.get_total_amounts(player_index, solution)
                 add(item_totals, tn.create_typed_name("item", name, amount.quality), -amount_per_second)
             elseif filter_type == "fluid" then
                 add(fluid_totals, tn.create_typed_name("fluid", name, nil,
-                    amount.temperature, amount.minimum_temperature, amount.maximum_temperature),
+                    amount.minimum_temperature, amount.maximum_temperature),
                     -amount_per_second)
             elseif filter_type == "virtual_material" then
                 add(virtual_totals, tn.create_typed_name("virtual_material", name, amount.quality), -amount_per_second)
@@ -107,7 +107,7 @@ function M.get_total_amounts(player_index, solution)
                 add(item_totals, tn.create_typed_name("item", name, fuel_amount.quality), -amount_per_second)
             elseif filter_type == "fluid" then
                 add(fluid_totals, tn.create_typed_name("fluid", name, fuel_amount.quality,
-                    fuel_amount.temperature, fuel_amount.minimum_temperature, fuel_amount.maximum_temperature),
+                    fuel_amount.minimum_temperature, fuel_amount.maximum_temperature),
                     -amount_per_second)
             elseif filter_type == "virtual_material" then
                 add(virtual_totals, tn.create_typed_name("virtual_material", name, fuel_amount.quality), -amount_per_second)
@@ -133,14 +133,12 @@ function M.get_total_amounts(player_index, solution)
             if flow then
                 for _, ingredient in ipairs(bridge_line.ingredients) do
                     add(fluid_totals, tn.create_typed_name("fluid", ingredient.name, nil,
-                        ingredient.temperature,
                         ingredient.minimum_temperature,
                         ingredient.maximum_temperature),
                         -flow * ingredient.amount_per_second)
                 end
                 for _, product in ipairs(bridge_line.products) do
                     add(fluid_totals, tn.create_typed_name("fluid", product.name, nil,
-                        product.temperature,
                         product.minimum_temperature,
                         product.maximum_temperature),
                         flow * product.amount_per_second)

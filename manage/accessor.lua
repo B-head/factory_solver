@@ -27,13 +27,18 @@ function M.raw_product_to_amount(product, quality, craft_energy, crafting_speed,
     local extra_amount = (product.extra_count_fraction or 0) * (1 + effectivity_productivity)
     local amount = (normal_amount * product.probability + extra_amount) * crafting_speed / craft_energy
 
+    -- The raw layer (Product) carries a single `temperature`; the normalized /
+    -- LP layer is range-only, so a point temperature becomes the degenerate
+    -- range [T,T]. A bare product (temperature nil) is left unset for
+    -- resolve_bare_fluid_product to widen to [default, default].
     ---@type NormalizedAmount
     return {
         type = product.type,
         name = product.name,
         quality = quality,
         amount_per_second = amount,
-        temperature = product.temperature,
+        minimum_temperature = product.temperature,
+        maximum_temperature = product.temperature,
     }
 end
 
@@ -94,6 +99,14 @@ function M.raw_ingredient_to_amount(ingredient, quality, craft_energy, crafting_
 
     local min_temp = ingredient.minimum_temperature
     local max_temp = ingredient.maximum_temperature
+    -- A fluid ingredient pinned to an exact temperature is the degenerate range
+    -- [T,T] in the range-only model. (Most fluid ingredients expose min/max; this
+    -- handles the rarer exact-`temperature` shape without leaking a single field
+    -- into the normalized layer.)
+    if ingredient.type == "fluid" and ingredient.temperature ~= nil then
+        min_temp = ingredient.temperature
+        max_temp = ingredient.temperature
+    end
     if ingredient.type == "fluid" then
         -- Factorio's runtime API returns the FLT-sentinel values
         -- (e.g. -3.4e38) for ingredient temperature bounds that the
@@ -127,56 +140,46 @@ function M.raw_ingredient_to_amount(ingredient, quality, craft_energy, crafting_
     }
 end
 
----Widen a fluid amount in product position: a fully bare fluid resolves to
----its default_temperature (single). Anything already tagged passes through.
----Returns the (temperature, minimum_temperature, maximum_temperature) tuple
----so callers can mutate a NormalizedAmount in place or build a fresh
----TypedName from it.
+---Widen a fluid amount in product position: a fully bare fluid resolves to the
+---degenerate range [default_temperature, default_temperature] (a product comes
+---out at exactly one temperature). Anything already tagged passes through.
+---Returns (minimum_temperature, maximum_temperature) — the range-only model has
+---no single-value field.
 ---@param fluid_name string
----@param temperature number?
 ---@param minimum_temperature number?
 ---@param maximum_temperature number?
----@return number? temperature
 ---@return number? minimum_temperature
 ---@return number? maximum_temperature
-function M.resolve_bare_fluid_product(fluid_name, temperature, minimum_temperature, maximum_temperature)
-    if temperature == nil
-        and minimum_temperature == nil
-        and maximum_temperature == nil
-    then
+function M.resolve_bare_fluid_product(fluid_name, minimum_temperature, maximum_temperature)
+    if minimum_temperature == nil and maximum_temperature == nil then
         local proto = prototypes.fluid[fluid_name]
         if proto then
-            return proto.default_temperature, nil, nil
+            return proto.default_temperature, proto.default_temperature
         end
     end
-    return temperature, minimum_temperature, maximum_temperature
+    return minimum_temperature, maximum_temperature
 end
 
----Widen a fluid amount in ingredient position: any single-temperature tag
----passes through; otherwise the bounds are filled to [default_temperature,
----max_temperature] and clamped to the fluid's physical range. The clamp
----also tames the FLT-sentinel values Factorio returns for unset bounds
----(e.g. -3.4e38 for an unset minimum_temperature).
+---Widen a fluid amount in ingredient position: a bare ingredient's bounds are
+---filled to [default_temperature, max_temperature] and clamped to the fluid's
+---physical range. The clamp also tames the FLT-sentinel values Factorio returns
+---for unset bounds (e.g. -3.4e38 for an unset minimum_temperature).
+---Returns (minimum_temperature, maximum_temperature).
 ---@param fluid_name string
----@param temperature number?
 ---@param minimum_temperature number?
 ---@param maximum_temperature number?
----@return number? temperature
 ---@return number? minimum_temperature
 ---@return number? maximum_temperature
-function M.resolve_bare_fluid_ingredient(fluid_name, temperature, minimum_temperature, maximum_temperature)
-    if temperature ~= nil then
-        return temperature, minimum_temperature, maximum_temperature
-    end
+function M.resolve_bare_fluid_ingredient(fluid_name, minimum_temperature, maximum_temperature)
     local proto = prototypes.fluid[fluid_name]
     if not proto then
-        return temperature, minimum_temperature, maximum_temperature
+        return minimum_temperature, maximum_temperature
     end
     local min = minimum_temperature or proto.default_temperature
     local max = maximum_temperature or proto.max_temperature
     if min < proto.default_temperature then min = proto.default_temperature end
     if max > proto.max_temperature then max = proto.max_temperature end
-    return temperature, min, max
+    return min, max
 end
 
 ---comment
@@ -292,8 +295,7 @@ function M.get_generator_power(machine, machine_quality, fuel, fuel_typed_name)
         else
             local input_t = fuel.max_temperature
             if fuel_typed_name then
-                input_t = fuel_typed_name.temperature
-                    or fuel_typed_name.maximum_temperature
+                input_t = fuel_typed_name.maximum_temperature
                     or input_t
             end
             local cap = machine.maximum_temperature
@@ -669,8 +671,7 @@ function M.get_fuel_amount_per_second(machine, machine_quality, fuel, fuel_quali
             -- The engine caps T_in at FluidEnergySource.maximum_temperature (0 means no cap).
             local input_t = fuel.max_temperature
             if fuel_typed_name then
-                input_t = fuel_typed_name.temperature
-                    or fuel_typed_name.maximum_temperature
+                input_t = fuel_typed_name.maximum_temperature
                     or input_t
             end
             local cap = energy.maximum_temperature
@@ -776,7 +777,7 @@ function M.try_get_fixed_fuel(machine)
         end
         local min_temp = fluidbox_filter.default_temperature
         local max_temp = energy.maximum_temperature or fluidbox_filter.max_temperature
-        return tn.create_typed_name("fluid", fluidbox_filter.name, nil, nil, min_temp, max_temp)
+        return tn.create_typed_name("fluid", fluidbox_filter.name, nil, min_temp, max_temp)
     elseif machine.type == "generator" then
         local fluidbox_filter = M.get_fluidbox_filter_prototype(machine, 1)
         if not fluidbox_filter then
@@ -784,7 +785,7 @@ function M.try_get_fixed_fuel(machine)
         end
         local min_temp = fluidbox_filter.default_temperature
         local max_temp = machine.maximum_temperature or fluidbox_filter.max_temperature
-        return tn.create_typed_name("fluid", fluidbox_filter.name, nil, nil, min_temp, max_temp)
+        return tn.create_typed_name("fluid", fluidbox_filter.name, nil, min_temp, max_temp)
     else
         return nil
     end
@@ -1519,7 +1520,6 @@ function M.normalize_production_line(line, bonuses)
             name = ftn.name,
             quality = ftn.quality,
             amount_per_second = amount_per_second,
-            temperature = ftn.temperature,
             minimum_temperature = ftn.minimum_temperature,
             maximum_temperature = ftn.maximum_temperature,
         }

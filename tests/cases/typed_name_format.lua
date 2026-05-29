@@ -34,18 +34,18 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "single-temperature fluid encodes @<T>",
+    name = "point-temperature fluid encodes @[T,T] (degenerate range)",
     run = function()
-        local t = tn.create_typed_name("fluid", "steam", nil, 165)
-        harness.assert_eq(tn.typed_name_to_variable_name(t), "fluid/steam@165")
-        harness.assert_true(not tn.is_bare_fluid(t), "single-temp fluid is not bare")
+        local t = tn.create_typed_name("fluid", "steam", nil, 165, 165)
+        harness.assert_eq(tn.typed_name_to_variable_name(t), "fluid/steam@[165,165]")
+        harness.assert_true(not tn.is_bare_fluid(t), "point-temp fluid is not bare")
     end,
 })
 
 table.insert(cases, {
     name = "range-temperature fluid encodes @[lo,hi]",
     run = function()
-        local t = tn.create_typed_name("fluid", "steam", nil, nil, 15, 1000)
+        local t = tn.create_typed_name("fluid", "steam", nil, 15, 1000)
         harness.assert_eq(tn.typed_name_to_variable_name(t), "fluid/steam@[15,1000]")
         harness.assert_true(not tn.is_bare_fluid(t), "range-temp fluid is not bare")
     end,
@@ -69,19 +69,19 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "equals_typed_name treats matching single temperatures as equal",
+    name = "equals_typed_name treats matching point temperatures as equal",
     run = function()
-        local a = tn.create_typed_name("fluid", "steam", nil, 165)
-        local b = tn.create_typed_name("fluid", "steam", nil, 165)
-        harness.assert_true(tn.equals_typed_name(a, b), "same single temperature")
+        local a = tn.create_typed_name("fluid", "steam", nil, 165, 165)
+        local b = tn.create_typed_name("fluid", "steam", nil, 165, 165)
+        harness.assert_true(tn.equals_typed_name(a, b), "same point temperature")
     end,
 })
 
 table.insert(cases, {
-    name = "equals_typed_name separates different single temperatures",
+    name = "equals_typed_name separates different point temperatures",
     run = function()
-        local a = tn.create_typed_name("fluid", "steam", nil, 165)
-        local b = tn.create_typed_name("fluid", "steam", nil, 500)
+        local a = tn.create_typed_name("fluid", "steam", nil, 165, 165)
+        local b = tn.create_typed_name("fluid", "steam", nil, 500, 500)
         harness.assert_true(not tn.equals_typed_name(a, b), "different temperatures")
     end,
 })
@@ -89,29 +89,29 @@ table.insert(cases, {
 table.insert(cases, {
     name = "equals_typed_name compares range endpoints",
     run = function()
-        local a = tn.create_typed_name("fluid", "steam", nil, nil, 15, 1000)
-        local b = tn.create_typed_name("fluid", "steam", nil, nil, 15, 1000)
-        local c = tn.create_typed_name("fluid", "steam", nil, nil, 15, 500)
+        local a = tn.create_typed_name("fluid", "steam", nil, 15, 1000)
+        local b = tn.create_typed_name("fluid", "steam", nil, 15, 1000)
+        local c = tn.create_typed_name("fluid", "steam", nil, 15, 500)
         harness.assert_true(tn.equals_typed_name(a, b), "identical ranges")
         harness.assert_true(not tn.equals_typed_name(a, c), "different max")
     end,
 })
 
 table.insert(cases, {
-    name = "equals_typed_name distinguishes single from range",
+    name = "equals_typed_name distinguishes a point from a wider range",
     run = function()
-        local a = tn.create_typed_name("fluid", "steam", nil, 165)
-        local b = tn.create_typed_name("fluid", "steam", nil, nil, 15, 1000)
-        harness.assert_true(not tn.equals_typed_name(a, b), "single vs range")
+        local a = tn.create_typed_name("fluid", "steam", nil, 165, 165)
+        local b = tn.create_typed_name("fluid", "steam", nil, 15, 1000)
+        harness.assert_true(not tn.equals_typed_name(a, b), "point vs range")
     end,
 })
 
 table.insert(cases, {
-    name = "bare and single-temperature fluids are not equal",
+    name = "bare and point-temperature fluids are not equal",
     run = function()
         local a = tn.create_typed_name("fluid", "steam")
-        local b = tn.create_typed_name("fluid", "steam", nil, 165)
-        harness.assert_true(not tn.equals_typed_name(a, b), "bare vs single")
+        local b = tn.create_typed_name("fluid", "steam", nil, 165, 165)
+        harness.assert_true(not tn.equals_typed_name(a, b), "bare vs point")
     end,
 })
 
@@ -124,30 +124,31 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "format_temperature_suffix renders single temperature",
+    name = "format_temperature_suffix renders a point as a degenerate range",
     run = function()
-        local t = tn.create_typed_name("fluid", "steam", nil, 165)
-        harness.assert_eq(tn.format_temperature_suffix(t), "@165")
+        local t = tn.create_typed_name("fluid", "steam", nil, 165, 165)
+        harness.assert_eq(tn.format_temperature_suffix(t), "@[165,165]")
     end,
 })
 
 table.insert(cases, {
     name = "format_temperature_suffix renders range",
     run = function()
-        local t = tn.create_typed_name("fluid", "steam", nil, nil, 15, 1000)
+        local t = tn.create_typed_name("fluid", "steam", nil, 15, 1000)
         harness.assert_eq(tn.format_temperature_suffix(t), "@[15,1000]")
     end,
 })
 
 table.insert(cases, {
-    name = "craft_to_typed_name decodes fluid/X@T virtual material to fluid TypedName",
+    name = "craft_to_typed_name decodes legacy fluid/X@T to a degenerate range",
     run = function()
         local virtual_material = { type = "virtual_material", name = "fluid/steam@165" }
         local typed_name = tn.craft_to_typed_name(virtual_material)
         harness.assert_eq(typed_name.type, "fluid")
         harness.assert_eq(typed_name.name, "steam")
-        harness.assert_eq(typed_name.temperature, 165)
-        harness.assert_eq(tn.typed_name_to_variable_name(typed_name), "fluid/steam@165")
+        harness.assert_eq(typed_name.minimum_temperature, 165)
+        harness.assert_eq(typed_name.maximum_temperature, 165)
+        harness.assert_eq(tn.typed_name_to_variable_name(typed_name), "fluid/steam@[165,165]")
     end,
 })
 

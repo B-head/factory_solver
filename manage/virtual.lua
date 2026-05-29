@@ -182,10 +182,16 @@ function M.add_fluid_temperature_virtuals(materials, recipes)
     local function visit_products(products)
         for _, product in ipairs(products) do
             if product.type == "fluid" then
-                local t = acc.resolve_bare_fluid_product(product.name,
-                    product.temperature, product.minimum_temperature, product.maximum_temperature)
-                if t then
-                    M.register_fluid_temperature_single(materials, product.name, t)
+                -- Raw products carry a single `temperature`; normalize to the
+                -- degenerate range [T,T] so registration is range-only.
+                local pmin = product.minimum_temperature
+                local pmax = product.maximum_temperature
+                if product.temperature ~= nil then
+                    pmin, pmax = product.temperature, product.temperature
+                end
+                local lo, hi = acc.resolve_bare_fluid_product(product.name, pmin, pmax)
+                if lo and hi then
+                    M.register_fluid_temperature_range(materials, product.name, lo, hi)
                 end
             end
         end
@@ -193,11 +199,13 @@ function M.add_fluid_temperature_virtuals(materials, recipes)
     local function visit_ingredients(ingredients)
         for _, ingredient in ipairs(ingredients) do
             if ingredient.type == "fluid" then
-                local t, lo, hi = acc.resolve_bare_fluid_ingredient(ingredient.name,
-                    ingredient.temperature, ingredient.minimum_temperature, ingredient.maximum_temperature)
-                if t then
-                    M.register_fluid_temperature_single(materials, ingredient.name, t)
-                elseif lo and hi then
+                local imin = ingredient.minimum_temperature
+                local imax = ingredient.maximum_temperature
+                if ingredient.temperature ~= nil then
+                    imin, imax = ingredient.temperature, ingredient.temperature
+                end
+                local lo, hi = acc.resolve_bare_fluid_ingredient(ingredient.name, imin, imax)
+                if lo and hi then
                     M.register_fluid_temperature_range(materials, ingredient.name, lo, hi)
                 end
             end
@@ -212,28 +220,6 @@ function M.add_fluid_temperature_virtuals(materials, recipes)
         visit_products(recipe.products)
         visit_ingredients(recipe.ingredients)
     end
-end
-
----@param materials table<string, VirtualMaterial>
----@param fluid_name string
----@param temperature number
-function M.register_fluid_temperature_single(materials, fluid_name, temperature)
-    local key = string.format("fluid/%s@%g", fluid_name, temperature)
-    if materials[key] then return end
-    local fluid_proto = prototypes.fluid[fluid_name]
-    if not fluid_proto or fluid_proto.parameter then return end
-    ---@type VirtualMaterial
-    materials[key] = {
-        type = "virtual_material",
-        name = key,
-        sprite_path = "fluid/" .. fluid_name,
-        elem_tooltip = { type = "fluid", name = fluid_name },
-        order = fluid_proto.order .. string.format("@%020.6f", temperature),
-        group_name = fluid_proto.group.name,
-        subgroup_name = fluid_proto.subgroup.name,
-        hidden = fluid_proto.hidden,
-        source_fluid_name = fluid_name,
-    }
 end
 
 ---@param materials table<string, VirtualMaterial>
@@ -352,22 +338,17 @@ function M.create_source_sink_virtuals(materials, recipes)
     end
 
     -- Read the registered temperature-variant materials back into per-fluid
-    -- single-temperature and range sets, mirroring the names
-    -- register_fluid_temperature_single / _range emit.
-    local singles = {} ---@type table<string, table<string, number>>
+    -- range sets, mirroring the range-only names register_fluid_temperature_range
+    -- emits. A source produces at a single point, so its temperatures are the
+    -- degenerate ranges (lo == hi); a sink accepts an interval, so it uses every
+    -- registered range.
     local ranges = {}   ---@type table<string, table<string, number[]>>
     for _, m in pairs(materials) do
         if m.source_fluid_name then
-            local fname, t = string.match(m.name, "^fluid/(.-)@(%-?%d+%.?%d*)$")
-            if fname then
-                singles[fname] = singles[fname] or {}
-                singles[fname][t] = tonumber(t)
-            else
-                local fn2, lo, hi = string.match(m.name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
-                if fn2 then
-                    ranges[fn2] = ranges[fn2] or {}
-                    ranges[fn2][lo .. "," .. hi] = { tonumber(lo), tonumber(hi) }
-                end
+            local fn2, lo, hi = string.match(m.name, "^fluid/(.-)@%[(%-?%d+%.?%d*),(%-?%d+%.?%d*)%]$")
+            if fn2 then
+                ranges[fn2] = ranges[fn2] or {}
+                ranges[fn2][lo .. "," .. hi] = { tonumber(lo), tonumber(hi) }
             end
         end
     end
@@ -386,7 +367,13 @@ function M.create_source_sink_virtuals(materials, recipes)
 
             local temp_set = {} ---@type table<string, number>
             temp_set[string.format("%g", fluid.default_temperature)] = fluid.default_temperature
-            for k, v in pairs(singles[fluid.name] or {}) do temp_set[k] = v end
+            -- Source points = the degenerate ranges (lo == hi) registered for
+            -- this fluid; those are the single product temperatures.
+            for _, r in pairs(ranges[fluid.name] or {}) do
+                if r[1] == r[2] then
+                    temp_set[string.format("%g", r[1])] = r[1]
+                end
+            end
             for _, t in pairs(temp_set) do
                 display.order = fluid.order .. string.format("@%020.6f", t)
                 build(true, string.format("<source>fluid/%s@%g", fluid.name, t),

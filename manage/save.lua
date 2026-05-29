@@ -185,7 +185,9 @@ function M.reinit_force_data(force_index)
                 -- selection lights up a picker button after upgrade.
                 if line.fuel_typed_name
                     and line.fuel_typed_name.type == "fluid"
-                    and line.fuel_typed_name.temperature == nil
+                    and (line.fuel_typed_name.minimum_temperature == nil
+                        or line.fuel_typed_name.minimum_temperature
+                            ~= line.fuel_typed_name.maximum_temperature)
                 then
                     local machine = tn.typed_name_to_machine(line.machine_typed_name)
                     local variant = acc.get_default_fluid_fuel_variant(machine)
@@ -604,7 +606,6 @@ function M.new_constraint(solution, typed_name)
         type = typed_name.type,
         name = typed_name.name,
         quality = typed_name.quality,
-        temperature = typed_name.temperature,
         minimum_temperature = typed_name.minimum_temperature,
         maximum_temperature = typed_name.maximum_temperature,
         limit_type = "upper",

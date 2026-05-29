@@ -82,11 +82,12 @@ function M.create_decorated_sprite_button(data)
     local typed_name = assert(data.typed_name) --[[@as TypedName]]
     local is_hidden = data.is_hidden or false
     local is_unresearched = data.is_unresearched or false
-    -- Temperature shown on the slot defaults to the typed_name's own fields, but
-    -- external source/sink fluid recipes carry the temperature on their single
-    -- product / ingredient instead (the recipe's typed_name is just a name), so
-    -- pull it from there below to keep the temperature variants distinguishable.
-    local temperature = typed_name.temperature
+    -- Fluid TypedNames are range-only, so the slot reads its range from the
+    -- typed_name's min/max. A single point temperature only appears on the raw
+    -- product of an external source recipe (the recipe's typed_name is just a
+    -- name); pull it from there into `temperature` below so source slots show a
+    -- single "T°" while sink slots show their acceptance range.
+    local temperature = nil ---@type number?
     local minimum_temperature = typed_name.minimum_temperature
     local maximum_temperature = typed_name.maximum_temperature
     local top_right_sprite = data.top_right_sprite --[[@as string?]]
@@ -131,12 +132,21 @@ function M.create_decorated_sprite_button(data)
             },
         })
     elseif minimum_temperature ~= nil then
-        flib_table.insert(children, {
-            type = "flow",
-            direction = "vertical",
-            style = "factory_solver_slot_temperature_flow",
-            ignored_by_interaction = true,
-            children = {
+        -- A degenerate range (min == max) is conceptually a single temperature;
+        -- render it as "25°" instead of "25°~25°" so it reads identically to the
+        -- single-temperature slots it sits alongside.
+        local range_children
+        if minimum_temperature == maximum_temperature then
+            range_children = {
+                {
+                    type = "label",
+                    style = "factory_solver_slot_temperature_label",
+                    caption = string.format("%g°", minimum_temperature),
+                    ignored_by_interaction = true,
+                },
+            }
+        else
+            range_children = {
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
@@ -149,7 +159,14 @@ function M.create_decorated_sprite_button(data)
                     caption = string.format("%g°", maximum_temperature),
                     ignored_by_interaction = true,
                 },
-            },
+            }
+        end
+        flib_table.insert(children, {
+            type = "flow",
+            direction = "vertical",
+            style = "factory_solver_slot_temperature_flow",
+            ignored_by_interaction = true,
+            children = range_children,
         })
     end
 
