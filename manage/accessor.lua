@@ -778,13 +778,29 @@ function M.try_get_fixed_fuel(machine)
         local max_temp = energy.maximum_temperature or fluidbox_filter.max_temperature
         return tn.create_typed_name("fluid", fluidbox_filter.name, nil, nil, min_temp, max_temp)
     elseif machine.type == "generator" then
-        local fluidbox_filter = M.get_fluidbox_filter_prototype(machine, 1)
-        if not fluidbox_filter then
+        -- The ACCEPTANCE range is the input fluidbox's own temperature filter,
+        -- NOT machine.maximum_temperature. maximum_temperature is only the
+        -- energy-conversion cap: steam hotter than it is still consumed, with the
+        -- excess heat wasted (get_generator_power applies that cap). Using it as
+        -- the acceptance ceiling wrongly bars the generator from taking hotter
+        -- steam (e.g. a 100-5000 C turbine showed up as 15-165). A generator has
+        -- no fluid_energy_source, so the input box is index 1.
+        local fluidbox = machine.fluidbox_prototypes[1]
+        local filter = fluidbox and fluidbox.filter
+        if not filter then
             return nil
         end
-        local min_temp = fluidbox_filter.default_temperature
-        local max_temp = machine.maximum_temperature or fluidbox_filter.max_temperature
-        return tn.create_typed_name("fluid", fluidbox_filter.name, nil, nil, min_temp, max_temp)
+        -- Fall back to the fluid's physical range and tame the FLT sentinels
+        -- Factorio returns for unset fluidbox temperature bounds.
+        local min_temp = fluidbox.minimum_temperature
+        local max_temp = fluidbox.maximum_temperature
+        if not min_temp or min_temp < filter.default_temperature then
+            min_temp = filter.default_temperature
+        end
+        if not max_temp or max_temp > filter.max_temperature then
+            max_temp = filter.max_temperature
+        end
+        return tn.create_typed_name("fluid", filter.name, nil, nil, min_temp, max_temp)
     else
         return nil
     end
