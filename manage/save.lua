@@ -661,12 +661,32 @@ function M.new_production_line(player_index, solution, recipe_typed_name, fuel_t
     end
 
     local machine_typed_name = preset.get_machine_preset(player_index, recipe_typed_name)
+    local machine = tn.typed_name_to_machine(machine_typed_name)
+
+    -- A caller-supplied fluid fuel (the recipe picker passes the clicked
+    -- material as the fuel when browsing the fuel category) carries that
+    -- material's own temperature, which is the producer's, not what this machine
+    -- accepts. Re-derive the temperature from the machine's intake — its fixed
+    -- fuel range for a fixed-fuel machine (generator, fluid-energy), or the
+    -- fluid's physical range otherwise — while keeping the chosen fluid.
+    -- Without this the fuel is pinned to the referenced single temperature.
+    -- Only newly created lines are corrected here; production lines already
+    -- saved with a wrongly pinned fuel temperature are not migrated (the user
+    -- can re-pick the fuel to refresh it).
+    if fuel_typed_name and fuel_typed_name.type == "fluid" then
+        local fixed = acc.try_get_fixed_fuel(machine)
+        if fixed and fixed.type == "fluid" and fixed.name == fuel_typed_name.name then
+            fuel_typed_name = fixed
+        else
+            local lo, hi = acc.resolve_bare_fluid_ingredient(fuel_typed_name.name)
+            fuel_typed_name = tn.create_typed_name("fluid", fuel_typed_name.name, nil, lo, hi)
+        end
+    end
     fuel_typed_name = fuel_typed_name or preset.get_fuel_preset(player_index, machine_typed_name)
 
     -- Plant lines default substrate to the first tile listed in the plant's
     -- autoplace_specification.tile_restriction. Non-plant recipes leave it
     -- nil. Mutated later through the substrate widget in solution_editor.
-    local machine = tn.typed_name_to_machine(machine_typed_name)
     local substrate_tile_name = nil
     if machine.type == "plant" then
         local tiles = acc.get_plant_substrate_tiles(machine)

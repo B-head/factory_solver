@@ -323,7 +323,9 @@ local function decode_fluid_temperature_virtual(name)
     -- rather than a digit-only pattern: temperatures are emitted with "%g",
     -- which switches to scientific notation at >=1e6 (fusion plasma keys look
     -- like "fluid/plasma@[1e+06,1e+07]"). A "%d+%.?%d*" pattern silently fails
-    -- to match the "e+06" exponent, leaving the variant undecoded.
+    -- to match the "e+06" exponent, leaving the variant undecoded — the picker
+    -- then treats plasma as a virtual_material that binds to no recipe. Try the
+    -- range form first so the permissive single pattern can't swallow it.
     local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[([^,]+),([^%]]+)%]$")
     if fluid_name2 then
         local l, h = tonumber(lo), tonumber(hi)
