@@ -10,6 +10,34 @@ local function range_subset(a_lo, a_hi, b_lo, b_hi)
     return b_lo <= a_lo and a_hi <= b_hi
 end
 
+---True if any of `machines` can burn `fluid_name` as fuel while accepting the
+---reference temperature range [ref_lo, ref_hi] (reference produces, machine
+---consumes, so reference ⊆ acceptance). A filterless fluid-fuel machine accepts
+---any fluid at any temperature; a machine that doesn't burn this fluid is
+---ignored. If no machine burns it at all the recipe is unrelated to this fuel,
+---so it is kept (not filtered).
+---@param machines LuaEntityPrototype[]
+---@param fluid_name string
+---@param ref_lo number
+---@param ref_hi number
+---@return boolean
+local function any_machine_burns_fluid_at(machines, fluid_name, ref_lo, ref_hi)
+    local matched = false
+    for _, machine in ipairs(machines) do
+        if acc.is_use_any_fluid_fuel(machine) then
+            return true
+        end
+        local fuel = acc.try_get_fixed_fuel(machine)
+        if fuel and fuel.type == "fluid" and fuel.name == fluid_name then
+            matched = true
+            if range_subset(ref_lo, ref_hi, fuel.minimum_temperature, fuel.maximum_temperature) then
+                return true
+            end
+        end
+    end
+    return not matched
+end
+
 ---True if `recipe` can connect to the referenced fluid at the reference's
 ---temperature for `kind`, using the bridge rule producer_range ⊆ consumer_range.
 ---EVERY matching fluid slot is checked and the recipe is kept if ANY connects:
@@ -21,8 +49,9 @@ end
 ---@param recipe LuaRecipePrototype | VirtualRecipe
 ---@param reference TypedName
 ---@param kind string
+---@param category_fuel_cache table<string, boolean> memoises the fuel verdict per crafting category
 ---@return boolean
-local function recipe_temperature_compatible(recipe, reference, kind)
+local function recipe_temperature_compatible(recipe, reference, kind, category_fuel_cache)
     local fluid_name = reference.name
     local ref_lo = reference.minimum_temperature
     local ref_hi = reference.maximum_temperature
@@ -70,19 +99,42 @@ local function recipe_temperature_compatible(recipe, reference, kind)
         end
         return not matched
     elseif kind == "fuel" then
-        -- Only a virtual recipe pins a single machine, whose fixed fuel intake is
-        -- the acceptance range. Real-recipe category fuels and any-fluid-fuel have
-        -- no single range, so they stay unfiltered. Guard the
-        -- fixed_crafting_machine read: a real LuaRecipePrototype (userdata) throws
-        -- on unknown keys, while a VirtualRecipe is a plain table (object_name nil).
+        -- The recipe burns `fluid_name` as fuel through one or more machines; keep
+        -- it if ANY of them can accept the reference temperature. A virtual recipe
+        -- with a fixed machine pins exactly one; a real recipe runs on any machine
+        -- in its crafting category, and a virtual mining recipe on any drill in its
+        -- resource category. Guard the field reads: a real LuaRecipePrototype
+        -- (userdata) throws on unknown keys, while a VirtualRecipe is a plain table
+        -- (object_name nil). The multi-machine verdict is memoised per category — a
+        -- fluid-fuel machine in a common category (e.g. "crafting") would otherwise
+        -- re-scan the same machine list for every recipe in it.
         if recipe.object_name == nil and recipe.fixed_crafting_machine then
             local machine = tn.typed_name_to_machine(recipe.fixed_crafting_machine)
-            local fuel = acc.try_get_fixed_fuel(machine)
-            if fuel and fuel.type == "fluid" and fuel.name == fluid_name then
-                return slot_ok(fuel.minimum_temperature, fuel.maximum_temperature)
-            end
+            return any_machine_burns_fluid_at({ machine }, fluid_name, ref_lo, ref_hi)
         end
-        return true
+
+        local cache_key
+        if recipe.object_name ~= nil then
+            cache_key = "crafting/" .. recipe.category
+        elseif recipe.resource_category then
+            cache_key = "resource/" .. recipe.resource_category
+        else
+            return true
+        end
+
+        local cached = category_fuel_cache[cache_key]
+        if cached ~= nil then return cached end
+
+        local machines
+        if recipe.object_name ~= nil then
+            machines = acc.get_machines_in_category(recipe.category)
+        else
+            machines = acc.get_machines_in_resource_category(recipe.resource_category)
+        end
+
+        local result = any_machine_burns_fluid_at(machines, fluid_name, ref_lo, ref_hi)
+        category_fuel_cache[cache_key] = result
+        return result
     end
     return true
 end
@@ -100,6 +152,7 @@ local function pickable_recipe_names(reference, recipe_names, kind)
     local filter_temp = reference.type == "fluid" and reference.minimum_temperature ~= nil
     local out = {}
     local seen = {}
+    local category_fuel_cache = {} ---@type table<string, boolean>
     for _, name in ipairs(recipe_names) do
         if not seen[name] then
             seen[name] = true
@@ -111,7 +164,7 @@ local function pickable_recipe_names(reference, recipe_names, kind)
                 keep = false
             end
             if keep and filter_temp then
-                keep = recipe_temperature_compatible(recipe, reference, kind)
+                keep = recipe_temperature_compatible(recipe, reference, kind, category_fuel_cache)
             end
             if keep then
                 out[#out + 1] = name
