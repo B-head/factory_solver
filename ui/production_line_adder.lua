@@ -5,6 +5,93 @@ local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
 
+---[a_lo,a_hi] ⊆ [b_lo,b_hi]
+local function range_subset(a_lo, a_hi, b_lo, b_hi)
+    return b_lo <= a_lo and a_hi <= b_hi
+end
+
+---The candidate recipe's fluid-slot temperature range relevant to `kind`,
+---returned as (lo, hi), or nil when it has no single well-defined range (then
+---the candidate is never filtered out). `recipe` is a real LuaRecipePrototype
+---or a plain-table VirtualRecipe.
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@param fluid_name string
+---@param kind string
+---@return number?, number?
+local function candidate_fluid_range(recipe, fluid_name, kind)
+    if kind == "product" then
+        for _, p in ipairs(recipe.products) do
+            if p.type == "fluid" and p.name == fluid_name then
+                -- A product comes out at a single temperature; bare resolves to
+                -- the degenerate [default, default].
+                return acc.resolve_bare_fluid_product(fluid_name, p.temperature, p.temperature)
+            end
+        end
+    elseif kind == "ingredient" then
+        for _, ing in ipairs(recipe.ingredients) do
+            if ing.type == "fluid" and ing.name == fluid_name then
+                if ing.temperature ~= nil then
+                    return ing.temperature, ing.temperature
+                end
+                return acc.resolve_bare_fluid_ingredient(fluid_name,
+                    ing.minimum_temperature, ing.maximum_temperature)
+            end
+        end
+    elseif kind == "fuel" then
+        -- Only a virtual recipe pins a single machine, whose fixed fuel intake is
+        -- the acceptance range. Real-recipe category fuels and any-fluid-fuel have
+        -- no single range, so they stay unfiltered (nil). Guard the
+        -- fixed_crafting_machine read: a real LuaRecipePrototype (userdata) throws
+        -- on unknown keys, while a VirtualRecipe is a plain table (object_name nil).
+        if recipe.object_name == nil and recipe.fixed_crafting_machine then
+            local machine = tn.typed_name_to_machine(recipe.fixed_crafting_machine)
+            local fuel = acc.try_get_fixed_fuel(machine)
+            if fuel and fuel.type == "fluid" and fuel.name == fluid_name then
+                return fuel.minimum_temperature, fuel.maximum_temperature
+            end
+        end
+    end
+    return nil
+end
+
+---Keep only recipes whose referenced-fluid slot is LP-connectable to the
+---referenced temperature: producer_range ⊆ consumer_range, the same rule the
+---temperature bridges use. A non-fluid or temperature-less reference (e.g. a
+---bare fluid constraint) filters nothing. A candidate with no well-defined slot
+---range is kept.
+---@param reference TypedName
+---@param recipe_names string[]
+---@param kind string
+---@return string[]
+local function compatible_recipe_names(reference, recipe_names, kind)
+    if reference.type ~= "fluid" or reference.minimum_temperature == nil then
+        return recipe_names
+    end
+    local ref_lo = reference.minimum_temperature
+    local ref_hi = reference.maximum_temperature
+    local out = {}
+    for _, name in ipairs(recipe_names) do
+        local recipe = storage.virtuals.recipe[name] or prototypes.recipe[name]
+        local keep = true
+        if recipe then
+            local c_lo, c_hi = candidate_fluid_range(recipe, reference.name, kind)
+            if c_lo ~= nil then
+                if kind == "product" then
+                    -- candidate is the producer, reference the consumer
+                    keep = range_subset(c_lo, c_hi, ref_lo, ref_hi)
+                else
+                    -- ingredient / fuel: reference is the producer, candidate the consumer
+                    keep = range_subset(ref_lo, ref_hi, c_lo, c_hi)
+                end
+            end
+        end
+        if keep then
+            out[#out + 1] = name
+        end
+    end
+    return out
+end
+
 local handlers = {}
 
 ---@param event EventDataTrait
@@ -33,15 +120,20 @@ function handlers.on_init_choose_visiblity(event)
         assert()
     end
 
+    -- Visibility must reflect the temperature-filtered count, so a section that
+    -- ends up empty after filtering is hidden.
+    local allowed, recipe_names
     if kind == "product" then
-        elem.visible = dialog_tags.is_choose_product and 0 < #relation_to_recipe.recipe_for_product
+        allowed, recipe_names = dialog_tags.is_choose_product, relation_to_recipe.recipe_for_product
     elseif kind == "ingredient" then
-        elem.visible = dialog_tags.is_choose_ingredient and 0 < #relation_to_recipe.recipe_for_ingredient
+        allowed, recipe_names = dialog_tags.is_choose_ingredient, relation_to_recipe.recipe_for_ingredient
     elseif kind == "fuel" then
-        elem.visible = dialog_tags.is_choose_ingredient and 0 < #relation_to_recipe.recipe_for_fuel
+        allowed, recipe_names = dialog_tags.is_choose_ingredient, relation_to_recipe.recipe_for_fuel
     else
         assert()
     end
+    elem.visible = allowed
+        and 0 < #compatible_recipe_names(reference_typed_name, recipe_names, kind)
 end
 
 ---@param event EventDataTrait
@@ -76,6 +168,7 @@ function handlers.on_make_choose_table(event)
     else
         assert()
     end
+    recipe_names = compatible_recipe_names(choose_typed_name, recipe_names, kind)
 
     local used_recipes = flib_table.map(recipe_names, function(name)
         return assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
