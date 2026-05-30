@@ -7,6 +7,27 @@ local M = {}
 M.second_per_tick = 60
 M.tolerance = (10 ^ -6) / 2
 
+-- The IPM converges to a RELATIVE residual of M.tolerance, so the absolute
+-- noise left on a solved value of magnitude V is ~M.tolerance * V, not the bare
+-- M.tolerance. A fixed absolute pad therefore cannot clean a value before it is
+-- handed to a slot button's `number` field, whose engine formatting truncates:
+-- a true 60 that solves to 59.9999996 still renders as 59. Round AWAY that
+-- relative tail instead, to 5 significant figures (relative precision) so the
+-- result matches the flib_format.number(x, true, 5) labels and reads correctly
+-- whether the engine truncates or rounds. Rounding (not flooring/snapping)
+-- keeps genuine fractional rates intact.
+---@param value number
+---@return number
+function M.round_display(value)
+    if value == 0 then
+        return 0
+    end
+    local sign = value < 0 and -1 or 1
+    local magnitude = value * sign
+    local factor = 10 ^ (4 - math.floor(math.log(magnitude, 10)))
+    return sign * math.floor(magnitude * factor + 0.5) / factor
+end
+
 ---comment
 ---@param product ProductEx
 ---@param quality string

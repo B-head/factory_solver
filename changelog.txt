@@ -1,7 +1,12 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.2
 Date: ????
-  Changes:
+  Bugfixes:
+    - Round the product / ingredient / per-line amount slot numbers away
+      from the solver's relative residual instead of padding by a fixed
+      absolute amount. The slot's engine number formatting truncates, so a
+      true rate like 60/s that the LP solves to 59.9999996 used to read as
+      59; large throughputs were affected most.
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.1
 Date: 2026-05-30
