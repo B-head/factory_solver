@@ -1,6 +1,11 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.2
 Date: ????
+  Gui:
+    - Hide the "parameters" category from the machine presets dialog. The
+      engine auto-adds this parametrised-blueprint category to every
+      crafting machine, so its row just duplicated every real machine
+      under a meaningless heading.
   Bugfixes:
     - Round the product / ingredient / per-line amount slot numbers away
       from the solver's relative residual instead of padding by a fixed
