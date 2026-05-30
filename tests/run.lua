@@ -130,6 +130,7 @@ local case_files = {
     "lp_material_classification",
     "material_cycles",
     "problem_dump",
+    "lp_fuel_burnt_result",
 }
 
 local total, passed, failed = 0, 0, 0

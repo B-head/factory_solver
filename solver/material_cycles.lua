@@ -75,6 +75,9 @@ function M.build_material_graph(production_lines)
         for _, prod in ipairs(line.products) do
             products[#products + 1] = tn.typed_name_to_variable_name(prod)
         end
+        if line.fuel_burnt_result then
+            products[#products + 1] = tn.typed_name_to_variable_name(line.fuel_burnt_result)
+        end
 
         for _, i_var in ipairs(ingredients) do
             ensure(i_var)
@@ -228,6 +231,10 @@ function M.compute_net_flow(production_lines, scc_set)
         for _, prod in ipairs(line.products) do
             if scc_set[tn.typed_name_to_variable_name(prod)] then touches = true; break end
         end
+        if not touches and line.fuel_burnt_result
+            and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then
+            touches = true
+        end
         if not touches then
             for _, ing in ipairs(line.ingredients) do
                 if scc_set[tn.typed_name_to_variable_name(ing)] then touches = true; break end
@@ -242,6 +249,12 @@ function M.compute_net_flow(production_lines, scc_set)
                 local v = tn.typed_name_to_variable_name(prod)
                 if scc_set[v] then
                     net[v] = net[v] + prod.amount_per_second
+                end
+            end
+            if line.fuel_burnt_result then
+                local v = tn.typed_name_to_variable_name(line.fuel_burnt_result)
+                if scc_set[v] then
+                    net[v] = net[v] + line.fuel_burnt_result.amount_per_second
                 end
             end
             for _, ing in ipairs(line.ingredients) do
@@ -291,6 +304,10 @@ local function build_scc_matrix(production_lines, scc)
         end
         for _, prod in ipairs(line.products) do
             add(tn.typed_name_to_variable_name(prod), prod.amount_per_second)
+        end
+        if line.fuel_burnt_result then
+            add(tn.typed_name_to_variable_name(line.fuel_burnt_result),
+                line.fuel_burnt_result.amount_per_second)
         end
         for _, ing in ipairs(line.ingredients) do
             add(tn.typed_name_to_variable_name(ing), -ing.amount_per_second)

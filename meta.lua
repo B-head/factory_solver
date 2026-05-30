@@ -168,6 +168,7 @@ __factory_solver__storage = {}
 ---@field products NormalizedAmount[]
 ---@field ingredients NormalizedAmount[]
 ---@field fuel_ingredient NormalizedAmount?
+---@field fuel_burnt_result NormalizedAmount?
 ---@field power_per_second number
 ---@field pollution_per_second number
 

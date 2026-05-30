@@ -116,6 +116,16 @@ function M.get_total_amounts(player_index, solution)
             end
         end
 
+        -- Spent fuel (burnt_result) is a produced item, so it credits the item
+        -- totals positively -- the counterpart to the fuel_ingredient debit
+        -- above. Always an item (fluid fuels have no burnt_result), so no
+        -- type branch is needed.
+        local burnt = n.fuel_burnt_result
+        if burnt then
+            add(item_totals, tn.create_typed_name("item", burnt.name, burnt.quality),
+                burnt.amount_per_second * quantity_of_machines_required)
+        end
+
         ::continue_line::
     end
 

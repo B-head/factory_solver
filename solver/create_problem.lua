@@ -84,6 +84,29 @@ local function each_ingredient(line)
     end, nil, 0
 end
 
+---Iterate every product the line emits: real recipe products first, then the
+---fuel's burnt_result (spent fuel cell) as a trailing pseudo-product when
+---present. Mirror of each_ingredient on the production side -- the LP treats
+---the spent cell as just another produced material; the separation only exists
+---so it bypasses quality decomposition and the UI can render it apart from the
+---recipe's own products. burnt_result is always an item, so callers that filter
+---on `type == "fluid"` (temperature bridges) see it as a no-op.
+---@param line NormalizedProductionLine
+---@return fun(_: any, i: integer): integer?, NormalizedAmount?
+---@return any
+---@return integer
+local function each_product(line)
+    local n = #line.products
+    return function(_, i)
+        i = i + 1
+        if i <= n then
+            return i, line.products[i]
+        elseif i == n + 1 and line.fuel_burnt_result then
+            return i, line.fuel_burnt_result
+        end
+    end, nil, 0
+end
+
 ---For a temperature-suffixed fluid variable name ("fluid/<X>@T" / "fluid/<X>@[lo,hi]"),
 ---return the bare-fluid limit dual name ("|limit|fluid/<X>") so constraints on a
 ---temperature-agnostic fluid pick can aggregate flow across every variant.
@@ -126,7 +149,7 @@ function M.create_temperature_bridges(production_lines)
     end
 
     for _, line in ipairs(production_lines) do
-        for _, product in ipairs(line.products) do
+        for _, product in each_product(line) do
             if product.type == "fluid" and product.minimum_temperature then
                 collect(product_ranges, product.name,
                     product.minimum_temperature, product.maximum_temperature)
@@ -229,7 +252,7 @@ end
 function M.compute_reachable_materials(production_lines, extra_seeds)
     local has_producer = {} ---@type table<string, true>
     for _, line in ipairs(production_lines) do
-        for _, product in ipairs(line.products) do
+        for _, product in each_product(line) do
             has_producer[tn.typed_name_to_variable_name(product)] = true
         end
     end
@@ -263,7 +286,7 @@ function M.compute_reachable_materials(production_lines, extra_seeds)
                 end
                 if all_ingredients_reachable then
                     fired[i] = true
-                    for _, product in ipairs(line.products) do
+                    for _, product in each_product(line) do
                         local name = tn.typed_name_to_variable_name(product)
                         if not reachable[name] then
                             reachable[name] = true
@@ -330,7 +353,7 @@ function M.compute_active_lines(all_lines, constraints)
         recipe_vars[i] = recipe_var
         local bridge = is_bridge_line(line)
 
-        for _, value in ipairs(line.products) do
+        for _, value in each_product(line) do
             local material_var = tn.typed_name_to_variable_name(value)
             link(recipe_var, material_var)
             link(recipe_var, "|limit|" .. material_var)
@@ -448,6 +471,9 @@ function M.dump_normalized_lines(production_lines)
         if line.fuel_ingredient then
             out[#out + 1] = "    fuel_ingredient = " .. amount_literal(line.fuel_ingredient) .. ","
         end
+        if line.fuel_burnt_result then
+            out[#out + 1] = "    fuel_burnt_result = " .. amount_literal(line.fuel_burnt_result) .. ","
+        end
         out[#out + 1] = "    power_per_second = " .. num_literal(line.power_per_second) .. ","
         out[#out + 1] = "    pollution_per_second = " .. num_literal(line.pollution_per_second) .. ","
         out[#out + 1] = "  },"
@@ -534,7 +560,7 @@ function M.create_problem(solution_name, constraints, production_lines)
         local objective_name = tn.typed_name_to_variable_name(line.recipe_typed_name)
         local bridge = is_bridge_line(line)
 
-        for _, value in ipairs(line.products) do
+        for _, value in each_product(line) do
             local constraint_name = tn.typed_name_to_variable_name(value)
             included_products[constraint_name] = true
 

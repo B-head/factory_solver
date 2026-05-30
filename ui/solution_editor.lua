@@ -312,6 +312,39 @@ function handlers.make_production_line_table(event)
                 end
             end
 
+            -- Spent fuel (burnt_result) is a produced item, so it shares the
+            -- Products column with recipe outputs. Unlike recipe products it is
+            -- NOT quality-decomposed: the spent cell is a deterministic 1:1
+            -- byproduct of the fuel burned, not a module-quality cascade (it
+            -- lives in its own line field for exactly this reason).
+            if n.fuel_burnt_result then
+                local amount = n.fuel_burnt_result
+                local typed_name = tn.create_typed_name("item", amount.name, amount.quality)
+                local craft = tn.typed_name_to_material(typed_name)
+                local is_hidden = acc.is_hidden(craft)
+                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+
+                local def = common.create_decorated_sprite_button {
+                    typed_name = typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
+                    tags = {
+                        line_index = line_index,
+                        typed_name = typed_name,
+                        is_product = true,
+                        result_typed_name = line.recipe_typed_name,
+                        raw_amount = amount.amount_per_second,
+                    },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_production_line_inout_click,
+                        on_added = handlers.update_amount,
+                        on_amount_unit_changed = handlers.update_amount,
+                        on_calculation_changed = handlers.update_amount,
+                    },
+                }
+                flib_table.insert(buttons, def)
+            end
+
             local def = {
                 type = "table",
                 column_count = 4,

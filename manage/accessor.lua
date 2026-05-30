@@ -714,6 +714,22 @@ function M.get_fuel_emissions_multiplier(material)
     ---@diagnostic enable: param-type-mismatch
 end
 
+---The item produced when this fuel is burned (e.g. uranium-fuel-cell ->
+---used-up-uranium-fuel-cell). Only item fuels have a burnt_result; fluid /
+---virtual fuels return nil. Reading `.burnt_result` is gated on the
+---LuaItemPrototype discriminant so it never indexes a field that doesn't
+---exist on the other prototype variants (see CLAUDE.md union-typing rule).
+---@param material LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
+---@return LuaItemPrototype?
+function M.try_get_burnt_result(material)
+    ---@diagnostic disable-next-line: param-type-mismatch
+    if material.object_name == "LuaItemPrototype" then
+        ---@diagnostic disable-next-line: param-type-mismatch
+        return material.burnt_result
+    end
+    return nil
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@return EnergyType
@@ -1564,6 +1580,28 @@ function M.normalize_production_line(line, bonuses)
         }
     end
 
+    -- Spent fuel: a burning machine emits the fuel's burnt_result 1:1 with the
+    -- fuel it consumes (one uranium-fuel-cell burned -> one used-up cell). Kept
+    -- as a dedicated field rather than folded into `products` so it bypasses
+    -- pre_solve.quality_decomposition (the spent cell is a deterministic byproduct,
+    -- not a module-quality cascade) and the UI can render it apart from recipe
+    -- outputs, mirroring how fuel_ingredient sits apart from ingredients. Only
+    -- item fuels carry a burnt_result; the spent cell inherits the fuel's quality.
+    ---@type NormalizedAmount?
+    local fuel_burnt_result = nil
+    if fuel_ingredient and fuel_ingredient.type == "item" then
+        local burnt = M.try_get_burnt_result(tn.typed_name_to_material(line.fuel_typed_name))
+        if burnt then
+            ---@type NormalizedAmount
+            fuel_burnt_result = {
+                type = "item",
+                name = burnt.name,
+                quality = fuel_ingredient.quality,
+                amount_per_second = fuel_ingredient.amount_per_second,
+            }
+        end
+    end
+
     local power = M.get_power_per_second(machine, machine_quality,
         effectivity.consumption, line.fuel_typed_name)
     local pollution = M.get_pollution_per_second(machine, "pollution",
@@ -1595,6 +1633,7 @@ function M.normalize_production_line(line, bonuses)
         products = products,
         ingredients = ingredients,
         fuel_ingredient = fuel_ingredient,
+        fuel_burnt_result = fuel_burnt_result,
         power_per_second = power,
         pollution_per_second = pollution,
     }

@@ -128,6 +128,25 @@ function M.create_relation_to_recipes(force_index)
         end
     end
 
+    -- A machine burning an item fuel emits that fuel's burnt_result (spent
+    -- cell), so a recipe consuming the fuel is also a *producer* of the spent
+    -- cell. Register it under recipe_for_product so the picker / Recipe Explorer
+    -- can navigate "what produces used-up-uranium-fuel-cell" back to the
+    -- reactor. Fluid fuels have no burnt_result and never reach here.
+    ---@param fuel_item_name string
+    ---@param recipe_name string
+    ---@param is_visible boolean
+    local function register_burnt_result(fuel_item_name, recipe_name, is_visible)
+        local burnt = acc.try_get_burnt_result(prototypes.item[fuel_item_name])
+        if burnt then
+            local info = get_info("item", burnt.name)
+            flib_table.insert(info.recipe_for_product, recipe_name)
+            if is_visible then
+                info.craftable_count = info.craftable_count + 1
+            end
+        end
+    end
+
     for key, _ in pairs(prototypes.item) do
         items[key] = create_relation_table()
     end
@@ -157,6 +176,7 @@ function M.create_relation_to_recipes(force_index)
         for _, value in ipairs(cache_crafting_fuels[recipe.category]) do
             local info = get_info("item", value)
             flib_table.insert(info.recipe_for_fuel, recipe.name)
+            register_burnt_result(value, recipe.name, recipe.enabled and not recipe.hidden)
         end
 
         for _, value in ipairs(cache_crafting_fluid_fuels[recipe.category]) do
@@ -219,6 +239,9 @@ function M.create_relation_to_recipes(force_index)
             if fixed_fuel then
                 local info = get_info(fixed_fuel.type, fixed_fuel.name)
                 flib_table.insert(info.recipe_for_fuel, recipe.name)
+                if fixed_fuel.type == "item" then
+                    register_burnt_result(fixed_fuel.name, recipe.name, is_visible)
+                end
             end
 
             if acc.is_use_any_fluid_fuel(machine) then
@@ -234,6 +257,7 @@ function M.create_relation_to_recipes(force_index)
                 for _, value in ipairs(fuels) do
                     local info = get_info("item", value.name)
                     flib_table.insert(info.recipe_for_fuel, recipe.name)
+                    register_burnt_result(value.name, recipe.name, is_visible)
                 end
             end
         end
@@ -242,6 +266,7 @@ function M.create_relation_to_recipes(force_index)
             for _, value in ipairs(cache_resource_fuels[recipe.resource_category]) do
                 local info = get_info("item", value)
                 flib_table.insert(info.recipe_for_fuel, recipe.name)
+                register_burnt_result(value, recipe.name, is_visible)
             end
 
             for _, value in ipairs(cache_resource_fluid_fuels[recipe.resource_category]) do
