@@ -203,8 +203,14 @@ function handlers.make_build_totals_table(event)
 
     for _, line in ipairs(solution.production_lines) do
         if bp.can_pipette(line) then
+            -- Pad INWARD by the solver's relative residual before the ceil: the
+            -- IPM converges to a relative tolerance, so a true 3-machine line can
+            -- solve to 3.0000002 and a fixed `+ acc.tolerance` would push it to 4
+            -- (worse, the larger the count). Multiplying by (1 - acc.tolerance)
+            -- snaps that noise down to 3 while a genuine fractional excess (e.g.
+            -- 3.00003, well above the relative tolerance) still ceils to 4.
             local phys = math.ceil(save.get_quantity_of_machines_required(solution, line.recipe_typed_name)
-                + acc.tolerance)
+                * (1 - acc.tolerance))
             if 0 < phys then
                 local machine = tn.typed_name_to_machine(line.machine_typed_name)
                 bump(machines, line.machine_typed_name, phys)
