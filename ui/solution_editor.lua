@@ -359,6 +359,12 @@ function handlers.make_production_line_table(event)
             if not n.fuel_ingredient or acc.is_generator(machine) then
                 local def = {
                     type = "label",
+                    -- Rocket silos report a full-power figure: the launch
+                    -- animation toggles full / no draw in phases we can't time
+                    -- at runtime, so the real average is lower. Flag it right
+                    -- on the power cell where the inflated number is shown.
+                    tooltip = machine.type == "rocket-silo"
+                        and { "factory-solver-rocket-silo-power-note" } or nil,
                     tags = {
                         result_typed_name = line.recipe_typed_name,
                         raw_amount = n.power_per_second,
