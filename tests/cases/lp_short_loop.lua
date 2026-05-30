@@ -53,9 +53,9 @@ table.insert(cases, {
 
 table.insert(cases, {
     name = "short cyclic loop (base + short-positive) reaches a terminal state",
-    -- Mirrors fs-test-base + fs-test-short-positive: a cycle on speed-module
-    -- <-> speed-module-2 with a non-cycle input (efficiency-module) and a
-    -- non-cycle output (efficiency-module-2). This is the case 0.3.12 / 0.3.14
+    -- A cycle on speed-module <-> speed-module-2 with a non-cycle input
+    -- (efficiency-module) and a non-cycle output (efficiency-module-2). This
+    -- is the canonical short-loop topology; it is the case 0.3.12 / 0.3.14
     -- fixed; the assertion is that the LP converges (does not return
     -- "unbounded" / "unfeasible") and that the requested product comes out.
     run = function()

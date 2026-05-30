@@ -617,9 +617,8 @@ function M.create_problem(solution_name, constraints, production_lines)
             -- fabricate intermediates rather than run long recycling chains
             -- (e.g. Fulgora scrap), which produces wrong solutions. Materials
             -- stuck in dead-end cycles that the deficit heuristic did not
-            -- catch (mass-losing loops like fs-test-base + fs-test-short-
-            -- negative) keep the escape hatch — otherwise the LP can only
-            -- return all-zero.
+            -- catch (mass-losing loops with no external input) keep the
+            -- escape hatch — otherwise the LP can only return all-zero.
             local elastic_name = "|shortage_source|" .. constraint_name
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
