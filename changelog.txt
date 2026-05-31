@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.2
-Date: ????
+Date: 2026-05-31
   Gui:
     - Hide the auto-generated "parameters" category from the machine presets
       dialog, where it just duplicated every real machine.
