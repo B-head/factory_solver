@@ -27,6 +27,13 @@ if script.level and script.level.mod_name == "factory_solver" then
         smoke = require "manage/smoke"
     elseif script.level.level_name == "smoke_missing_prototype" then
         smoke = require "manage/smoke_missing_prototype"
+    elseif script.level.level_name == "smoke_rcon" then
+        -- RCON-driven smoke needs no on_player_created / on_tick hook: the
+        -- solver pump in on_tick already runs force-scoped, and the launcher
+        -- drives setup / polling over RCON. Just expose the remote interface it
+        -- calls. remote.add_interface is not persisted, so it must run on every
+        -- load -- the control.lua main chunk does, which is where we are.
+        require("manage/smoke_rcon").register()
     end
 end
 

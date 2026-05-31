@@ -1,0 +1,10 @@
+-- Marker scenario for the RCON-driven smoke test. The actual driver lives in
+-- [manage/smoke_rcon.lua](../../manage/smoke_rcon.lua), which the mod activates
+-- when script.level.level_name == "smoke_rcon" (see the gate near the top of
+-- [control.lua](../../control.lua)).
+--
+-- Scenarios run in their own Lua context with a separate `storage`, so we
+-- cannot poke at mod state from here. Keeping this file empty avoids the
+-- temptation. Launched as a dedicated server by tests/smoke_rcon.ps1:
+--   factorio.exe --start-server-load-scenario factory_solver/smoke_rcon \
+--                --rcon-bind 127.0.0.1:<port> --rcon-password <pw>
