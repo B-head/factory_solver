@@ -45,8 +45,14 @@
 
 local flib_table = require "__flib__/table"
 local fs_log = require "fs_log"
+local acc = require "manage/accessor"
+local fp_codec = require "manage/factoryplanner_codec"
+local helmod_codec = require "manage/helmod_codec"
+local preset = require "manage/preset"
+local relation = require "manage/relation"
 local report = require "manage/report"
 local save = require "manage/save"
+local solution_codec = require "manage/solution_codec"
 local tn = require "manage/typed_name"
 
 local log = fs_log.for_module("smoke_rcon")
@@ -57,11 +63,61 @@ local M = {}
 -- is present even on a dedicated server with nobody connected.
 local FORCE_INDEX = 1
 
+-- A synthetic player index for the codec import path. The interop *_to_payload
+-- converters consult a player's fuel presets (FP / Helmod omit fuel for some
+-- machines), and save.init_player_data builds those presets purely from
+-- prototypes + storage.virtuals -- it never touches game.players -- so a player
+-- that exists only in storage is enough here. The solver / read-side paths are
+-- all force-scoped and never index game.players[PLAYER_INDEX], so the absence of
+-- a real connected player is harmless.
+local PLAYER_INDEX = 1
+
 -- Fixtures. Each is `{ requires = {<mod names>}, build = function(solution) }`.
 -- `build` plants a Solution into the force's storage; the caller marks it
 -- solver_state="ready" so the on_tick pump picks it up. `requires` drives the
 -- SKIP guard in setup (see the header). Kept deliberately player-free.
 local fixtures = {}
+
+---Populate a solution with the canonical electric-furnace iron-plate line plus
+---a lower bound that forces the furnace to run. Shared by the codec round-trip
+---fixtures so each starts from the same known-good, solvable shape and only the
+---encode/decode layer under test varies.
+---@param solution Solution
+local function build_iron_plate_demand(solution)
+    ---@type ProductionLine
+    local line = {
+        recipe_typed_name = tn.create_typed_name("recipe", "iron-plate"),
+        machine_typed_name = tn.create_typed_name("machine", "electric-furnace"),
+        module_typed_names = {},
+        affected_by_beacons = {},
+    }
+    flib_table.insert(solution.production_lines, line)
+
+    ---@type Constraint
+    local constraint = {
+        type = "item",
+        name = "iron-plate",
+        quality = "normal",
+        limit_type = "lower",
+        limit_amount_per_second = 1,
+    }
+    flib_table.insert(solution.constraints, constraint)
+end
+
+---True when a payload's production_lines contain an iron-plate recipe line.
+---Used as the round-trip survival check across the lossy interop codecs (FP /
+---Helmod drop features but must preserve the core recipe identity).
+---@param payload table
+---@return boolean
+local function payload_has_iron_plate(payload)
+    for _, line in ipairs(payload.production_lines or {}) do
+        local rtn = line.recipe_typed_name
+        if rtn and rtn.name == "iron-plate" then
+            return true
+        end
+    end
+    return false
+end
 
 ---Happy path: smelt iron-plate in an electric furnace (electric, so no fuel is
 ---needed), with an upper-bound constraint on the product. Exercises pre_solve
@@ -109,6 +165,318 @@ fixtures.missing_prototype = {
             quality = "normal",
             limit_type = "upper",
             limit_amount_per_second = 0.5,
+        }
+        flib_table.insert(solution.constraints, constraint)
+    end,
+}
+
+---Virtual recipe + burner fuel + fluid temperature, end to end. iron_plate is
+---an electric, item-only real recipe, so it never touches three whole branches
+---of the read side and normalize: a virtual_recipe (manage/virtual.lua's
+---create_boiler_virtual output, normalized via get_virtual_recipe_rates rather
+---than crafting_speed), a burnt fuel ingredient (the fuel_ingredient debit in
+---report.get_total_amounts), and a temperature-tagged fluid product (the fluid
+---branch with [min,max] in the totals). A lower bound on the boiler recipe
+---forces it to run: running it costs ~source_cost (water + coal) which is far
+---below the lower bound's target_cost (2^20) elastic, so the LP genuinely
+---activates the boiler instead of parking it -- the read side then folds
+---non-zero steam / water / coal flow. Base game only (boiler / water / steam /
+---coal), so `requires` is empty. build() asserts the virtual recipe exists up
+---front so a rename or a base-game change surfaces as an ERROR rather than a
+---quietly-degraded (elastic-satisfied) solve.
+fixtures.boiler_steam = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        -- create_boiler_virtual keys the recipe <run>{entity}:{input fluid};
+        -- the base boiler is the "boiler" entity heating "water". Assert it is
+        -- present so a registry change is caught here, not hidden behind the
+        -- lower bound's elastic escape hatch.
+        local recipe_name = "<run>boiler:water"
+        assert(storage.virtuals.recipe[recipe_name],
+            "boiler virtual recipe '" .. recipe_name .. "' not registered")
+
+        ---@type ProductionLine
+        local line = {
+            recipe_typed_name = tn.create_typed_name("virtual_recipe", recipe_name),
+            machine_typed_name = tn.create_typed_name("machine", "boiler"),
+            module_typed_names = {},
+            affected_by_beacons = {},
+            -- A boiler is a burner, so is_use_fuel is true and a fuel is
+            -- required; coal exercises the solid-fuel ingredient path.
+            fuel_typed_name = tn.create_typed_name("item", "coal"),
+        }
+        flib_table.insert(solution.production_lines, line)
+
+        -- Lower-bound the boiler recipe itself (its machine-count variable),
+        -- not the steam output, so the demand is independent of the boiler's
+        -- exact target_temperature.
+        ---@type Constraint
+        local constraint = {
+            type = "virtual_recipe",
+            name = recipe_name,
+            quality = "normal",
+            limit_type = "lower",
+            limit_amount_per_second = 1,
+        }
+        flib_table.insert(solution.constraints, constraint)
+    end,
+}
+
+---Save migration: plant a *legacy-shaped* Solution -- the formats that
+---predate the current schema -- then run it through save.reinit_force_data
+---(the same call control.lua makes on_configuration_changed) and assert the
+---migration rewrote every field before solving. This is the only fixture that
+---exercises manage/save.lua's reinit_force_data + manage/typed_name.lua's
+---typed_name_migration; the other fixtures build current-format data, so the
+---migration branches would otherwise be dead in the smoke. Every shape below
+---is a real legacy form the migration code still has a branch for:
+---   * machine_typed_name.type = "virtual-machine"  -> "machine"
+---   * recipe_typed_name with no quality            -> quality = "normal"
+---   * line.module_names (string list)              -> line.module_typed_names
+---   * affected.beacon_name / .module_names         -> *_typed_name(s)
+---   * <pump>{pump}:{tile} recipe key               -> <pump>{tile}
+---   * constraint with a single .temperature field  -> [T,T] range, .temperature cleared
+---The asserts run inside build(), so a regressed migration surfaces as
+---setup() -> "ERROR: ..." (a FAIL), not a silently-degraded solve. Base-game
+---prototypes only (iron-plate / electric-furnace / speed-module / beacon /
+---steam), so `requires` is empty. The migrated solution is then left solvable
+---(a lower bound on iron-plate forces the furnace line to run) so the pump
+---still drives it to a terminal state end to end.
+fixtures.migration_legacy_shape = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        -- Legacy iron-plate line: old type tag, no quality, pre-typed-name
+        -- module / beacon lists.
+        ---@diagnostic disable-next-line: missing-fields
+        local line = {
+            recipe_typed_name = { type = "recipe", name = "iron-plate" },
+            machine_typed_name = { type = "virtual-machine", name = "electric-furnace" },
+            module_names = { "speed-module" },
+            -- beacon_quantity predates the typed-name conversion (it has been
+            -- on AffectedByBeacon since the first commit), so a real legacy
+            -- entry carried it even when beacon_name / module_names were still
+            -- the bare-string form. The migration deliberately only rewrites
+            -- the fields whose shape changed; beacon_quantity passes through.
+            affected_by_beacons = {
+                { beacon_name = "beacon", beacon_quantity = 2, module_names = { "speed-module" } },
+            },
+        }
+        flib_table.insert(solution.production_lines, line)
+
+        -- Legacy offshore-pump line: the pre-machine-picker recipe key carried
+        -- both the pump and the tile (<pump>{pump}:{tile}); reinit splits the
+        -- pump out and rekeys the recipe to <pump>{tile}.
+        ---@diagnostic disable-next-line: missing-fields
+        local pump_line = {
+            recipe_typed_name = { type = "virtual_recipe", name = "<pump>offshore-pump:water" },
+            machine_typed_name = { type = "machine", name = "offshore-pump" },
+            module_typed_names = {},
+            affected_by_beacons = {},
+        }
+        flib_table.insert(solution.production_lines, pump_line)
+
+        -- Legacy fluid constraint: the LP dropped the scalar `temperature`
+        -- field for a [min,max] range; migration must lift T to [T,T]. Upper
+        -- bound on steam (which nothing here produces) is trivially satisfied,
+        -- so it does not perturb the solve.
+        ---@diagnostic disable-next-line: missing-fields
+        local steam_constraint = {
+            type = "fluid",
+            name = "steam",
+            temperature = 165,
+            limit_type = "upper",
+            limit_amount_per_second = 10,
+        }
+        flib_table.insert(solution.constraints, steam_constraint)
+
+        -- A real demand so the migrated solution has something to solve.
+        ---@type Constraint
+        local iron_constraint = {
+            type = "item",
+            name = "iron-plate",
+            quality = "normal",
+            limit_type = "lower",
+            limit_amount_per_second = 1,
+        }
+        flib_table.insert(solution.constraints, iron_constraint)
+
+        -- Run the exact migration control.lua runs on_configuration_changed.
+        -- Force-scoped, no player -- the whole reason it is reachable headless.
+        save.reinit_force_data(FORCE_INDEX)
+
+        -- Now assert every legacy field was rewritten. Any failure raises out
+        -- of build() and becomes a setup ERROR (a FAIL), pinning the migration.
+        assert(line.machine_typed_name.type == "machine",
+            "machine type not migrated: " .. tostring(line.machine_typed_name.type))
+        assert(line.recipe_typed_name.quality == "normal",
+            "recipe quality not defaulted")
+        assert(line.module_names == nil and line.module_typed_names,
+            "line module_names not migrated to module_typed_names")
+        assert(line.module_typed_names[1] and line.module_typed_names[1].name == "speed-module",
+            "migrated line module is wrong")
+        local affected = line.affected_by_beacons[1]
+        assert(affected.beacon_name == nil and affected.beacon_typed_name
+            and affected.beacon_typed_name.name == "beacon",
+            "beacon_name not migrated to beacon_typed_name")
+        assert(affected.module_names == nil and affected.module_typed_names
+            and affected.module_typed_names[1].name == "speed-module",
+            "beacon module_names not migrated")
+        assert(pump_line.recipe_typed_name.name == "<pump>water",
+            "offshore-pump recipe key not rekeyed: " .. pump_line.recipe_typed_name.name)
+        assert(steam_constraint.minimum_temperature == 165
+            and steam_constraint.maximum_temperature == 165
+            and steam_constraint.temperature == nil,
+            "scalar temperature not lifted to a [T,T] range")
+        assert(solution.problem == nil and solution.raw_variables == nil,
+            "cached problem / warm-start not discarded by migration")
+    end,
+}
+
+---Native shared-string codec round-trip: build the iron-plate solution, run it
+---through solution_codec.encode -> decode (which also runs migrate_typed_names),
+---assert the user-input fields survive byte-for-byte, then replace the live
+---solution with the decoded payload so the pump solves the *imported* copy. The
+---native codec is lossless (it only serializes name / constraints /
+---production_lines), so this asserts an exact structural round-trip, unlike the
+---lossy interop codecs below. Base game only.
+fixtures.codec_solution_roundtrip = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        build_iron_plate_demand(solution)
+
+        local encoded = solution_codec.encode({ solution })
+        local payloads, err = solution_codec.decode(encoded)
+        assert(payloads, "native decode failed: " .. tostring(err and err[1]))
+        assert(#payloads == 1, "expected exactly one decoded payload, got " .. #payloads)
+
+        local payload = payloads[1]
+        assert(payload.name == solution.name, "name not preserved")
+        assert(#payload.production_lines == #solution.production_lines,
+            "production line count changed across round-trip")
+        assert(#payload.constraints == #solution.constraints,
+            "constraint count changed across round-trip")
+        assert(payload_has_iron_plate(payload), "iron-plate line lost in round-trip")
+        assert(payload.constraints[1].limit_type == "lower"
+            and payload.constraints[1].name == "iron-plate",
+            "constraint mangled across round-trip")
+
+        -- Solve the imported copy, not the original, so the import field shapes
+        -- (post-migrate_typed_names) are what reaches the solver.
+        solution.constraints = payload.constraints
+        solution.production_lines = payload.production_lines
+    end,
+}
+
+---Factory Planner interop round-trip: FS solution -> fp_codec.encode (FS->FP) ->
+---decode -> factory_to_payload (FP->FS) -> solve. This drives the FP mapping in
+---*both* directions through real Factorio (the layers the headless suite can't
+---reach), which the maintainer previously had to validate by hand in-game. The
+---interop codecs are intentionally lossy (FP percentage / subfloors / priority
+---product have no FS equivalent and drop with a warning), so the assertion is
+---"the core recipe identity survived", not byte equality. factory_to_payload
+---reads the player's fuel preset, so a synthetic player is seeded first (see
+---PLAYER_INDEX). Base game only.
+fixtures.codec_fp_roundtrip = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        save.init_player_data(PLAYER_INDEX)
+        build_iron_plate_demand(solution)
+
+        local encoded = fp_codec.encode({ solution })
+        local decoded, err = fp_codec.decode(encoded)
+        assert(decoded, "FP decode failed: " .. tostring(err and err[1]))
+        assert(decoded.factories and decoded.factories[1], "FP decode produced no factory")
+
+        local payload = fp_codec.factory_to_payload(decoded.factories[1], PLAYER_INDEX)
+        assert(payload_has_iron_plate(payload), "iron-plate line lost across the FP round-trip")
+
+        solution.constraints = payload.constraints
+        solution.production_lines = payload.production_lines
+    end,
+}
+
+---Helmod interop round-trip: FS solution -> helmod_codec.encode (FS->Helmod,
+---serpent.dump inner payload) -> decode (loadstring) -> model_to_payload
+---(Helmod->FS) -> solve. Same rationale as the FP fixture; Helmod's wire format
+---and conversion rules differ enough (serpent vs JSON, Model/block hierarchy,
+---getTableKey-compatible keys) that it needs its own coverage. Lossy, so the
+---assertion is core-recipe survival. Base game only.
+fixtures.codec_helmod_roundtrip = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        save.init_player_data(PLAYER_INDEX)
+        build_iron_plate_demand(solution)
+
+        local encoded = helmod_codec.encode({ solution })
+        local model, err = helmod_codec.decode(encoded)
+        assert(model, "Helmod decode failed: " .. tostring(err and err[1]))
+
+        local payload = helmod_codec.model_to_payload(model, PLAYER_INDEX)
+        assert(payload_has_iron_plate(payload), "iron-plate line lost across the Helmod round-trip")
+
+        solution.constraints = payload.constraints
+        solution.production_lines = payload.production_lines
+    end,
+}
+
+---Spent-fuel (burnt_result) crediting -- the one read-side path no other
+---fixture reaches. boiler_steam burns coal (no burnt_result) and every other
+---fixture is electric or fuel-less, so accessor.normalize_production_line's
+---fuel_burnt_result construction and report.get_total_amounts' burnt credit
+---(the spent-cell counterpart to the fuel debit) are otherwise untested. A
+---nuclear reactor (base game; type "reactor", so create_reactor_virtual emits
+---`<run>nuclear-reactor`) burns uranium-fuel-cell, whose burnt_result is
+---depleted-uranium-fuel-cell. build() asserts the normalized line credits that
+---spent cell directly (so a regressed try_get_burnt_result fails loudly here,
+---not as a silently-wrong total), then a lower bound forces the reactor to run
+---so the read side folds the credit through report. Base game only.
+fixtures.reactor_burnt_fuel = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        local recipe_name = "<run>nuclear-reactor"
+        assert(storage.virtuals.recipe[recipe_name],
+            "reactor virtual recipe '" .. recipe_name .. "' not registered")
+        local fuel = prototypes.item["uranium-fuel-cell"]
+        assert(fuel and fuel.burnt_result,
+            "uranium-fuel-cell / its burnt_result is missing -- fixture assumptions broken")
+
+        ---@type ProductionLine
+        local line = {
+            recipe_typed_name = tn.create_typed_name("virtual_recipe", recipe_name),
+            machine_typed_name = tn.create_typed_name("machine", "nuclear-reactor"),
+            module_typed_names = {},
+            affected_by_beacons = {},
+            fuel_typed_name = tn.create_typed_name("item", "uranium-fuel-cell"),
+        }
+        flib_table.insert(solution.production_lines, line)
+
+        -- Directly assert the non-obvious accessor wiring: a burning machine
+        -- emits its fuel's burnt_result 1:1 as a dedicated normalized product.
+        -- This runs pre-solve, so it pins the construction independently of the
+        -- LP. (bonuses=nil: burnt_result does not depend on research.)
+        local n = acc.normalize_production_line(line, nil)
+        assert(n.fuel_ingredient and n.fuel_ingredient.name == "uranium-fuel-cell",
+            "reactor fuel ingredient not normalized")
+        assert(n.fuel_burnt_result
+            and n.fuel_burnt_result.name == fuel.burnt_result.name,
+            "spent fuel (burnt_result) not credited as a normalized product")
+
+        -- Lower-bound the reactor recipe so the LP actually runs it (pulling
+        -- the fuel and emitting the spent cell), driving the report burnt-credit
+        -- fold under check_read_side.
+        ---@type Constraint
+        local constraint = {
+            type = "virtual_recipe",
+            name = recipe_name,
+            quality = "normal",
+            limit_type = "lower",
+            limit_amount_per_second = 1,
         }
         flib_table.insert(solution.constraints, constraint)
     end,
@@ -201,6 +569,90 @@ function M.check_read_side()
     return "OK"
 end
 
+---RCON entry point: assert the force/prototype-global cache invariants that the
+---solve path never exercises. Unlike check_read_side (per-solution report
+---totals), this is solution-independent, so the launcher calls it once per boot.
+---It builds the relation / group_infos caches (manage/relation.lua) and the
+---machine / fuel presets (manage/preset.lua) and asserts their non-obvious
+---contracts rather than merely that they don't raise:
+---  * relation: an item burned as fuel registers its burnt_result as a product
+---    of the consuming recipe (the spent-cell credit), and source/sink recipes
+---    land in the dedicated External group bucket, not the Virtual one.
+---  * preset: create_machine_presets resolves a (validated or sentinel) machine
+---    for every recipe_category -- the invariant get_machine_preset asserts on
+---    -- and get_fuel_preset dispatches by energy source: an item/heat/fluid
+---    fuel machine yields a non-nil fuel, a fuel-less machine yields nil.
+---Returns "OK" or "ERROR: <detail>". Base-game prototypes only.
+---@return string
+function M.check_force_caches()
+    local ok, err = pcall(function()
+        local rel = relation.create_relation_to_recipes(FORCE_INDEX)
+        local groups = relation.create_group_infos(FORCE_INDEX, rel)
+
+        -- relation (1): burnt_result registration. For any item consumed as a
+        -- fuel (recipe_for_fuel non-empty) that has a burnt_result, the spent
+        -- item must be registered as a product of that consumer. Base game
+        -- exercises this via the nuclear-reactor virtual recipe burning
+        -- uranium-fuel-cell -> depleted-uranium-fuel-cell. Generic over the mod
+        -- set: any fuel-with-burnt_result that something consumes is checked.
+        local checked_burnt = false
+        for name, item in pairs(prototypes.item) do
+            local burnt = item.burnt_result
+            if burnt then
+                local fuel_info = rel.item[name]
+                if fuel_info and #fuel_info.recipe_for_fuel > 0 then
+                    local burnt_info = rel.item[burnt.name]
+                    assert(burnt_info and #burnt_info.recipe_for_product > 0,
+                        "burnt_result '" .. burnt.name .. "' not registered as a product of "
+                        .. "the recipe burning '" .. name .. "'")
+                    checked_burnt = true
+                end
+            end
+        end
+        log.info("check_force_caches: burnt_result path %s",
+            checked_burnt and "exercised" or "absent on this mod set")
+
+        -- relation (2): source/sink recipes are bucketed into External, never
+        -- Virtual. The universal source/sink virtuals are always registered
+        -- (create_source_sink_virtuals), so the External counts must be > 0.
+        local external_total = 0
+        for _, g in pairs(groups.external) do
+            external_total = external_total + g.hidden_count + g.researched_count + g.unresearched_count
+        end
+        assert(external_total > 0, "no source/sink recipes landed in the External bucket")
+
+        -- preset (1): every recipe_category resolves to a non-nil machine
+        -- preset (validated craft or the unknown-entity sentinel). This is the
+        -- invariant preset.get_machine_preset's assert relies on.
+        local machine_presets = preset.create_machine_presets()
+        for category in pairs(prototypes.recipe_category) do
+            assert(machine_presets[category],
+                "create_machine_presets left category '" .. category .. "' unresolved")
+        end
+
+        -- preset (2): get_fuel_preset dispatches by energy source. Seed a
+        -- synthetic player for the preset tables, then check a burner machine
+        -- (boiler) yields a fuel and a fuel-less machine (electric-furnace)
+        -- yields nil. Guarded on prototype presence so a stripped mod set that
+        -- lacks either entity skips that leg instead of failing.
+        save.init_player_data(PLAYER_INDEX)
+        if prototypes.entity["boiler"] then
+            local boiler_fuel = preset.get_fuel_preset(PLAYER_INDEX,
+                tn.create_typed_name("machine", "boiler"))
+            assert(boiler_fuel, "get_fuel_preset returned nil for a burner (boiler)")
+        end
+        if prototypes.entity["electric-furnace"] then
+            local furnace_fuel = preset.get_fuel_preset(PLAYER_INDEX,
+                tn.create_typed_name("machine", "electric-furnace"))
+            assert(furnace_fuel == nil, "get_fuel_preset returned non-nil for a fuel-less machine")
+        end
+    end)
+    if not ok then
+        return "ERROR: force-cache check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -211,6 +663,7 @@ function M.register()
         setup = M.setup,
         state = M.state,
         check_read_side = M.check_read_side,
+        check_force_caches = M.check_force_caches,
     })
 end
 
