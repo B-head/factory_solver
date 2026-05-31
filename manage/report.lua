@@ -5,14 +5,17 @@ local tn = require "manage/typed_name"
 
 local M = {}
 
----comment
----@param player_index integer
+---Totals are pure functions of (research bonuses, solution): they take the
+---force-scoped ResearchBonuses directly rather than a player_index so they can
+---run with no player connected (the RCON smoke harness passes the force's
+---bonuses). Callers in the GUI pass save.get_research_bonuses(player_index).
+---Per-second values are returned as-is; time-scale conversion is the UI's job.
+---@param bonuses ResearchBonuses
 ---@param solution Solution
 ---@return table<string, { typed_name: TypedName, amount_per_second: number }>
 ---@return table<string, { typed_name: TypedName, amount_per_second: number }>
 ---@return table<string, { typed_name: TypedName, amount_per_second: number }>
-function M.get_total_amounts(player_index, solution)
-    local bonuses = save.get_research_bonuses(player_index)
+function M.get_total_amounts(bonuses, solution)
     ---@type table<string, { typed_name: TypedName, amount_per_second: number }>
     local item_totals = {}
     ---@type table<string, { typed_name: TypedName, amount_per_second: number }>
@@ -160,12 +163,10 @@ function M.get_total_amounts(player_index, solution)
     return item_totals, fluid_totals, virtual_totals
 end
 
----comment
----@param player_index integer
+---@param bonuses ResearchBonuses
 ---@param solution Solution
 ---@return number
-function M.get_total_power(player_index, solution)
-    local bonuses = save.get_research_bonuses(player_index)
+function M.get_total_power(bonuses, solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do
@@ -177,12 +178,10 @@ function M.get_total_power(player_index, solution)
     return total
 end
 
----comment
----@param player_index integer
+---@param bonuses ResearchBonuses
 ---@param solution Solution
 ---@return number
-function M.get_total_pollution(player_index, solution)
-    local bonuses = save.get_research_bonuses(player_index)
+function M.get_total_pollution(bonuses, solution)
     local total = 0
 
     for _, line in ipairs(solution.production_lines) do

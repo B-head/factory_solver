@@ -1,37 +1,41 @@
--- RCON-driven smoke-test driver.
+-- RCON-driven smoke-test driver -- the single in-game smoke test. It replaced
+-- the earlier per-scenario variants, which auto-ran on on_player_created and
+-- reported verdicts as SMOKE PASS/FAIL markers grepped out of
+-- factorio-current.log.
 --
--- Unlike [manage/smoke.lua](smoke.lua) and
--- [manage/smoke_missing_prototype.lua](smoke_missing_prototype.lua) -- which
--- auto-run on on_player_created and report verdicts through SMOKE PASS/FAIL
--- markers in factorio-current.log -- this driver is *pulled* from outside via a
--- remote interface over RCON. The launcher
--- [tests/smoke_rcon.ps1](../tests/smoke_rcon.ps1) boots Factorio as a dedicated
--- server (`--start-server-load-scenario factory_solver/smoke_rcon` plus
--- `--rcon-bind`/`--rcon-password`), connects over RCON, and drives the test
+-- This driver is *pulled* from outside via a remote interface over RCON. The
+-- launcher [tests/smoke_rcon.ps1](../tests/smoke_rcon.ps1) boots Factorio as a
+-- dedicated server (`--start-server-load-scenario factory_solver/smoke_rcon`
+-- plus `--rcon-bind`/`--rcon-password`), connects over RCON, and drives the test
 -- synchronously:
 --
 --   /silent-command rcon.print(remote.call("factory_solver_smoke", "setup", "iron_plate"))
 --   /silent-command rcon.print(remote.call("factory_solver_smoke", "state"))   -- poll until terminal
 --
--- This buys two things over the log-marker smoke variants:
+-- Why RCON over the old log-marker approach:
 --   * synchronous, structured request/response (no log byte-offset grepping);
 --   * many fixtures per boot (the expensive Factorio bootstrap is paid once).
 --
--- Running headless with zero players constrains what this can cover:
+-- Why a zero-player dedicated server is enough, and what it constrains:
 --   * The IPM pump in control.lua's on_tick is force-scoped
 --     (pre_solve.find_the_need_for_solve iterates game.forces, not players), so
 --     it advances a solution to a terminal solver_state with no player
---     connected. That is the path this driver exercises.
---   * Player-scoped paths -- machine-preset selection in
---     save.new_production_line, the read-side report.get_total_* helpers, and
---     the whole GUI -- are NOT reachable with no player. Fixtures therefore
---     plant the Solution table directly into the force's storage (the same
---     technique manage/smoke_missing_prototype.lua uses) and pick a machine
---     explicitly instead of going through preset selection. Read-side / GUI
---     coverage stays with the player-based smoke variants.
+--     connected. That is the core path this driver exercises.
+--   * save.new_production_line's machine-preset selection is player-scoped, so
+--     fixtures instead plant the Solution table directly into the force's
+--     storage and pick a machine explicitly.
+--   * The read-side report.get_total_* helpers take the force's ResearchBonuses
+--     directly (no player), so check_read_side exercises them here too.
+--   * The GUI is deliberately out of scope. The only engine API that can
+--     synthesise real GUI input -- a test player, cursor moves, clicks --
+--     is LuaSimulation, which is simulation-only and, per the engine, does not
+--     run a mod's control.lua unless the mod is opted in through
+--     SimulationDefinition.mods. Driving the GUI that way would be a separate
+--     harness built on brittle coordinate-based clicking, so it is left out.
 
 local flib_table = require "__flib__/table"
 local fs_log = require "fs_log"
+local report = require "manage/report"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 
@@ -144,6 +148,32 @@ function M.state()
     return tostring(solution.solver_state)
 end
 
+---RCON entry point: exercise the read-side total helpers against the current
+---solution, the path that crashed in the 0.3.13 report. report.get_total_* take
+---the force-scoped ResearchBonuses directly (no player needed), so they run
+---headless here. Returns "OK" or "ERROR: <detail>"; the launcher calls this once
+---a fixture has converged and folds the result into the verdict.
+---@return string
+function M.check_read_side()
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data and force_data.solutions
+    local _, solution = next(solutions or {})
+    if not solution then
+        return "ERROR: no solution"
+    end
+
+    local bonuses = force_data.research_bonuses
+    local ok, err = pcall(function()
+        report.get_total_amounts(bonuses, solution)
+        report.get_total_power(bonuses, solution)
+        report.get_total_pollution(bonuses, solution)
+    end)
+    if not ok then
+        return "ERROR: read-side raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -153,6 +183,7 @@ function M.register()
     remote.add_interface("factory_solver_smoke", {
         setup = M.setup,
         state = M.state,
+        check_read_side = M.check_read_side,
     })
 end
 

@@ -220,7 +220,20 @@ try {
             Start-Sleep -Milliseconds 200
         }
 
-        Write-Host "SMOKE $verdict`: [$fixture] solver_state=$state"
+        # On convergence, also exercise the read-side total helpers
+        # (report.get_total_*) -- the path that crashed in the 0.3.13 report.
+        # They take the force's ResearchBonuses directly, so they run with no
+        # player. A read-side failure flips the verdict to FAIL.
+        $readSide = $null
+        if ($verdict -eq "PASS") {
+            $readSide = Invoke-RconCommand -Stream $stream `
+                -Command "/silent-command rcon.print(remote.call('$iface','check_read_side'))"
+            if ($readSide -ne "OK") { $verdict = "FAIL" }
+        }
+
+        $detail = "solver_state=$state"
+        if ($readSide) { $detail += "; read_side=$readSide" }
+        Write-Host "SMOKE $verdict`: [$fixture] $detail"
         if ($verdict -ne "PASS") { $allPass = $false }
     }
 

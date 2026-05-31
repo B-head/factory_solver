@@ -17,24 +17,18 @@ local build_assistant = require "ui/build_assistant"
 -- flagging the global as undefined.
 local __DebugAdapter = _G["__DebugAdapter"]
 
--- Activate the in-game smoke driver only when this Factorio instance was
--- launched with --load-scenario factory_solver/<smoke-variant>. The mod's
--- normal flow is untouched otherwise. Each variant ships its own driver under
--- manage/ with the same on_player_created / on_tick shape.
-local smoke = nil
-if script.level and script.level.mod_name == "factory_solver" then
-    if script.level.level_name == "smoke" then
-        smoke = require "manage/smoke"
-    elseif script.level.level_name == "smoke_missing_prototype" then
-        smoke = require "manage/smoke_missing_prototype"
-    elseif script.level.level_name == "smoke_rcon" then
-        -- RCON-driven smoke needs no on_player_created / on_tick hook: the
-        -- solver pump in on_tick already runs force-scoped, and the launcher
-        -- drives setup / polling over RCON. Just expose the remote interface it
-        -- calls. remote.add_interface is not persisted, so it must run on every
-        -- load -- the control.lua main chunk does, which is where we are.
-        require("manage/smoke_rcon").register()
-    end
+-- Activate the RCON-driven smoke driver only when this Factorio instance was
+-- launched as a server with the factory_solver/smoke_rcon scenario (see
+-- tests/smoke_rcon.ps1). The mod's normal flow is untouched otherwise. No
+-- on_player_created / on_tick hook is needed: the solver pump in on_tick already
+-- runs force-scoped, and the launcher drives setup / polling over RCON. We just
+-- expose the remote interface it calls. remote.add_interface is not persisted,
+-- so it must run on every load -- the control.lua main chunk does, which is
+-- where we are.
+if script.level and script.level.mod_name == "factory_solver"
+    and script.level.level_name == "smoke_rcon"
+then
+    require("manage/smoke_rcon").register()
 end
 
 script.on_init(function()
@@ -110,7 +104,6 @@ script.on_event(defines.events.on_player_created, function(event)
     if __DebugAdapter then
         game.players[event.player_index].cheat_mode = true
     end
-    if smoke then smoke.on_player_created(event) end
 end)
 
 script.on_event(defines.events.on_player_changed_force, function(event)
@@ -172,8 +165,6 @@ script.on_event(defines.events.on_tick, function(event)
             end
         end
     end
-
-    if smoke then smoke.on_tick(event) end
 end)
 
 ---@param player_index integer
