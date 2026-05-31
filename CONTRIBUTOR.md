@@ -102,7 +102,7 @@ The user-facing surface exposes **categorical choices** (which recipe, target ra
 
 ## Headless testing (`tests/`)
 
-`solver/*` is pure Lua with no Factorio runtime dependencies, so the suite runs from a standalone Lua 5.2+ / LuaJIT interpreter outside Factorio. Invoked from the repo root:
+`solver/*` is pure Lua with no Factorio runtime dependencies, so the suite runs from a standalone Lua 5.2+ / LuaJIT interpreter outside Factorio. Any `lua` on your `PATH` works — there are no external rocks to install. On Windows, `winget install DEVCOM.Lua` installs Lua 5.4 and puts `lua` on `PATH`; verify with `lua -v`. Invoked from the repo root:
 
 - `lua tests/run.lua` — runs every case under [tests/cases/](tests/cases/).
 - `lua tests/run.lua -v` — same, with captured solver dumps on success too.

@@ -10,7 +10,10 @@ The reason the solver exists (LP + interior-point method, so recipe **loops** li
 
 A few habits that make working on this codebase smoother:
 
-- **Use the headless suite (`lua tests/run.lua`) as your inner loop** for any change to `solver/` or `create_problem.lua`. Don't ask the user to boot Factorio just to validate solver math — that's what the suite exists to avoid. Factorio is needed only for `manage/pre_solve.lua` folding, virtuals, migrations, and GUI; defer those checks to the smoke test or a manual run.
+- **Automated tests run in two tiers — both runnable from here without an interactive Factorio session:**
+  - **Inner loop — `lua tests/run.lua`.** The headless solver suite; pure Lua, no Factorio. Run it after any change to `solver/` or `create_problem.lua` — it's fast, so lean on it instead of asking the user to boot Factorio to validate solver math. Needs `lua` on `PATH` (stock 5.2+; on Windows `winget install DEVCOM.Lua`). `lua tests/run.lua -v` keeps solver dumps on success; `lua tests/run.lua <substr>` filters by case-file name.
+  - **Pre-merge gate — `pwsh tests/smoke_rcon.ps1`.** Boots a *headless* Factorio server and drives the solver over RCON (no GUI client, no human; you can run it yourself — it reads `factorioPath` from `.vscode/settings.json`). Covers the layers the headless suite can't: `manage/pre_solve.lua` folding, `manage/virtual.lua` generation, `manage/save.lua` migrations, and the `manage/report.lua` read-side totals. GUI is deliberately out of scope. Run it before merging changes that touch those layers. Exit 0 = all fixtures PASS.
+  - Detail (architecture, fixtures, how to add one) lives in CONTRIBUTOR.md's "Headless testing" and "In-game smoke test" sections.
 - **Don't touch `info.json`'s `version` field** unless asked. It's intentionally drift-managed by the maintainer; migrations are exercised through `on_configuration_changed`, not version bumps you make.
 - **Confirm the branch before committing.** Bug fixes targeting the released version go to `stable` first, not `main` — see CONTRIBUTOR.md's "Branching model".
 
