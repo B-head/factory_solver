@@ -1,7 +1,25 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.5.2
+Version: 0.5.3
 Date: ????
   Changes:
+---------------------------------------------------------------------------------------------------
+Version: 0.5.2
+Date: 2026-05-31
+  Gui:
+    - Hide the auto-generated "parameters" category from the machine presets
+      dialog, where it just duplicated every real machine.
+    - Note on the rocket-silo power cell's tooltip that its draw is the
+      full-power maximum, not the launch-cycle average (the launch
+      animation's phase lengths aren't readable at runtime).
+  Bugfixes:
+    - Round the amount slot numbers off the solver's relative residual
+      instead of a fixed absolute pad, so a rate like 60/s solved to
+      59.9999996 no longer truncates to 59. Large throughputs were most
+      affected.
+    - Apply a beacon's profile when scaling its module effects, so machines
+      reached by many beacons are no longer over-credited by ignoring the
+      per-beacon diminishing returns. beacon_counter ("total" vs
+      "same_type") is now honored.
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.1
 Date: 2026-05-30

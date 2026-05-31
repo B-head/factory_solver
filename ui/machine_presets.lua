@@ -37,6 +37,15 @@ function handlers.on_make_preset_tables(event)
     end
 
     for category_name, value in pairs(categories) do
+        -- The engine auto-adds the core "parameters" crafting category to every
+        -- crafting machine so parametrised blueprints can target any of them. It
+        -- holds only the parameter-N placeholder recipes (filtered out elsewhere
+        -- via .parameter), so its preset row would just duplicate every real
+        -- machine under a meaningless heading. Skip it.
+        if preset_type == "machine" and category_name == "parameters" then
+            goto continue
+        end
+
         local crafts
         if preset_type == "fuel" then
             crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]])

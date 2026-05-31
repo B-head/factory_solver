@@ -398,6 +398,12 @@ function handlers.make_production_line_table(event)
             if not n.fuel_ingredient or acc.is_generator(machine) then
                 local def = {
                     type = "label",
+                    -- Rocket silos report a full-power figure: the launch
+                    -- animation toggles full / no draw in phases we can't time
+                    -- at runtime, so the real average is lower. Flag it right
+                    -- on the power cell where the inflated number is shown.
+                    tooltip = machine.type == "rocket-silo"
+                        and { "factory-solver-rocket-silo-power-note" } or nil,
                     tags = {
                         result_typed_name = line.recipe_typed_name,
                         raw_amount = n.power_per_second,
@@ -506,11 +512,12 @@ function handlers.update_amount(event)
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    -- Inactive lines suppress the acc.tolerance pad so the slot number reads
-    -- a clean 0 rather than a microscopic tail (~1e-9) from the tolerance.
-    local inactive = is_line_inactive(solution, result_typed_name)
-    local pad = inactive and 0 or acc.tolerance
-    elem.number = fs_util.to_scale(raw_amount, player_data.time_scale) * (quantity_of_machines_required + pad)
+    -- Round away the solver's relative residual (see acc.round_display) rather
+    -- than padding by a fixed absolute amount: the slot's engine number
+    -- formatting truncates, so an unrounded near-integer rate reads one short.
+    -- An inactive line solves to 0, which round_display keeps a clean 0.
+    elem.number = acc.round_display(
+        fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required)
 end
 
 ---@param event EventDataTrait

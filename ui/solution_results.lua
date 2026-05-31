@@ -37,7 +37,7 @@ function handlers.make_final_products_table(event)
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
-            number = number + acc.tolerance,
+            number = acc.round_display(number),
             tags = {
                 line_index = nil,
                 typed_name = typed_name,
@@ -90,7 +90,7 @@ function handlers.make_basic_ingredients_table(event)
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
-            number = number + acc.tolerance,
+            number = acc.round_display(number),
             tags = {
                 line_index = nil,
                 typed_name = typed_name,

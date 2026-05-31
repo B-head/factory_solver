@@ -7,6 +7,27 @@ local M = {}
 M.second_per_tick = 60
 M.tolerance = (10 ^ -6) / 2
 
+-- The IPM converges to a RELATIVE residual of M.tolerance, so the absolute
+-- noise left on a solved value of magnitude V is ~M.tolerance * V, not the bare
+-- M.tolerance. A fixed absolute pad therefore cannot clean a value before it is
+-- handed to a slot button's `number` field, whose engine formatting truncates:
+-- a true 60 that solves to 59.9999996 still renders as 59. Round AWAY that
+-- relative tail instead, to 5 significant figures (relative precision) so the
+-- result matches the flib_format.number(x, true, 5) labels and reads correctly
+-- whether the engine truncates or rounds. Rounding (not flooring/snapping)
+-- keeps genuine fractional rates intact.
+---@param value number
+---@return number
+function M.round_display(value)
+    if value == 0 then
+        return 0
+    end
+    local sign = value < 0 and -1 or 1
+    local magnitude = value * sign
+    local factor = 10 ^ (4 - math.floor(math.log(magnitude, 10)))
+    return sign * math.floor(magnitude * factor + 0.5) / factor
+end
+
 ---comment
 ---@param product ProductEx
 ---@param quality string
@@ -1238,6 +1259,35 @@ function M.get_beacon_distribution_effectivity(beacon, quality)
     return base + level * bonus
 end
 
+---Return the diminishing-returns multiplier from a beacon's `profile` for a
+---given number of beacons reaching the receiving machine. `profile` is a 1-based
+---array of doubles sampled by the beacon count; counts past the array length
+---reuse the last entry (engine behaviour). An undefined or empty profile is the
+---engine default `{1}` — no diminishing returns, so non-Space-Age and modded
+---beacons that omit it behave as before. `beacon_count` is chosen by the caller
+---per the beacon's `beacon_counter` ("total" vs "same_type"); counts below 1
+---clamp to index 1 so the array is never indexed at 0 / nil.
+---@param beacon LuaEntityPrototype
+---@param beacon_count integer
+---@return number
+function M.get_beacon_profile_multiplier(beacon, beacon_count)
+    local profile = beacon.profile
+    if type(profile) ~= "table" then
+        return 1
+    end
+    local n = #profile
+    if n == 0 then
+        return 1
+    end
+    local index = beacon_count
+    if index < 1 then
+        index = 1
+    elseif index > n then
+        index = n
+    end
+    return profile[index]
+end
+
 ---comment
 ---@param module_typed_names table<string, TypedName>
 ---@param module_inventory_size integer
@@ -1292,12 +1342,37 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
     -- Machines that cannot receive beacon effects ignore any beacons attached
     -- to the line, so stale data on such a line never reaches the LP.
     if M.is_use_beacon(machine) then
+        -- Diminishing returns: the profile multiplier is sampled by how many
+        -- beacons reach this one machine, and beacon_counter selects the
+        -- population ("total" = every beacon on the line, "same_type" = beacons
+        -- sharing a prototype). Precompute both populations once so per-entry
+        -- work stays O(1); same_type groups by prototype name because quality
+        -- never changes which BeaconPrototype an entity is.
+        local total_beacon_count = 0
+        local same_type_count = {}
+        for _, affected_by_beacon in ipairs(affected_by_beacons) do
+            local quantity = affected_by_beacon.beacon_quantity
+            total_beacon_count = total_beacon_count + quantity
+            local beacon_typed_name = affected_by_beacon.beacon_typed_name
+            if beacon_typed_name then
+                local name = beacon_typed_name.name
+                same_type_count[name] = (same_type_count[name] or 0) + quantity
+            end
+        end
+
         for _, affected_by_beacon in ipairs(affected_by_beacons) do
             local beacon_typed_name = affected_by_beacon.beacon_typed_name
             local beacon = beacon_typed_name and M.get_beacon(beacon_typed_name.name)
             if beacon and beacon_typed_name then
+                local effect_count = total_beacon_count
+                if beacon.beacon_counter == "same_type" then
+                    effect_count = same_type_count[beacon_typed_name.name]
+                end
+                local profile_multiplier = M.get_beacon_profile_multiplier(beacon, effect_count)
+
                 local effectivity = M.get_beacon_distribution_effectivity(beacon, beacon_typed_name.quality)
                     * affected_by_beacon.beacon_quantity
+                    * profile_multiplier
                     * beacon_multiplier
                 local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
                     beacon.module_inventory_size)

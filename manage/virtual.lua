@@ -502,7 +502,11 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
             }
             flib_table.insert(crafts, space_rocket)
 
-            -- TODO Add note that power consumption is calculated to be higher.
+            -- Power ends up computed as full draw across the whole launch cycle,
+            -- but the silo toggles full / no draw through the launch animation
+            -- whose phase lengths aren't readable at runtime, so the figure is a
+            -- maximum, not the real average. Surfaced to the user as a tooltip on
+            -- the power cell in ui/solution_editor.lua.
             ---@type VirtualRecipe
             local recipe = {
                 type = "virtual_recipe",
@@ -545,7 +549,11 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                 local modify_ingredients = flib_table.deep_copy(ingredients)
                 flib_table.insert(modify_ingredients, payload)
 
-                -- TODO Add note that power consumption is calculated to be higher.
+                -- Power ends up computed as full draw across the whole launch cycle,
+                -- but the silo toggles full / no draw through the launch animation
+                -- whose phase lengths aren't readable at runtime, so the figure is a
+                -- maximum, not the real average. Surfaced to the user as a tooltip on
+                -- the power cell in ui/solution_editor.lua.
                 ---@type VirtualRecipe
                 local recipe = {
                     type = "virtual_recipe",
