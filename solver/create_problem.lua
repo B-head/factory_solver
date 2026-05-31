@@ -516,14 +516,16 @@ end
 function M.create_problem(solution_name, constraints, production_lines)
     local problem = problem_generator.new(solution_name)
 
-    -- trace-only: capture the exact input so an in-game solve can be replayed
-    -- as a headless fixture (enable with `/factory-solver-log-level trace`).
-    -- Guarded because the dumps build O(lines) strings eagerly — fs_log args
-    -- are evaluated by the caller even when the level would filter the emit.
-    if fs_log.get_level() == "trace" then
-        log.trace("-- create_problem input '%s' --", solution_name)
-        log.trace("constraints:\n%s", M.dump_constraints(constraints))
-        log.trace("normalized lines:\n%s", M.dump_normalized_lines(production_lines))
+    -- The constraints + normalized lines are the minimal data needed to replay
+    -- this in-game solve as a headless fixture, so they log at debug (the bulky
+    -- LP internals -- cost/limit/subject/primal -- sit one level lower at trace).
+    -- Guarded because the dumps build O(lines) strings eagerly: fs_log args are
+    -- evaluated by the caller even when the level would filter the emit. Enable
+    -- with `/factory-solver-log-level debug` (or trace for the LP internals too).
+    if fs_log.is_enabled("debug") then
+        log.debug("-- create_problem input '%s' --", solution_name)
+        log.debug("constraints:\n%s", M.dump_constraints(constraints))
+        log.debug("normalized lines:\n%s", M.dump_normalized_lines(production_lines))
     end
 
     local bridges = M.create_temperature_bridges(production_lines)

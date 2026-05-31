@@ -219,6 +219,23 @@ if ($controlMods) {
     }
     # Ensure requested mods appear even if absent from the dev config.
     foreach ($m in $Mods) { if (-not $names.Contains($m)) { [void]$names.Add($m) } }
+    # Close the gap: a mod present on disk but absent from the original
+    # mod-list.json is auto-enabled by Factorio (mods it doesn't find listed
+    # default to enabled). Enumerate disk mods -- folders with an info.json and
+    # name_version.zip archives -- so each gets an explicit entry and is disabled
+    # unless requested, keeping the set reproducible.
+    foreach ($d in Get-ChildItem $modsDir -Directory -ErrorAction SilentlyContinue) {
+        $info = Join-Path $d.FullName "info.json"
+        if (Test-Path $info) {
+            try { $n = (Get-Content $info -Raw | ConvertFrom-Json).name } catch { $n = $null }
+            if ($n -and -not $names.Contains($n)) { [void]$names.Add($n) }
+        }
+    }
+    foreach ($z in Get-ChildItem $modsDir -Filter *.zip -ErrorAction SilentlyContinue) {
+        if ($z.BaseName -match '^(.+)_\d+\.\d+\.\d+$' -and -not $names.Contains($Matches[1])) {
+            [void]$names.Add($Matches[1])
+        }
+    }
     # base is core and always loads; force it enabled regardless of -Mods.
     $entries = foreach ($name in $names) {
         [PSCustomObject]@{ name = $name; enabled = ($Mods -contains $name) -or ($name -eq 'base') }

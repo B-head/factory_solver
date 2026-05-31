@@ -216,6 +216,21 @@ try {
                 foreach ($m in (Get-Content $modListPath -Raw | ConvertFrom-Json).mods) { [void]$names.Add($m.name) }
             }
             foreach ($m in $Mods) { if (-not $names.Contains($m)) { [void]$names.Add($m) } }
+            # Disk mods absent from the original mod-list.json are auto-enabled by
+            # Factorio; enumerate them (folders with info.json + name_version.zip)
+            # so each is explicitly disabled unless requested. See smoke_rcon.ps1.
+            foreach ($d in Get-ChildItem $modsDir -Directory -ErrorAction SilentlyContinue) {
+                $info = Join-Path $d.FullName "info.json"
+                if (Test-Path $info) {
+                    try { $n = (Get-Content $info -Raw | ConvertFrom-Json).name } catch { $n = $null }
+                    if ($n -and -not $names.Contains($n)) { [void]$names.Add($n) }
+                }
+            }
+            foreach ($z in Get-ChildItem $modsDir -Filter *.zip -ErrorAction SilentlyContinue) {
+                if ($z.BaseName -match '^(.+)_\d+\.\d+\.\d+$' -and -not $names.Contains($Matches[1])) {
+                    [void]$names.Add($Matches[1])
+                }
+            }
             $entries = foreach ($name in $names) {
                 [PSCustomObject]@{ name = $name; enabled = ($Mods -contains $name) -or ($name -eq 'base') }
             }

@@ -29,6 +29,11 @@ if script.level and script.level.mod_name == "factory_solver"
     and script.level.level_name == "smoke_rcon"
 then
     require("manage/smoke_rcon").register()
+    -- Headless script context (no __DebugAdapter): default to debug so the RCON
+    -- tooling reads back create_problem's debug-tier reproduction data, the same
+    -- verbosity a debugger session gets. Trace (the bulky LP internals) stays
+    -- opt-in via the /factory-solver-log-level command.
+    fs_log.set_level("debug")
 end
 
 script.on_init(function()

@@ -9,7 +9,7 @@
     "package": {
         "git_publish_branch": "stable",
         "sync_portal_details": true,
-        "ignore": ["gallery/*", "tests/*", "scenarios/*"],
+        "ignore": ["gallery/*", "tests/*", "scenarios/*", "data_test.lua"],
         "gallery": [
             "gallery/Fulgora.png",
             "gallery/Gleba.png",

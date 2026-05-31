@@ -13,7 +13,9 @@ Development uses the [`justarandomgeek.factoriomod-debug`](https://marketplace.v
 
 The one piece the extension can't auto-configure is `flib`, because it lives in a separate mod. Extract the `flib` mod into the `factorio_mods/` parent folder, then add that folder to `Lua.workspace.library` in a local `.vscode/settings.json` so `__flib__/*` imports resolve in [sumneko-lua](https://github.com/LuaLS/lua-language-server). `.vscode/` is gitignored, so each contributor maintains their own copy.
 
-Under the debugger, `__DebugAdapter` is truthy. The code paths gated on it (in [control.lua](control.lua), [data.lua](data.lua), [manage/save.lua](manage/save.lua)) auto-enable cheat mode, skip the freeplay intro, unlock all qualities, expose hidden/unresearched recipes in the picker, and register the `fs-test-*` recipes (short/long/parallel loops in [data.lua](data.lua)) used to stress the LP solver against the cyclic chains that motivated the mod.
+Under the debugger, `__DebugAdapter` is truthy. The code paths gated on it (in [control.lua](control.lua) and [manage/save.lua](manage/save.lua)) auto-enable cheat mode, skip the freeplay intro, unlock all qualities, and expose hidden/unresearched recipes in the picker.
+
+The synthetic `fs-test-*` test prototypes in [data_test.lua](data_test.lua) — which exercise the virtual-recipe / accessor branches vanilla + Space Age don't cover — are gated differently. [data.lua](data.lua) `pcall`-requires the file, which is present in any dev checkout but excluded from the published mod (info.json `package.ignore`), so they load in all dev contexts (including the headless RCON smoke / console) yet never reach a shipped save. This replaced an earlier `mods["debugadapter"]` gate, which was unreachable from the RCON tooling: the debugadapter mod can't load on a server, and `--enable-unsafe-lua-debug-api` is rejected with servers.
 
 [info.json](info.json) has a `package` block consumed by factoriomod-debug's publish command (`stable` branch, gallery and `tests/` excluded from the upload).
 
@@ -23,7 +25,9 @@ Under the debugger, `__DebugAdapter` is truthy. The code paths gated on it (in [
 
 ### Logging (`fs_log.lua`)
 
-[fs_log.lua](fs_log.lua) wraps Factorio's `log()` with severity levels (`debug` / `info` / `warn` / `error`) and a per-module prefix; loggers are obtained via `fs_log.for_module("<module name>")`.
+[fs_log.lua](fs_log.lua) wraps Factorio's `log()` with severity levels (`trace` / `debug` / `info` / `warn` / `error`) and a per-module prefix; loggers are obtained via `fs_log.for_module("<module name>")`. The threshold defaults to `debug` under `__DebugAdapter` (and under the smoke_rcon scenario, set in [control.lua](control.lua)) else `info`; `/factory-solver-log-level <level>` changes it at runtime (works over RCON).
+
+Two solver levels are load-bearing for offline reproduction: [solver/create_problem.lua](solver/create_problem.lua) logs the **constraints + normalized lines** — the minimal, round-trippable input to rebuild an in-game solve as a headless `tests/cases/*.lua` fixture — at `debug`, while the bulky LP internals (cost / limit / subject-matrix / primal vectors) in [solver/linear_programming.lua](solver/linear_programming.lua) sit one level lower at `trace`. Both guard their `dump_*` calls with `fs_log.is_enabled(...)`, because the dump strings are built by the caller before `emit()` can filter on the level.
 
 ### Solver pipeline (`solver/`)
 
@@ -131,7 +135,7 @@ Runtime details:
 - **Stale lock file.** A killed run can leave `%APPDATA%/Factorio/.lock` behind. The launcher clears it on startup, but only when `Get-Process factorio` returns nothing — the lock is never yanked from a live instance.
 - **Wall-clock cost.** A headless server boots without graphics (no atlas mipmaps), so the whole run — boot, both fixtures, clean quit — is on the order of ten seconds. This is still not an inner-loop check (the headless suite is); the smoke is a pre-release / pre-merge sanity gate.
 
-Invocation: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/smoke_rcon.ps1` (PowerShell 5.1 works; JSONC comments and trailing commas are stripped before parsing `settings.json` / `launch.json` for compatibility). Exit codes: 0 = every fixture PASS (skips are not failures), 1 = a fixture FAILed (or no response), 2 = setup error (Factorio binary not found, RCON never came up). Adding a fixture is a `{ requires, build }` entry in `manage/smoke_rcon.lua` plus its name in the launcher's `$Fixtures` — no extra boot; declare any non-dependency mods it needs in `requires` so it SKIPs cleanly on a narrower `-Mods` set.
+Invocation: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/smoke_rcon.ps1` (PowerShell 5.1 works; JSONC comments and trailing commas are stripped before parsing `settings.json` / `launch.json` for compatibility). Exit codes: 0 = every fixture PASS (skips are not failures), 1 = a fixture FAILed (or no response), 2 = setup error (Factorio binary not found, RCON never came up). Adding a fixture is a `{ requires, build }` entry in `manage/smoke_rcon.lua` plus its name in the launcher's `$Fixtures` — no extra boot; declare any non-dependency mods it needs in `requires` so it SKIPs cleanly on a narrower `-Mods` set. The `fs-test-*` synthetic prototypes ([data_test.lua](data_test.lua)) are always present in a dev checkout, so a fixture may use them to exercise the virtual-recipe / accessor edge branches without any `requires`.
 
 The scenario folder is excluded from the published mod via the `package.ignore` entry in [info.json](info.json) (`scenarios/*`), alongside `gallery/*` and `tests/*`.
 

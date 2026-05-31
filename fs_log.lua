@@ -43,6 +43,18 @@ function M.get_level()
     return LEVEL_PREFIXES[threshold]:lower()
 end
 
+---Whether a call at `level` would currently reach the sink. Use it to guard the
+---construction of expensive log arguments: fs_log can't skip that work itself,
+---because the caller builds the args (a matrix / line dump, say) before emit()
+---ever sees the level.
+---@param name "trace" | "debug" | "info" | "warn" | "error"
+---@return boolean
+function M.is_enabled(name)
+    local n = LEVELS[name]
+    assert(n, "fs_log: unknown level " .. tostring(name))
+    return n >= threshold
+end
+
 ---Replace the underlying sink. Pass `nil` to restore the default
 ---(`log` in Factorio, `print` in the headless test harness). Intended for
 ---tests that need to capture emissions; production code should not call this.

@@ -153,14 +153,18 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         local b = problem:generate_limit_vector()
         local c = problem:generate_cost_vector()
 
-        log.debug("-- ready solve '%s' --", problem.name)
-        log.debug("cost <c>:\n%s", problem:dump_primal(c))
-        log.debug("limit <b>:\n%s", problem:dump_dual(b))
-        -- Subject matrix only at trace -- on real factories the dump is large
-        -- (one line per non-zero coefficient) and only needed when capturing
-        -- a fixture for the headless test suite. Stays off under both the
-        -- default info and the __DebugAdapter debug threshold.
-        log.trace("subject <A>:\n%s", problem:dump_subject_matrix())
+        -- The LP internals are bulky (the subject-matrix dump is one line per
+        -- non-zero coefficient on a real factory) and only needed when capturing
+        -- a fixture, so they log at trace -- a level below the debug-tier
+        -- reproduction input that create_problem emits. Guarded because the
+        -- dumps build large strings eagerly: fs_log args are evaluated by the
+        -- caller before emit() can filter on the level.
+        log.trace("-- ready solve '%s' --", problem.name)
+        if fs_log.is_enabled("trace") then
+            log.trace("cost <c>:\n%s", problem:dump_primal(c))
+            log.trace("limit <b>:\n%s", problem:dump_dual(b))
+            log.trace("subject <A>:\n%s", problem:dump_subject_matrix())
+        end
 
         return 1, raw_variables
     elseif type(solver_state) ~= "number" then
@@ -255,21 +259,21 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     local d_criteria = dual:euclidean_norm() / (1 + c:euclidean_norm())
     local mu_criteria = vector_sum(duality_gap) / p_degree
 
-    -- log.debug("i = %i, p_rel = %g, d_rel = %g, mu = %g",
+    -- log.trace("i = %i, p_rel = %g, d_rel = %g, mu = %g",
     --     solver_state, p_criteria, d_criteria, mu_criteria)
 
     if math.max(p_criteria, d_criteria, mu_criteria) <= tolerance then
-        log.debug("primal <x>:\n%s", problem:dump_primal(x))
-        log.debug("-- finished solve '%s' --", problem.name)
-        log.debug("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
+        if fs_log.is_enabled("trace") then log.trace("primal <x>:\n%s", problem:dump_primal(x)) end
+        log.trace("-- finished solve '%s' --", problem.name)
+        log.trace("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
 
         return "finished", problem:pack_variables(x, y, s)
     end
 
     if iterate_limit <= solver_state then
-        log.debug("primal <x>:\n%s", problem:dump_primal(x))
-        log.debug("-- unfinished solve '%s' --", problem.name)
-        log.debug("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
+        if fs_log.is_enabled("trace") then log.trace("primal <x>:\n%s", problem:dump_primal(x)) end
+        log.trace("-- unfinished solve '%s' --", problem.name)
+        log.trace("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
 
         -- Drop the partial primal so the next re-prepare warm-starts from the
         -- default (make_primal_variables fallback) rather than from a stuck-
@@ -321,9 +325,9 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         y_step, s_step, x_step = solve_step(2 ^ -12)
     end
     if has_nan(y_step) or has_nan(s_step) or has_nan(x_step) then
-        log.debug("-- unfinished solve '%s' (Cholesky lost precision) --",
+        log.trace("-- unfinished solve '%s' (Cholesky lost precision) --",
             problem.name)
-        log.debug("  iterate = %i, width = %i, height = %i",
+        log.trace("  iterate = %i, width = %i, height = %i",
             solver_state, p_degree, d_degree)
         return "unfinished", nil
     end
@@ -331,7 +335,7 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     local p_step = math.min(1, step_fraction * find_step(x, x_step))
     local d_step = math.min(1, step_fraction * find_step(s, s_step))
 
-    -- log.debug("  sigma = %g, mu = %g, p_step = %g, d_step = %g",
+    -- log.trace("  sigma = %g, mu = %g, p_step = %g, d_step = %g",
     --     centering_sigma, mu, p_step, d_step)
 
     x = x + p_step * x_step

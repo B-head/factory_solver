@@ -19,11 +19,20 @@ if not mods["base"] then
 end
 
 -- Debug-only synthetic test prototypes (LP stress recipes, fluid-temperature
--- probes, virtual-recipe edge entities) live in data_test.lua and are only
--- registered under the factoriomod-debug extension. See that file for the
--- coverage map of which create_*_virtual / accessor branch each one exercises.
-if mods["debugadapter"] then
-    require("data_test")
+-- probes, virtual-recipe edge entities) live in data_test.lua. See that file for
+-- the coverage map of which create_*_virtual / accessor branch each one
+-- exercises. The file is excluded from the published mod (info.json
+-- package.ignore), so a player build cannot load it; any dev / test checkout
+-- always does. That is what lets the headless RCON smoke (tests/smoke_rcon.ps1)
+-- reach the virtual-recipe / accessor branches vanilla + Space Age don't cover
+-- WITHOUT the factoriomod-debug extension (debugadapter can't load on a server,
+-- and --enable-unsafe-lua-debug-api is rejected with servers, so neither of
+-- those gating signals is reachable from the RCON tooling). pcall keeps the
+-- "module data_test not found" of a published build benign, but any genuine
+-- error inside data_test.lua is re-raised so dev edits stay honest.
+local ok, err = pcall(require, "data_test")
+if not ok and not tostring(err):find("module data_test not found", 1, true) then
+    error(err)
 end
 
 data:extend({

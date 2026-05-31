@@ -104,4 +104,26 @@ table.insert(cases, {
     end,
 })
 
+table.insert(cases, {
+    name = "is_enabled reports whether a level would reach the sink",
+    -- Callers guard expensive log-argument construction on this (fs_log can't,
+    -- since the args are built before emit() sees the level).
+    run = function()
+        with_capture(function()
+            fs_log.set_level("debug")
+            harness.assert_true(not fs_log.is_enabled("trace"), "trace off at debug threshold")
+            harness.assert_true(fs_log.is_enabled("debug"), "debug on at debug threshold")
+            harness.assert_true(fs_log.is_enabled("error"), "error on at debug threshold")
+
+            fs_log.set_level("trace")
+            harness.assert_true(fs_log.is_enabled("trace"), "trace on at trace threshold")
+
+            fs_log.set_level("warn")
+            harness.assert_true(not fs_log.is_enabled("info"), "info off at warn threshold")
+            harness.assert_true(fs_log.is_enabled("warn"), "warn on at warn threshold")
+        end)
+        harness.assert_true(not pcall(fs_log.is_enabled, "verbose"), "is_enabled('verbose') errors")
+    end,
+})
+
 return cases

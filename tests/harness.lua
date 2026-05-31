@@ -25,7 +25,9 @@ function M.install_log_capture()
     M.captured_output = {}
     local fs_log = require "fs_log"
     fs_log.set_sink(capture_sink)
-    fs_log.set_level("debug")
+    -- trace so -v captures the full solver dump: create_problem's debug-tier
+    -- reproduction input and the LP's trace-tier cost/limit/subject/primal.
+    fs_log.set_level("trace")
 end
 
 -- Per-case cleanup: clear the buffer and re-install the sink in case a
@@ -34,7 +36,9 @@ function M.reset_log_capture()
     M.captured_output = {}
     local fs_log = require "fs_log"
     fs_log.set_sink(capture_sink)
-    fs_log.set_level("debug")
+    -- trace so -v captures the full solver dump: create_problem's debug-tier
+    -- reproduction input and the LP's trace-tier cost/limit/subject/primal.
+    fs_log.set_level("trace")
 end
 
 function M.dump_captured(prefix)

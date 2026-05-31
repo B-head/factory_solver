@@ -3,10 +3,14 @@
 -- Debug-only synthetic prototypes for exercising factory_solver's prototype ->
 -- virtual-recipe -> pre_solve layer WITHOUT depending on any third-party mod.
 --
--- This file is require()d from data.lua only when `mods["debugadapter"]` is set
--- (i.e. running under the factoriomod-debug VS Code extension), so nothing here
--- ever reaches a shipped save. The historical inline `fs-test-*` / `fbtest-*` /
--- `fes-*` blocks that used to live in data.lua are consolidated here.
+-- This file is pcall-require()d from data.lua and excluded from the published
+-- mod via info.json `package.ignore`, so it loads in any dev checkout (including
+-- the headless RCON smoke in tests/smoke_rcon.ps1 and the console) but never
+-- reaches a shipped save. The historical inline `fs-test-*` / `fbtest-*` /
+-- `fes-*` blocks that used to live in data.lua are consolidated here. (It was
+-- gated on `mods["debugadapter"]` until that proved unreachable from the RCON
+-- tooling -- the debugadapter mod can't load on a server, and
+-- --enable-unsafe-lua-debug-api is rejected with servers.)
 --
 -- The headless suite (tests/run.lua) covers the pure-LP layer (temperature
 -- bridges, reachability, quality recycling, ...). It cannot reach virtual-recipe
@@ -21,8 +25,10 @@
 -- instead of hard-erroring at the data stage.
 --
 -- NOTE FOR FIRST LOAD: this file has no headless coverage (it is data-stage
--- only). After editing it, boot Factorio once under the debugger to confirm the
--- data stage loads clean before relying on the new prototypes.
+-- only). After editing it, boot once to confirm the data stage loads clean --
+-- `pwsh tests/console.ps1 -Run '=1'` is the quickest check (data.lua re-raises
+-- any genuine error here; only a missing-file "not found" is swallowed). The
+-- debugger works too.
 
 local raw = data.raw
 
