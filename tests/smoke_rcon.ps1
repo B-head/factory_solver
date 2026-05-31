@@ -15,12 +15,20 @@
 # the "RCON client" region below so a future cross-platform launcher could swap
 # in mcrcon / a Python helper without touching the orchestration.
 #
-# Exit codes: 0 = all fixtures PASS, 1 = a fixture FAILed (or no response),
-# 2 = setup error (Factorio not found, RCON never came up, etc).
+# Mod set: the launcher rewrites <mods>/mod-list.json to a reproducible set
+# (-Mods, default base+flib+factory_solver) and restores the original afterward.
+# The mods directory comes from .vscode/launch.json's modsPath -- the same value
+# the factoriomod-debug extension uses -- rather than being hardcoded. A fixture
+# that reads a mod's prototypes declares it in `requires` and is SKIPped (not
+# failed) when that mod isn't in the set.
+#
+# Exit codes: 0 = all fixtures PASS (skips are not failures), 1 = a fixture
+# FAILed (or no response), 2 = setup error (Factorio not found, RCON never came
+# up, etc).
 #
 # Usage:
 #   pwsh tests/smoke_rcon.ps1
-#   pwsh tests/smoke_rcon.ps1 -TimeoutSeconds 45 -Fixtures iron_plate,missing_prototype
+#   pwsh tests/smoke_rcon.ps1 -Fixtures iron_plate -Mods base,flib,factory_solver,space-age,quality,elevated-rails
 
 [CmdletBinding()]
 param(
@@ -29,12 +37,22 @@ param(
     # Seconds to wait for the server to open its RCON port after launch.
     [int] $RconStartupSeconds = 90,
     [string[]] $Fixtures = @("iron_plate", "missing_prototype"),
+    # Mods to enable for the run; everything else in mod-list.json is disabled.
+    # Default is the vanilla minimal set. Pass @() to leave mod-list.json
+    # untouched (load whatever the dev config has enabled).
+    [string[]] $Mods = @("base", "flib", "factory_solver"),
     [int] $RconPort = 27115,
     [string] $RconPassword = "smoke"
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+# Normalize -Mods to a clean string array. `powershell -File ... -Mods a,b,c`
+# binds the comma list as a SINGLE string (no split) rather than an array, which
+# would silently leave only base enabled; splitting on commas here makes both
+# comma- and space-separated forms work regardless of how -File bound them.
+$Mods = @($Mods | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 # ---------------------------------------------------------------------------
 # Settings / paths (shared shape with tests/smoke.ps1)
@@ -54,7 +72,23 @@ if (-not (Test-Path $factorio)) {
     exit 2
 }
 
-$modsDir = (Resolve-Path (Join-Path $repoRoot "..")).Path
+# The mods directory is sourced from .vscode/launch.json's modsPath -- the same
+# value factoriomod-debug uses -- so the smoke stays in lockstep with the
+# debugger config instead of hardcoding "repo parent". launch.json is JSONC, so
+# strip // line comments and trailing commas before parsing.
+$launchPath = Join-Path $repoRoot ".vscode/launch.json"
+if (-not (Test-Path $launchPath)) {
+    Write-Error "launch.json not found at $launchPath"
+    exit 2
+}
+$launchNoComments = ((Get-Content $launchPath -Raw) -split "`n" | ForEach-Object { $_ -replace '//.*$', '' }) -join "`n"
+$launch = ($launchNoComments -replace ',(\s*[}\]])', '$1') | ConvertFrom-Json
+$modsPathRaw = ($launch.configurations | Where-Object { $_.modsPath } | Select-Object -First 1).modsPath
+if (-not $modsPathRaw) {
+    Write-Error "no configuration with a modsPath in launch.json"
+    exit 2
+}
+$modsDir = (Resolve-Path ($modsPathRaw -replace [regex]::Escape('${workspaceFolder}'), $repoRoot.Path)).Path
 $logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
 
 # A dedicated server wants a server-settings file; the built-in defaults prompt
@@ -77,6 +111,7 @@ Write-Host "smoke_rcon: factorio = $factorio"
 Write-Host "smoke_rcon: mods     = $modsDir"
 Write-Host "smoke_rcon: rcon     = 127.0.0.1:$RconPort"
 Write-Host "smoke_rcon: fixtures = $($Fixtures -join ', ')"
+Write-Host "smoke_rcon: mod set  = $(if ($Mods.Count) { $Mods -join ', ' } else { '(dev config unchanged)' })"
 
 # ---------------------------------------------------------------------------
 # RCON client (Source RCON protocol over TCP, .NET sockets, no dependencies)
@@ -158,6 +193,40 @@ if ((Test-Path $lockFile) -and -not (Get-Process -Name "factorio" -ErrorAction S
     Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 }
 
+# --- Mod set control --------------------------------------------------------
+# Factorio reads enable/disable state from <mod-directory>/mod-list.json. To run
+# a known, reproducible set we rewrite that file (requested mods enabled, the
+# rest disabled) and restore it in the finally block. Because the directory is
+# the shared dev mods folder, the original is backed up to a .smoke-bak sibling;
+# a .smoke-bak left over by a crashed run is restored on startup before we touch
+# anything, so the dev config is never lost. -Mods @() opts out entirely.
+$modListPath = Join-Path $modsDir "mod-list.json"
+$modListBak = "$modListPath.smoke-bak"
+$controlMods = $Mods.Count -gt 0
+$modListHadOriginal = $false
+
+if (Test-Path $modListBak) {
+    Write-Host "smoke_rcon: restoring mod-list.json from a prior run's backup"
+    Move-Item -Force $modListBak $modListPath
+}
+
+if ($controlMods) {
+    $modListHadOriginal = Test-Path $modListPath
+    $names = New-Object System.Collections.Generic.List[string]
+    if ($modListHadOriginal) {
+        Copy-Item $modListPath $modListBak -Force
+        foreach ($m in (Get-Content $modListPath -Raw | ConvertFrom-Json).mods) { [void]$names.Add($m.name) }
+    }
+    # Ensure requested mods appear even if absent from the dev config.
+    foreach ($m in $Mods) { if (-not $names.Contains($m)) { [void]$names.Add($m) } }
+    # base is core and always loads; force it enabled regardless of -Mods.
+    $entries = foreach ($name in $names) {
+        [PSCustomObject]@{ name = $name; enabled = ($Mods -contains $name) -or ($name -eq 'base') }
+    }
+    ([PSCustomObject]@{ mods = @($entries) } | ConvertTo-Json -Depth 5) |
+        Set-Content -Path $modListPath -Encoding utf8
+}
+
 $proc = Start-Process -FilePath $factorio -ArgumentList $arguments -PassThru -NoNewWindow
 
 $client = $null
@@ -193,9 +262,16 @@ try {
     # --- Drive each fixture ------------------------------------------------
     $iface = "factory_solver_smoke"
     $allPass = $true
+    $skipCount = 0
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"
+        if ($setup -match '^SKIP:') {
+            # A required mod isn't in this run's set -- trimmed coverage, not a failure.
+            Write-Host "SMOKE SKIP: [$fixture] $($setup -replace '^SKIP:\s*', '')"
+            $skipCount++
+            continue
+        }
         if ($setup -notmatch '^OK:') {
             Write-Host "SMOKE FAIL: [$fixture] setup -> $setup"
             $allPass = $false
@@ -237,6 +313,9 @@ try {
         if ($verdict -ne "PASS") { $allPass = $false }
     }
 
+    if ($skipCount -gt 0) {
+        Write-Host "smoke_rcon: $skipCount of $($Fixtures.Count) fixtures skipped (required mods not in the set)"
+    }
     $exitCode = if ($allPass) { 0 } else { 1 }
 }
 catch {
@@ -266,6 +345,15 @@ finally {
     # scenario, so there is nothing of the user's to clobber.
     $smokeSave = Join-Path $env:APPDATA "Factorio/saves/smoke_rcon.zip"
     if (Test-Path $smokeSave) { Remove-Item $smokeSave -Force -ErrorAction SilentlyContinue }
+
+    # Restore the dev mod-list.json we rewrote for this run.
+    if ($controlMods) {
+        if (Test-Path $modListBak) {
+            Move-Item -Force $modListBak $modListPath
+        } elseif (-not $modListHadOriginal) {
+            Remove-Item $modListPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 exit $exitCode

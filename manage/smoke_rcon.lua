@@ -32,6 +32,16 @@
 --     run a mod's control.lua unless the mod is opted in through
 --     SimulationDefinition.mods. Driving the GUI that way would be a separate
 --     harness built on brittle coordinate-based clicking, so it is left out.
+--
+-- Adding a fixture: add a `{ requires = {...}, build = function(solution) ... }`
+-- entry to `fixtures` below and its name to the launcher's $Fixtures. `requires`
+-- lists the mods whose prototype definitions the fixture reads; setup() returns
+-- "SKIP: ..." (not a failure) when one is missing from script.active_mods, so a
+-- fixture that needs Space Age is simply skipped on a vanilla mod set rather than
+-- failing. The smoke's mod set is variable (tests/smoke_rcon.ps1's -Mods), so
+-- guard every mod you touch this way -- including official ones (space-age /
+-- quality / elevated-rails). The only names you may omit are factory_solver's
+-- hard info.json dependencies (base, flib), which are always present.
 
 local flib_table = require "__flib__/table"
 local fs_log = require "fs_log"
@@ -47,65 +57,82 @@ local M = {}
 -- is present even on a dedicated server with nobody connected.
 local FORCE_INDEX = 1
 
--- Fixture builders. Each plants a Solution into the force's storage; the caller
--- marks it solver_state="ready" so the on_tick pump picks it up. Kept
--- deliberately player-free (see the header).
+-- Fixtures. Each is `{ requires = {<mod names>}, build = function(solution) }`.
+-- `build` plants a Solution into the force's storage; the caller marks it
+-- solver_state="ready" so the on_tick pump picks it up. `requires` drives the
+-- SKIP guard in setup (see the header). Kept deliberately player-free.
 local fixtures = {}
 
 ---Happy path: smelt iron-plate in an electric furnace (electric, so no fuel is
 ---needed), with an upper-bound constraint on the product. Exercises pre_solve
----folding plus the LP end to end.
----@param solution Solution
-function fixtures.iron_plate(solution)
-    ---@type ProductionLine
-    local line = {
-        recipe_typed_name = tn.create_typed_name("recipe", "iron-plate"),
-        machine_typed_name = tn.create_typed_name("machine", "electric-furnace"),
-        module_typed_names = {},
-        affected_by_beacons = {},
-    }
-    flib_table.insert(solution.production_lines, line)
+---folding plus the LP end to end. Base-game prototypes only, so `requires` is
+---empty (base is a hard dependency, never guarded).
+fixtures.iron_plate = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        ---@type ProductionLine
+        local line = {
+            recipe_typed_name = tn.create_typed_name("recipe", "iron-plate"),
+            machine_typed_name = tn.create_typed_name("machine", "electric-furnace"),
+            module_typed_names = {},
+            affected_by_beacons = {},
+        }
+        flib_table.insert(solution.production_lines, line)
 
-    save.new_constraint(solution, tn.create_typed_name("item", "iron-plate"))
-end
+        save.new_constraint(solution, tn.create_typed_name("item", "iron-plate"))
+    end,
+}
 
 ---Missing-prototype fallback: a Solution pointing at machine / recipe / fuel
 ---names that no loaded mod provides, so the entity-unknown / recipe-unknown /
 ---item-unknown fallbacks in manage/typed_name.lua are exercised through a full
----solve. Mirrors the fixture in manage/smoke_missing_prototype.lua; the
----read-side report exercise from that driver is player-scoped and stays there.
----@param solution Solution
-function fixtures.missing_prototype(solution)
-    ---@type ProductionLine
-    local line = {
-        recipe_typed_name = { type = "recipe", name = "fs-missing-recipe", quality = "normal" },
-        machine_typed_name = { type = "machine", name = "fs-missing-machine", quality = "normal" },
-        module_typed_names = {},
-        affected_by_beacons = {},
-        fuel_typed_name = { type = "item", name = "fs-missing-fuel", quality = "normal" },
-    }
-    flib_table.insert(solution.production_lines, line)
+---solve. The names are intentionally fictional, so there is nothing to require.
+fixtures.missing_prototype = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        ---@type ProductionLine
+        local line = {
+            recipe_typed_name = { type = "recipe", name = "fs-missing-recipe", quality = "normal" },
+            machine_typed_name = { type = "machine", name = "fs-missing-machine", quality = "normal" },
+            module_typed_names = {},
+            affected_by_beacons = {},
+            fuel_typed_name = { type = "item", name = "fs-missing-fuel", quality = "normal" },
+        }
+        flib_table.insert(solution.production_lines, line)
 
-    ---@type Constraint
-    local constraint = {
-        type = "item",
-        name = "fs-missing-product",
-        quality = "normal",
-        limit_type = "upper",
-        limit_amount_per_second = 0.5,
-    }
-    flib_table.insert(solution.constraints, constraint)
-end
+        ---@type Constraint
+        local constraint = {
+            type = "item",
+            name = "fs-missing-product",
+            quality = "normal",
+            limit_type = "upper",
+            limit_amount_per_second = 0.5,
+        }
+        flib_table.insert(solution.constraints, constraint)
+    end,
+}
 
 ---RCON entry point: clear any prior solution, build the named fixture, and hand
 ---it to the pump. Returns a status string the launcher reads via rcon.print --
----"OK: <solution name>" or "ERROR: <detail>".
+---"OK: <solution name>", "SKIP: <detail>" (a required mod isn't loaded), or
+---"ERROR: <detail>".
 ---@param fixture_name string
 ---@return string
 function M.setup(fixture_name)
-    local builder = fixtures[fixture_name]
-    if not builder then
+    local fixture = fixtures[fixture_name]
+    if not fixture then
         return "ERROR: unknown fixture '" .. tostring(fixture_name) .. "'"
+    end
+
+    -- Guard: a fixture that reads prototypes from a mod which isn't loaded is
+    -- skipped, not failed, so narrowing the mod set (smoke_rcon.ps1 -Mods) trims
+    -- coverage instead of going red.
+    for _, mod_name in ipairs(fixture.requires) do
+        if not script.active_mods[mod_name] then
+            return "SKIP: fixture '" .. fixture_name .. "' requires mod '" .. mod_name .. "' (not loaded)"
+        end
     end
 
     save.init_force_data(FORCE_INDEX)
@@ -121,7 +148,7 @@ function M.setup(fixture_name)
     local solution_name = save.new_solution(solutions, "smoke_rcon")
     local solution = assert(solutions[solution_name])
 
-    local ok, err = pcall(builder, solution)
+    local ok, err = pcall(fixture.build, solution)
     if not ok then
         return "ERROR: fixture '" .. fixture_name .. "' raised: " .. tostring(err)
     end
