@@ -61,6 +61,32 @@ function handlers.on_make_constraints_table(event)
 
     for index, data in ipairs(solution.constraints) do
         do
+            local def = {
+                type = "flow",
+                direction = "vertical",
+                {
+                    type = "sprite-button",
+                    style = "mini_button",
+                    sprite = "utility/speed_up",
+                    tags = { constraint_index = index, direction = "up" },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_move_constraint_click,
+                    },
+                },
+                {
+                    type = "sprite-button",
+                    style = "mini_button",
+                    sprite = "utility/speed_down",
+                    tags = { constraint_index = index, direction = "down" },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_move_constraint_click,
+                    },
+                },
+            }
+            fs_util.add_gui(elem, def)
+        end
+
+        do
             local typed_name = tn.create_typed_name(
                 data.type, data.name, data.quality,
                 data.minimum_temperature, data.maximum_temperature)
@@ -217,6 +243,39 @@ function handlers.on_limit_type_changed(event)
 end
 
 ---@param event EventData.on_gui_click
+function handlers.on_move_constraint_click(event)
+    local tags = event.element.tags
+    local solution = assert(save.get_selected_solution(event.player_index))
+    local from_constraint_index = tags.constraint_index --[[@as integer]]
+    local direction = tags.direction
+
+    if direction == "up" then
+        local to_constraint_index
+        if event.shift then
+            to_constraint_index = 1
+        elseif event.control then
+            to_constraint_index = from_constraint_index - 5
+        else
+            to_constraint_index = from_constraint_index - 1
+        end
+        save.move_constraint(solution, from_constraint_index, to_constraint_index)
+    elseif direction == "down" then
+        local to_constraint_index
+        if event.shift then
+            to_constraint_index = #solution.constraints
+        elseif event.control then
+            to_constraint_index = from_constraint_index + 5
+        else
+            to_constraint_index = from_constraint_index + 1
+        end
+        save.move_constraint(solution, from_constraint_index, to_constraint_index)
+    end
+
+    local root = assert(fs_util.find_upper(event.element, "factory_solver_main_window"))
+    fs_util.dispatch_to_subtree(root, "on_constraint_changed")
+end
+
+---@param event EventData.on_gui_click
 function handlers.on_remove_constraint_click(event)
     local tags = event.element.tags
     local solution = assert(save.get_selected_solution(event.player_index))
@@ -243,7 +302,7 @@ return {
     {
         type = "table",
         style = "factory_solver_constraints_table",
-        column_count = 4,
+        column_count = 5,
         draw_horizontal_lines = true,
         handler = {
             on_added = handlers.on_make_constraints_table,

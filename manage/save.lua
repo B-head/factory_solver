@@ -577,12 +577,6 @@ end
 
 ---comment
 ---@param solution Solution
-function M.sort_constraints(solution)
-    -- TODO
-end
-
----comment
----@param solution Solution
 ---@param typed_name TypedName
 function M.new_constraint(solution, typed_name)
     local constraints = solution.constraints
@@ -613,7 +607,6 @@ function M.new_constraint(solution, typed_name)
     }
     flib_table.insert(constraints, add_data)
 
-    M.sort_constraints(solution)
     solution.solver_state = "ready"
 end
 
@@ -624,7 +617,6 @@ function M.delete_constraint(solution, constraint_index)
     local constraints = solution.constraints
     flib_table.remove(constraints, constraint_index)
 
-    M.sort_constraints(solution)
     solution.solver_state = "ready"
 end
 
@@ -638,7 +630,6 @@ function M.update_constraint(solution, constraint_index, data)
         data,
     }
 
-    M.sort_constraints(solution)
     solution.solver_state = "ready"
 end
 
@@ -906,6 +897,21 @@ function M.move_production_line(solution, from_line_index, to_line_index)
 
     local temp = flib_table.remove(production_lines, from_line_index)
     flib_table.insert(production_lines, to_line_index, temp)
+end
+
+---comment
+---@param solution Solution
+---@param from_constraint_index integer
+---@param to_constraint_index integer
+function M.move_constraint(solution, from_constraint_index, to_constraint_index)
+    local constraints = solution.constraints
+    local tail = #constraints
+
+    from_constraint_index = flib_math.clamp(from_constraint_index, 1, tail)
+    to_constraint_index = flib_math.clamp(to_constraint_index, 1, tail)
+
+    local temp = flib_table.remove(constraints, from_constraint_index)
+    flib_table.insert(constraints, to_constraint_index, temp)
 end
 
 return M

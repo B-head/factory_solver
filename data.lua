@@ -383,7 +383,7 @@ styles.factory_solver_limit_amount_textfield = {
 
 styles.factory_solver_limit_type_dropdown = {
     type = "dropdown_style",
-    width = 160,
+    width = 136,
     top_margin = 2,
 }
 
