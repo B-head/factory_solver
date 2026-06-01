@@ -52,6 +52,8 @@ function M.create_virtuals()
     local planet_index = M.build_planet_index()
 
     for _, entity in pairs(prototypes.entity) do
+        if entity.parameter then goto continue end
+
         local result_crafts = {}
         if entity.type == "rocket-silo" then
             result_crafts = M.create_rocket_silo_virtual(entity)
@@ -90,6 +92,8 @@ function M.create_virtuals()
             local joined_category = acc.join_categories(fuel_categories)
             fuel_categories_dictionary[joined_category] = fuel_categories
         end
+
+        ::continue::
     end
 
     for _, tile in pairs(prototypes.tile) do
@@ -588,7 +592,9 @@ function M.create_boiler_virtual(boiler_prototype)
         flib_table.insert(candidates, input_filter)
     else
         for _, fluid_prototype in pairs(prototypes.fluid) do
-            flib_table.insert(candidates, fluid_prototype)
+            if not fluid_prototype.parameter then
+                flib_table.insert(candidates, fluid_prototype)
+            end
         end
     end
 

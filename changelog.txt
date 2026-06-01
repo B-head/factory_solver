@@ -10,6 +10,13 @@ Date: ????
       best case. Temperatures above the machine's energy-conversion cap are
       still offered (the excess heat is wasted, as in-game).
   Bugfixes:
+    - Skip parameter prototypes when generating boiler virtual recipes. A
+      boiler with no input-fluid filter enumerated every fluid as a candidate,
+      including the placeholder "parameter" fluids used by blueprint
+      parameterization, so spurious <run>boiler:<parameter-fluid> recipes
+      leaked into the picker. Parameter fluids (and parameter source entities)
+      are now excluded, matching the existing filtering on the recipe/item/
+      fluid paths.
     - Honor a crafting machine's fixed_recipe lock for every machine, not just
       the rocket-silo. A machine the engine locks to one recipe is now offered
       only for that recipe, and a recipe is offered only the machines that can
