@@ -33,6 +33,78 @@
 local raw = data.raw
 
 -- ============================================================================
+-- Dedicated display + crafting buckets.
+--
+-- Every prototype defined in this file is deep-copied from a vanilla one and so
+-- inherits that source's item-subgroup (and, for the entity copies, the source
+-- entity's subgroup). In factory_solver's group/subgroup pickers that scatters
+-- the synthetic prototypes through the real groups, intermixed with whatever
+-- other mods are loaded -- pure noise. So `extend_test()` (used in place of
+-- `data:extend` throughout this file) stamps a single dedicated `fs-test` item-subgroup
+-- (under the vanilla "other" group) onto everything it adds, collecting them in
+-- one place, and marks each `hidden = true` so they stay out of the default
+-- pickers entirely (factory_solver has a toggle to show hidden prototypes when
+-- the test data is actually wanted). recipe-category / item-subgroup prototypes
+-- are skipped (they carry neither field).
+--
+-- The test crafting categories below replace the vanilla crafting_categories the
+-- test MACHINES used to borrow. A machine that kept "crafting" / "crafting-with-
+-- fluid" surfaced as a selectable option for every real recipe in those
+-- categories (get_machines_in_category returns all entities with the category);
+-- moving them onto dedicated categories -- with the test recipes they need to
+-- stay assignable -- keeps them out of vanilla machine lists.
+-- ============================================================================
+
+-- Meta prototypes that carry neither subgroup nor hidden, so the stamping below
+-- skips them.
+local NO_STAMP = { ["recipe-category"] = true, ["item-subgroup"] = true, ["item-group"] = true }
+
+---Drop-in for `data:extend`, distinct in name so the stamping side effect isn't
+---mistaken for a plain `data:extend`. Files every prototype under the dedicated
+---`fs-test` subgroup and marks it `hidden = true` (factory_solver can toggle
+---hidden prototypes back into view) before registering it.
+---@param protos table[]
+local function extend_test(protos)
+    for _, p in ipairs(protos) do
+        if not NO_STAMP[p.type] then
+            p.subgroup = "fs-test"
+            p.hidden = true
+        end
+    end
+    data:extend(protos)
+end
+
+extend_test({
+    -- group "other" is a vanilla item-group (it already backs the heat /
+    -- research-progress virtuals in manage/virtual.lua).
+    { type = "item-subgroup", name = "fs-test", group = "other", order = "z" },
+    -- Power / fuel-math test machines (FES / burner / void / heat) live here so
+    -- they can be assigned to fs-test-machine-recipe without ever appearing in a
+    -- vanilla recipe's machine list.
+    { type = "recipe-category", name = "fs-test-machine" },
+    -- Fluid-temperature edge recipes (exact / split) live here, crafted only by
+    -- the dedicated fs-test-fluid-crafter below.
+    { type = "recipe-category", name = "fs-test-crafting-with-fluid" },
+})
+
+-- A plain recipe the §2 / §2b power-test machines can craft, so their fuel /
+-- power / pollution math runs through the solver without borrowing a vanilla
+-- recipe (which would drag the test machines into that recipe's machine list).
+if raw.item and raw.item["iron-plate"] and raw.item["copper-plate"] then
+    extend_test({
+        {
+            type = "recipe",
+            name = "fs-test-machine-recipe",
+            category = "fs-test-machine",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
+            results = { { type = "item", name = "copper-plate", amount = 1 } },
+        },
+    })
+end
+
+-- ============================================================================
 -- 0. Synthetic dependency materials/items used by the entity groups below.
 -- ============================================================================
 
@@ -67,7 +139,7 @@ if raw.fluid and raw.fluid["water"] then
     hot.default_temperature = 15
     hot.max_temperature = 1e7
 
-    data:extend({ fuel_gas, uncookable, hot })
+    extend_test({ fuel_gas, uncookable, hot })
 end
 
 -- A launchable item (carries rocket_launch_products): required so the
@@ -79,7 +151,7 @@ if raw.item and raw.item["iron-plate"] then
     launchable.name = "fs-test-launchable"
     launchable.localised_name = "fs-test-launchable"
     launchable.rocket_launch_products = { { type = "item", name = "iron-plate", amount = 1 } }
-    data:extend({ launchable })
+    extend_test({ launchable })
 end
 
 -- ============================================================================
@@ -126,6 +198,10 @@ local function make_fes_test(name, temp_field, temp_value)
     e.minable = nil
     e.next_upgrade = nil
     e.placeable_by = nil
+    -- Off the vanilla crafting categories (assembling-machine-2's default) so the
+    -- probe never appears as an option for real recipes; §8a re-points this at its
+    -- own isolated category.
+    e.crafting_categories = { "fs-test-machine" }
     e.energy_usage = "100kW"
     e.energy_source = {
         type = "fluid",
@@ -146,7 +222,7 @@ local function make_fes_test(name, temp_field, temp_value)
 end
 
 if raw.generator and raw.generator["steam-engine"] then
-    data:extend({
+    extend_test({
         -- Control: minimum_temperature is the confirmed acceptance gate.
         make_fbtest("fbtest-min-100", "minimum_temperature", 100),
         -- Confirmed: maximum_temperature gates the same way.
@@ -157,20 +233,21 @@ if raw.generator and raw.generator["steam-engine"] then
 end
 
 if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"] then
-    data:extend({
+    extend_test({
         make_fes_test("fes-min-100", "minimum_temperature", 100),
         make_fes_test("fes-max-100", "maximum_temperature", 100),
     })
     -- Both-bounded FluidEnergySource fuel window.
     local fes_window = make_fes_test("fes-window-100-300", "minimum_temperature", 100)
     fes_window.energy_source.fluid_box.maximum_temperature = 300
-    data:extend({ fes_window })
+    extend_test({ fes_window })
 end
 
 -- ============================================================================
--- 2. FluidEnergySource crafting-machine fuel-mode variants. assembling-machine-2
---    keeps its default crafting categories, so any fluid-using recipe can be
---    assigned one of these machines to drive the fuel math through the solver.
+-- 2. FluidEnergySource crafting-machine fuel-mode variants. Each is moved onto
+--    the isolated fs-test-machine category and assigned fs-test-machine-recipe,
+--    so it can be selected for that recipe to drive the fuel math through the
+--    solver without polluting any vanilla recipe's machine list.
 -- ============================================================================
 
 if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"]
@@ -182,6 +259,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         e.minable = nil
         e.next_upgrade = nil
         e.placeable_by = nil
+        e.crafting_categories = { "fs-test-machine" }
         e.energy_usage = "100kW"
         return e
     end
@@ -241,7 +319,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         },
     }
 
-    data:extend({ burns, noscale, anyfluid })
+    extend_test({ burns, noscale, anyfluid })
 end
 
 -- ============================================================================
@@ -249,6 +327,8 @@ end
 --     is electric in vanilla; these swap its energy_source to exercise the
 --     burner / void / heat branches of get_energy_source_type, is_use_fuel,
 --     try_get_fuel_categories, try_get_fixed_fuel and the power/pollution math.
+--     Like §2 they sit on the isolated fs-test-machine category and craft
+--     fs-test-machine-recipe.
 -- ============================================================================
 
 if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"] then
@@ -259,6 +339,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         e.minable = nil
         e.next_upgrade = nil
         e.placeable_by = nil
+        e.crafting_categories = { "fs-test-machine" }
         e.energy_usage = "100kW"
         return e
     end
@@ -299,7 +380,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         },
     }
 
-    data:extend({ multi_burner, void_cm, heat_cm })
+    extend_test({ multi_burner, void_cm, heat_cm })
 end
 
 -- ============================================================================
@@ -335,7 +416,7 @@ if raw.generator and raw.generator["steam-engine"] then
     genburn.fluid_box.minimum_temperature = nil
     genburn.fluid_box.maximum_temperature = nil
 
-    data:extend({ genany, genburn })
+    extend_test({ genany, genburn })
 end
 
 -- ============================================================================
@@ -375,7 +456,7 @@ if raw.generator and raw.generator["steam-engine"] then
         -- the steam-engine's horizontal animation so the entity renders.
         animation = src.horizontal_animation,
     }
-    data:extend({ bg })
+    extend_test({ bg })
 end
 
 -- ============================================================================
@@ -396,7 +477,7 @@ if raw.boiler and raw.boiler["boiler"] then
         universal_heater.mode = "heat-fluid-inside"
         universal_heater.fluid_box.filter = nil
         universal_heater.output_fluid_box.filter = nil
-        data:extend({ universal_heater })
+        extend_test({ universal_heater })
     end
 
     -- heat-fluid-inside WITH an input filter: the filtered counterpart of the
@@ -409,7 +490,7 @@ if raw.boiler and raw.boiler["boiler"] then
     heat_inside.placeable_by = nil
     heat_inside.mode = "heat-fluid-inside"
     heat_inside.fluid_box.filter = "water"
-    data:extend({ heat_inside })
+    extend_test({ heat_inside })
 
     -- output-to-separate-pipe with NO output filter: create_boiler_virtual's
     -- `output_fluid = output_filter or input_fluid` falls to the input fluid, so
@@ -423,7 +504,7 @@ if raw.boiler and raw.boiler["boiler"] then
     no_output_filter.placeable_by = nil
     no_output_filter.fluid_box.filter = "water"
     no_output_filter.output_fluid_box.filter = nil
-    data:extend({ no_output_filter })
+    extend_test({ no_output_filter })
 
     -- "Physically impossible to heat": a heat-fluid-inside boiler on a fluid
     -- whose default_temperature == max_temperature, so delta_t == 0 and the
@@ -438,7 +519,7 @@ if raw.boiler and raw.boiler["boiler"] then
         uncookable_boiler.mode = "heat-fluid-inside"
         uncookable_boiler.fluid_box.filter = "fs-test-uncookable"
         uncookable_boiler.output_fluid_box.filter = "fs-test-uncookable"
-        data:extend({ uncookable_boiler })
+        extend_test({ uncookable_boiler })
     end
 end
 
@@ -462,7 +543,7 @@ if raw["offshore-pump"] and raw["offshore-pump"]["offshore-pump"] then
     pump_water.next_upgrade = nil
     pump_water.placeable_by = nil
     pump_water.fluid_box.filter = "water"
-    data:extend({ pump_water })
+    extend_test({ pump_water })
 
     -- Negative control: filtered to a REAL fluid that no tile produces
     -- (lubricant is crafted from heavy-oil, never pumped). The pump references a
@@ -478,7 +559,7 @@ if raw["offshore-pump"] and raw["offshore-pump"]["offshore-pump"] then
         pump_lubricant.next_upgrade = nil
         pump_lubricant.placeable_by = nil
         pump_lubricant.fluid_box.filter = "lubricant"
-        data:extend({ pump_lubricant })
+        extend_test({ pump_lubricant })
     end
 end
 
@@ -498,7 +579,7 @@ if raw["rocket-silo"] and raw["rocket-silo"]["rocket-silo"] then
     fixed_silo.next_upgrade = nil
     fixed_silo.placeable_by = nil
     fixed_silo.fixed_recipe = "rocket-part"
-    data:extend({ fixed_silo })
+    extend_test({ fixed_silo })
 
     -- launch_to_space_platforms=false: drives the rocket_launch_products branch
     -- (base-game "launch item -> rocket_launch_products" behaviour). Needs at
@@ -510,7 +591,7 @@ if raw["rocket-silo"] and raw["rocket-silo"]["rocket-silo"] then
     lp_silo.next_upgrade = nil
     lp_silo.placeable_by = nil
     lp_silo.launch_to_space_platforms = false
-    data:extend({ lp_silo })
+    extend_test({ lp_silo })
 end
 
 -- ============================================================================
@@ -540,7 +621,7 @@ if raw.plant and raw.plant["yumako-tree"] and raw.item and raw.item["yumako-seed
     seed_b.localised_name = "fs-test-seed-b"
     seed_b.plant_result = "fs-test-plant"
 
-    data:extend({ plant, seed_a, seed_b })
+    extend_test({ plant, seed_a, seed_b })
 end
 
 -- ============================================================================
@@ -553,7 +634,7 @@ end
 if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"] then
     local ffm = make_fes_test("fs-test-fuel-filter-machine", "minimum_temperature", 100)
     ffm.crafting_categories = { "fs-test-fuel-filter" }
-    data:extend({
+    extend_test({
         { type = "recipe-category", name = "fs-test-fuel-filter" },
         ffm,
         {
@@ -571,7 +652,7 @@ end
 -- 8b. Orphan category: a recipe whose category has no machine at all, so
 --     get_machines_in_category / get_machines_for_recipe returns empty. Exercises
 --     the empty-machine-list path in the picker and machine resolution.
-data:extend({
+extend_test({
     { type = "recipe-category", name = "fs-test-orphan-cat" },
     {
         type = "recipe",
@@ -584,15 +665,31 @@ data:extend({
     },
 })
 
+-- A dedicated fluid-handling crafter for the §8c / §8d temperature recipes, so
+-- those recipes resolve to a test machine on the isolated fs-test-crafting-with-
+-- fluid category instead of every vanilla crafting-with-fluid machine. Copied
+-- from assembling-machine-2 (which carries the input/output fluid boxes the
+-- recipes need); only its crafting category is swapped.
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"] then
+    local fluid_crafter = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+    fluid_crafter.name = "fs-test-fluid-crafter"
+    fluid_crafter.localised_name = "fs-test-fluid-crafter"
+    fluid_crafter.minable = nil
+    fluid_crafter.next_upgrade = nil
+    fluid_crafter.placeable_by = nil
+    fluid_crafter.crafting_categories = { "fs-test-crafting-with-fluid" }
+    extend_test({ fluid_crafter })
+end
+
 -- 8c. Exact-temperature fluid ingredient (single `temperature`, not min/max):
 --     exercises the degenerate [T,T] branch in raw_ingredient_to_amount and the
 --     picker's exact-temperature slot handling.
 if raw.fluid and raw.fluid["steam"] then
-    data:extend({
+    extend_test({
         {
             type = "recipe",
             name = "fs-test-exact-temp-recipe",
-            category = "crafting-with-fluid",
+            category = "fs-test-crafting-with-fluid",
             enabled = true,
             energy_required = 1,
             ingredients = {
@@ -607,11 +704,11 @@ end
 --     temperatures, so add_fluid_temperature_virtuals registers two ranges and
 --     the picker's "keep if ANY matching slot connects" branch is exercised.
 if raw.fluid and raw.fluid["steam"] then
-    data:extend({
+    extend_test({
         {
             type = "recipe",
             name = "fs-test-split-temp-recipe",
-            category = "crafting-with-fluid",
+            category = "fs-test-crafting-with-fluid",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
@@ -644,7 +741,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     fixed_machine.placeable_by = nil
     fixed_machine.crafting_categories = { "fs-test-fixed-cat" }
     fixed_machine.fixed_recipe = "fs-test-fixed-recipe-a"
-    data:extend({
+    extend_test({
         { type = "recipe-category", name = "fs-test-fixed-cat" },
         fixed_machine,
         {
