@@ -792,6 +792,19 @@ function M.get_fluidbox_filter_prototype(machine, index)
     return fluidbox and fluidbox.filter
 end
 
+---Round-trip a temperature through "%g" so it matches the format that
+---register_fluid_temperature_range / typed_name_to_variable_name emit. Without
+---this, single-precision quantization (a fluid declared at 0.01 reads back as
+---0.0099999, per CLAUDE.md) makes the raw acceptance-range TypedName differ
+---byte-for-byte from the picker's range button (decoded from a "%g" key), so
+---the range button never lights up as the selected default. A no-op for the
+---clean integer temperatures of essentially every real fluid fuel.
+---@param t number
+---@return number
+local function normalize_temperature(t)
+    return tonumber(string.format("%g", t)) --[[@as number]]
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@return TypedName?
@@ -821,7 +834,8 @@ function M.try_get_fixed_fuel(machine)
         if not max_temp or max_temp > filter.max_temperature then
             max_temp = filter.max_temperature
         end
-        return tn.create_typed_name("fluid", filter.name, nil, min_temp, max_temp)
+        return tn.create_typed_name("fluid", filter.name, nil,
+            normalize_temperature(min_temp), normalize_temperature(max_temp))
     elseif machine.type == "generator" then
         -- The ACCEPTANCE range is the input fluidbox's own temperature filter,
         -- NOT machine.maximum_temperature. maximum_temperature is only the
@@ -845,7 +859,8 @@ function M.try_get_fixed_fuel(machine)
         if not max_temp or max_temp > filter.max_temperature then
             max_temp = filter.max_temperature
         end
-        return tn.create_typed_name("fluid", filter.name, nil, min_temp, max_temp)
+        return tn.create_typed_name("fluid", filter.name, nil,
+            normalize_temperature(min_temp), normalize_temperature(max_temp))
     else
         return nil
     end
@@ -1004,17 +1019,22 @@ function M.get_plant_substrate_tiles(machine)
     return list
 end
 
----Returns the single-temperature virtual_material variants of the machine's
----filter fluid. Only meaningful for burns_fluid=false machines, where the
----power output depends on input temperature; returns nil for other cases so
----the caller knows there is nothing to expand. Filterless machines are also
----out of scope here (the candidate fluid set is unbounded).
+---Returns the fluid-fuel temperature options to offer in the picker for a
+---burns_fluid=false machine (one where extracted energy depends on input
+---temperature). The first entry is the machine's full ACCEPTANCE-range
+---variant (the default "any temperature in range" pick); the rest are the
+---distinct single temperatures other recipes actually produce this fluid at,
+---clipped to the acceptance range. Returns nil / an empty list when there is
+---nothing to choose between — a non-fluid or burns_fluid=true fuel, a
+---filterless any-fluid machine (unbounded candidate set), a machine that
+---accepts only one exact temperature (lo == hi), or a fluid no recipe produces
+---a point temperature for in-range. The caller hides the picker on empty.
 ---
----We deliberately do not clip by the machine's maximum_temperature: the
----engine accepts hotter fluid and merely discards the excess heat, so the
----picker should still surface those variants and let the user choose.
----Out-of-range temperatures are handled correctly downstream by
----get_generator_power and get_fuel_amount_per_second, which clamp T_in.
+---We clip to the acceptance range but deliberately NOT to the machine's
+---energy-conversion cap: the engine accepts fluid hotter than the cap and just
+---discards the excess heat, so an in-range-but-above-cap temperature is a valid
+---(if wasteful) pick the user may want to model. get_generator_power /
+---get_fuel_amount_per_second clamp T_in downstream.
 ---@param machine LuaEntityPrototype
 ---@return VirtualMaterial[]?
 function M.get_fluid_fuel_temperature_variants(machine)
@@ -1032,75 +1052,59 @@ function M.get_fluid_fuel_temperature_variants(machine)
     end
     if not filter then return nil end
 
+    local fixed = M.try_get_fixed_fuel(machine)
+    if not (fixed and fixed.type == "fluid") then return nil end
+    local lo, hi = fixed.minimum_temperature, fixed.maximum_temperature
+    if lo == nil or hi == nil or lo == hi then
+        -- Degenerate acceptance range: the machine takes exactly one
+        -- temperature, so there is no range-vs-point choice to offer.
+        return {}
+    end
+
+    -- Collect the registered single-temperature points (degenerate ranges,
+    -- l == h) of this fluid that fall within the acceptance range. Keys are
+    -- range-only ("fluid/x@[l,h]"); a permissive capture + tonumber handles the
+    -- "%g" scientific notation large temperatures stringify to (e.g. plasma).
     local prefix = "fluid/" .. filter.name .. "@"
     local prefix_len = #prefix
-    local results = {}
+    local points = {}
     for key, material in pairs(storage.virtuals.material) do
         if string.sub(key, 1, prefix_len) == prefix then
-            -- Single-temperature variants stringify to a bare number after
-            -- the "@". Range variants stringify to "[lo,hi]" and fail
-            -- tonumber, so they're naturally excluded.
-            if tonumber(string.sub(key, prefix_len + 1)) then
-                results[#results + 1] = material
+            local l, h = string.match(key, "@%[([^,]+),([^%]]+)%]$")
+            local ln, hn = tonumber(l), tonumber(h)
+            if ln and hn and ln == hn and lo <= ln and ln <= hi then
+                points[#points + 1] = material
             end
         end
     end
-    return fs_util.sort_prototypes(results)
-end
+    if #points == 0 then return {} end
+    fs_util.sort_prototypes(points)
 
----Picks the best single-temperature variant for a burns_fluid=false
----machine's fuel slot. Returns nil if the machine has no variants or isn't
----a heat-extraction fluid consumer. The choice mirrors the old implicit
----default: highest temperature ≤ machine cap (maximum useful energy, no
----wasted heat); if every variant is above the cap, fall back to the lowest
----(least waste). Used by migration to pin legacy range-only or bare-fluid
----fuel selections onto a concrete picker button.
----@param machine LuaEntityPrototype
----@return VirtualMaterial?
-function M.get_default_fluid_fuel_variant(machine)
-    local variants = M.get_fluid_fuel_temperature_variants(machine)
-    if not variants or #variants == 0 then return nil end
-
-    local cap
-    if machine.fluid_energy_source_prototype then
-        cap = machine.fluid_energy_source_prototype.maximum_temperature
-    elseif machine.type == "generator" then
-        cap = machine.maximum_temperature
-    end
-    if cap and cap <= 0 then cap = nil end
-
-    -- Temperature variant names are range-only ("fluid/x@[lo,hi]"); rank a fuel
-    -- variant by its upper bound (hottest). tonumber handles the "%g" scientific
-    -- notation used for large temperatures. The legacy single form "@T" is still
-    -- accepted as a fallback.
-    ---@param v VirtualMaterial
-    ---@return number?
-    local function temp_of(v)
-        local hi = string.match(v.name, "@%[[^,]+,([^%]]+)%]$")
-        if hi then
-            return tonumber(hi)
-        end
-        return tonumber(string.match(v.name, "@(.+)$"))
+    -- Prepend the acceptance-range variant (the default). Reuse the registered
+    -- material when one exists, else synthesize a transient one from the fluid
+    -- prototype; source_fluid_name is required by is_unresearched / tooltips.
+    local range_key = string.format("fluid/%s@[%g,%g]", filter.name, lo, hi)
+    local range_material = storage.virtuals.material[range_key]
+    if not range_material then
+        ---@type VirtualMaterial
+        range_material = {
+            type = "virtual_material",
+            name = range_key,
+            sprite_path = "fluid/" .. filter.name,
+            elem_tooltip = { type = "fluid", name = filter.name },
+            order = filter.order .. string.format("@z[%020.6f,%020.6f]", lo, hi),
+            group_name = filter.group.name,
+            subgroup_name = filter.subgroup.name,
+            hidden = filter.hidden,
+            source_fluid_name = filter.name,
+        }
     end
 
-    local best, best_t
-    for _, v in ipairs(variants) do
-        local t = temp_of(v)
-        if t and (not cap or t <= cap) then
-            if best_t == nil or t > best_t then
-                best, best_t = v, t
-            end
-        end
+    local results = { range_material }
+    for _, p in ipairs(points) do
+        results[#results + 1] = p
     end
-    if best then return best end
-
-    for _, v in ipairs(variants) do
-        local t = temp_of(v)
-        if t and (best_t == nil or t < best_t) then
-            best, best_t = v, t
-        end
-    end
-    return best
+    return results
 end
 
 ---@param recipe LuaRecipePrototype | VirtualRecipe

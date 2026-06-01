@@ -1,6 +1,14 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.3
 Date: ????
+  Gui:
+    - Let the Fuel section pick a temperature for a heat-extraction machine's
+      fluid fuel: the machine's full acceptance range (the default) plus a
+      button for each distinct temperature other recipes produce that fluid
+      at, within the accepted range. Picking a single temperature feeds the
+      exact heat into the fuel-amount and power math instead of assuming the
+      best case. Temperatures above the machine's energy-conversion cap are
+      still offered (the excess heat is wasted, as in-game).
   Bugfixes:
     - Pre-round a slot's amount onto the engine's display grid per material
       kind (one decimal), so a slot number reads the same magnitude across

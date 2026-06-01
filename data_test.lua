@@ -301,6 +301,27 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         },
     }
 
+    -- burns_fluid=false with a LOW energy-conversion cap but no fluid_box
+    -- temperature bound: acceptance is the fluid's full physical range while the
+    -- cap (maximum_temperature) is well below it. Exercises the fuel-temperature
+    -- picker's rule that in-range-but-above-cap points are still offered (the
+    -- engine accepts the hotter fluid and discards the excess heat).
+    local lowcap = base_fes("fs-test-fes-low-cap")
+    lowcap.energy_source = {
+        type = "fluid",
+        burns_fluid = false,
+        scale_fluid_usage = true,
+        destroy_non_fuel_fluid = false,
+        maximum_temperature = 200,
+        effectivity = 1,
+        fluid_box = {
+            volume = 200,
+            production_type = "input",
+            pipe_connections = {},
+            filter = "steam",
+        },
+    }
+
     -- Filterless heat-extraction fluid energy source: is_use_any_fluid_fuel is
     -- true, so the line offers every fluid as a fuel candidate.
     local anyfluid = base_fes("fs-test-fes-any-fluid")
@@ -319,7 +340,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         },
     }
 
-    extend_test({ burns, noscale, anyfluid })
+    extend_test({ burns, noscale, lowcap, anyfluid })
 end
 
 -- ============================================================================

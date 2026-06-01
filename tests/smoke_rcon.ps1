@@ -305,6 +305,19 @@ try {
         Write-Host "SMOKE FAIL: [fuel_reconcile] $fuelReconcile"
         $allPass = $false
     }
+
+    # The fuel-temperature picker options for burns_fluid=false machines (the
+    # acceptance-range variant plus in-range single temperatures, clipped to
+    # acceptance but not to the energy cap). Solution-independent, driven off
+    # data_test.lua machines, so it runs once up front too.
+    $fuelTemps = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_fluid_fuel_temperature_variants'))"
+    if ($fuelTemps -eq "OK") {
+        Write-Host "SMOKE PASS: [fuel_temps] picker offers acceptance range + in-range points"
+    } else {
+        Write-Host "SMOKE FAIL: [fuel_temps] $fuelTemps"
+        $allPass = $false
+    }
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"

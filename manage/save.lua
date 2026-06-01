@@ -186,21 +186,15 @@ function M.reinit_force_data(force_index)
                     line.recipe_typed_name.name = "<pump>" .. tile_name
                 end
 
-                -- Legacy lines for burns_fluid=false machines held a bare or
-                -- range-only fluid TypedName; the picker now offers concrete
-                -- temperature variants. Pin them to a sensible default so the
-                -- selection lights up a picker button after upgrade.
-                if line.fuel_typed_name
-                    and line.fuel_typed_name.type == "fluid"
-                    and (line.fuel_typed_name.minimum_temperature == nil
-                        or line.fuel_typed_name.minimum_temperature
-                            ~= line.fuel_typed_name.maximum_temperature)
-                then
+                -- Legacy lines may hold a bare or range-only fluid fuel
+                -- TypedName. Reconcile it to the machine's current acceptance
+                -- range, the same way runtime does: an in-range single-temp pick
+                -- is preserved (e.g. an interop import), while a bare / stale /
+                -- out-of-range one snaps to the acceptance range (the default).
+                if line.fuel_typed_name and line.fuel_typed_name.type == "fluid" then
                     local machine = tn.typed_name_to_machine(line.machine_typed_name)
-                    local variant = acc.get_default_fluid_fuel_variant(machine)
-                    if variant then
-                        line.fuel_typed_name = tn.craft_to_typed_name(variant)
-                    end
+                    line.fuel_typed_name = acc.reconcile_fluid_fuel_for_machine(
+                        line.fuel_typed_name, machine)
                 end
 
                 if line.module_names then

@@ -830,6 +830,87 @@ function M.check_fuel_reconciliation()
     return "OK"
 end
 
+---Exercises get_fluid_fuel_temperature_variants: the fuel-temperature picker
+---options for a burns_fluid=false machine. Asserts the list leads with the
+---machine's acceptance-range variant, then the distinct single temperatures
+---recipes produce the fluid at, clipped to the acceptance range but NOT to the
+---energy-conversion cap. Driven off the data_test.lua synthetic machines
+---(fs-test-fes-no-scale = wide steam [15,1000], fes-window-100-300 = [100,300],
+---fs-test-fes-low-cap = wide steam acceptance with a 200C cap). Base-game steam
+---has registered point temperatures at 165 (boiler) and 500 (heat exchanger).
+---Guarded on presence so a stripped build skips instead of failing.
+---@return string
+function M.check_fluid_fuel_temperature_variants()
+    local wide_machine = prototypes.entity["fs-test-fes-no-scale"]
+    local narrow_machine = prototypes.entity["fes-window-100-300"]
+    local lowcap_machine = prototypes.entity["fs-test-fes-low-cap"]
+    if not (wide_machine and narrow_machine and lowcap_machine) then
+        log.info("check_fluid_fuel_temperature_variants: data_test machines absent, skipped")
+        return "OK"
+    end
+
+    -- The degenerate single temperature a variant decodes to (min == max), or
+    -- nil if it is a non-degenerate range.
+    local function point_of(variant)
+        local tname = tn.craft_to_typed_name(variant)
+        if tname.type == "fluid"
+            and tname.minimum_temperature == tname.maximum_temperature then
+            return tname.minimum_temperature
+        end
+        return nil
+    end
+
+    local function points_in(variants)
+        local set = {}
+        for _, v in ipairs(variants) do
+            local p = point_of(v)
+            if p then set[p] = true end
+        end
+        return set
+    end
+
+    local ok, err = pcall(function()
+        -- (1) wide machine: first entry is the full acceptance range, followed by
+        -- every in-range steam point. Steam's physical range is [15,1000], so both
+        -- the 165 and 500 boiler/heat-exchanger points qualify.
+        local wide = acc.get_fluid_fuel_temperature_variants(wide_machine)
+        assert(wide and #wide >= 2, "wide machine offered no fuel-temperature choice")
+        local wide_range = tn.craft_to_typed_name(wide[1])
+        local acc_wide = acc.try_get_fixed_fuel(wide_machine)
+        assert(wide_range.type == "fluid" and wide_range.name == "steam"
+            and wide_range.minimum_temperature == acc_wide.minimum_temperature
+            and wide_range.maximum_temperature == acc_wide.maximum_temperature
+            and wide_range.minimum_temperature ~= wide_range.maximum_temperature,
+            "wide machine's first variant is not the acceptance range")
+        local wp = points_in(wide)
+        assert(wp[165] and wp[500],
+            "wide machine did not offer the 165 and 500 steam points")
+
+        -- (2) narrow machine [100,300]: 165 is in range and offered; 500 is out of
+        -- the acceptance range and must be clipped out.
+        local narrow = acc.get_fluid_fuel_temperature_variants(narrow_machine)
+        assert(narrow and #narrow >= 2, "narrow machine offered no fuel-temperature choice")
+        local narrow_range = tn.craft_to_typed_name(narrow[1])
+        assert(narrow_range.minimum_temperature == 100 and narrow_range.maximum_temperature == 300,
+            "narrow machine's first variant is not the [100,300] acceptance range")
+        local np = points_in(narrow)
+        assert(np[165], "narrow machine did not offer the in-range 165 point")
+        assert(not np[500], "narrow machine offered the out-of-acceptance 500 point")
+
+        -- (3) low-cap machine: acceptance is the full [15,1000] range but the cap
+        -- is 200. The 500 point is above the cap yet within acceptance, so it is
+        -- still offered (clip to acceptance, not to the cap).
+        local lowcap = acc.get_fluid_fuel_temperature_variants(lowcap_machine)
+        assert(lowcap and #lowcap >= 2, "low-cap machine offered no fuel-temperature choice")
+        local lp = points_in(lowcap)
+        assert(lp[500], "low-cap machine clipped the above-cap (but in-range) 500 point")
+    end)
+    if not ok then
+        return "ERROR: fluid fuel temperature variants check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -842,6 +923,7 @@ function M.register()
         check_read_side = M.check_read_side,
         check_force_caches = M.check_force_caches,
         check_fuel_reconciliation = M.check_fuel_reconciliation,
+        check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
     })
 end
 
