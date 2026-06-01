@@ -126,7 +126,7 @@ function M.create_decorated_sprite_button(data)
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = tn.format_temperature(temperature) .. "°",
+                    caption = { "factory-solver-slot-temperature", tn.format_temperature(temperature) },
                     ignored_by_interaction = true,
                 },
             },
@@ -141,7 +141,7 @@ function M.create_decorated_sprite_button(data)
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = tn.format_temperature(minimum_temperature) .. "°",
+                    caption = { "factory-solver-slot-temperature", tn.format_temperature(minimum_temperature) },
                     ignored_by_interaction = true,
                 },
             }
@@ -150,13 +150,13 @@ function M.create_decorated_sprite_button(data)
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = tn.format_temperature(minimum_temperature) .. "°~",
+                    caption = { "factory-solver-slot-temperature-lower", tn.format_temperature(minimum_temperature) },
                     ignored_by_interaction = true,
                 },
                 {
                     type = "label",
                     style = "factory_solver_slot_temperature_label",
-                    caption = tn.format_temperature(maximum_temperature) .. "°",
+                    caption = { "factory-solver-slot-temperature", tn.format_temperature(maximum_temperature) },
                     ignored_by_interaction = true,
                 },
             }

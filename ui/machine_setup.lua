@@ -939,7 +939,7 @@ return {
             vertical_scroll_policy = "auto-and-reserve-space",
             {
                 type = "label",
-                caption = "No configurable items.",
+                caption = { "factory-solver-no-configurable-items" },
                 visible = false,
                 handler = {
                     on_added = handlers.on_no_configurable_items_visible,
