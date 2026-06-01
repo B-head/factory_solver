@@ -7,7 +7,7 @@
 --   bioflux:                0.25 nutrients + 4 jelly + 5 yumako-mash -> 2 bioflux
 -- bioflux requires nutrients to be made; nutrients-from-bioflux requires
 -- bioflux to be made. The only thing that breaks the chicken-and-egg is
--- the external seed via yumako/jellynut basic_sources (which then feed
+-- the external seed via yumako/jellynut initial_sources (which then feed
 -- jellynut-processing / yumako-processing -- both of which themselves
 -- consume 0.25 nutrients, making the bootstrap non-trivial). The LP must
 -- find a fixed point where:
@@ -83,9 +83,9 @@ table.insert(cases, {
         p:add_objective("|final_sink|agricultural-science-pack", 0,   false)
         p:add_objective("|final_sink|jellynut-seed",             0,   false)
         p:add_objective("|final_sink|yumako-seed",               0,   false)
-        p:add_objective("|basic_source|water",                   0.1, false)
-        p:add_objective("|basic_source|jellynut",                1,   false)
-        p:add_objective("|basic_source|yumako",                  1,   false)
+        p:add_objective("|initial_source|water",                   0.1, false)
+        p:add_objective("|initial_source|jellynut",                1,   false)
+        p:add_objective("|initial_source|yumako",                  1,   false)
         p:add_objective("%positive_slack%|limit|agricultural-science-pack",
                         1048576, false)
 
@@ -148,13 +148,13 @@ table.insert(cases, {
         p:add_subject_term("recipe/yumako-processing",   "yumako-seed", 0.06)
         p:add_subject_term("|final_sink|yumako-seed",    "yumako-seed", -1)
 
-        -- raw inputs <- basic_source (uncapped)
+        -- raw inputs <- initial_source (uncapped)
         p:add_subject_term("recipe/pentapod-egg",         "water", -8)
-        p:add_subject_term("|basic_source|water",         "water",  1)
+        p:add_subject_term("|initial_source|water",         "water",  1)
         p:add_subject_term("recipe/jellynut-processing",  "jellynut", -2)
-        p:add_subject_term("|basic_source|jellynut",      "jellynut",  1)
+        p:add_subject_term("|initial_source|jellynut",      "jellynut",  1)
         p:add_subject_term("recipe/yumako-processing",    "yumako",   -2)
-        p:add_subject_term("|basic_source|yumako",        "yumako",    1)
+        p:add_subject_term("|initial_source|yumako",        "yumako",    1)
 
         -- ASP upper-cap row: 0.75 * recipe + slack = 0.5.
         p:add_subject_term("recipe/agricultural-science-pack",
@@ -183,9 +183,9 @@ table.insert(cases, {
         harness.assert_near(vars.x["recipe/yumako-processing"],      0.400761, 5e-4, "yumako-processing rate")
 
         -- Raw inputs scale to the chain.
-        harness.assert_near(vars.x["|basic_source|water"],    40 / 3,   1e-3, "water uptake (= 8 * 5/3)")
-        harness.assert_near(vars.x["|basic_source|jellynut"], 0.320609, 5e-4, "jellynut uptake")
-        harness.assert_near(vars.x["|basic_source|yumako"],   0.801522, 5e-4, "yumako uptake")
+        harness.assert_near(vars.x["|initial_source|water"],    40 / 3,   1e-3, "water uptake (= 8 * 5/3)")
+        harness.assert_near(vars.x["|initial_source|jellynut"], 0.320609, 5e-4, "jellynut uptake")
+        harness.assert_near(vars.x["|initial_source|yumako"],   0.801522, 5e-4, "yumako uptake")
 
         -- THE load-bearing assertion: every shortage_source must stay at
         -- zero. A non-zero shortage_source means the LP found it cheaper
@@ -204,7 +204,7 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "Gleba loop with <grow> seed cycles must not get a spurious |basic_source|bioflux",
+    name = "Gleba loop with <grow> seed cycles must not get a spurious |initial_source|bioflux",
     -- Integration test (drives create_problem, not a hand-built Problem) for
     -- the upstream bug the bioflux trace exposed: once the yumako / jellynut
     -- seed->plant->fruit->seed loops are closed by <grow> recipes, those
@@ -215,10 +215,10 @@ table.insert(cases, {
     -- that SCC and flags bioflux as a deficit:
     --   bioflux net at unit rates = +2 (bioflux recipe) - 5 (nutrients-from-
     --   bioflux) = -3, consumption = 5, ratio = -0.6 < -0.5 -> deficit.
-    -- create_problem then gives bioflux a free |basic_source| at source_cost,
+    -- create_problem then gives bioflux a free |initial_source| at source_cost,
     -- and because that undercuts the recipe chain's effective raw cost
     -- (~1.166 / bioflux through yumako+jellynut), the LP zeros out the entire
-    -- recipe chain and pulls all bioflux from the spurious basic_source.
+    -- recipe chain and pulls all bioflux from the spurious initial_source.
     --
     -- This is a false positive: the seed loops are mass-*positive*
     -- (one seed grows into ~50 fruit, which processes back into >1 seed), so
@@ -231,7 +231,7 @@ table.insert(cases, {
     -- admits a positive recipe-rate vector that balances every internal
     -- material (cone_feasible), so it is recognised as needing no external
     -- supply and bioflux is no longer flagged. Asserted below: the recipe
-    -- chain runs and no bioflux is drawn from a basic_source.
+    -- chain runs and no bioflux is drawn from a initial_source.
     run = function()
         local lines = {
             line("agricultural-science-pack",
@@ -275,8 +275,8 @@ table.insert(cases, {
         -- DESIRED: no spurious external bioflux. The seed/plant loops are
         -- mass-positive, so the whole chain should close through real
         -- recipes with bioflux produced by recipe/bioflux.
-        harness.assert_near(vars.x["|basic_source|item/bioflux/normal"] or 0, 0, 1e-3,
-            "bioflux must not get a spurious basic_source (find_deficit_materials false positive)")
+        harness.assert_near(vars.x["|initial_source|item/bioflux/normal"] or 0, 0, 1e-3,
+            "bioflux must not get a spurious initial_source (find_deficit_materials false positive)")
         harness.assert_true(
             (vars.x["recipe/bioflux/normal"] or 0) > 0.1,
             "recipe/bioflux must run to supply the chain (got " ..
@@ -285,11 +285,11 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "Gleba <grow> loops with EXTERNAL nutrients: chain closes, no spurious basic_source (control for the deficit bug)",
+    name = "Gleba <grow> loops with EXTERNAL nutrients: chain closes, no spurious initial_source (control for the deficit bug)",
     -- The control that isolates the find_deficit_materials false positive in
     -- the xfail case above. Same <grow> seed cycles, same ASP target, but
     -- nutrients-from-bioflux is removed -- nutrients now has no producer
-    -- recipe, so create_problem correctly makes it a |basic_source| (genuine
+    -- recipe, so create_problem correctly makes it a |initial_source| (genuine
     -- external input).
     --
     -- Why this passes where the xfail fails: with nutrients external, the
@@ -313,7 +313,7 @@ table.insert(cases, {
                 { item("pentapod-egg", 0.2) },
                 { item("nutrients", 4.25), item("water", 8) }),
             -- No nutrients-from-bioflux: nutrients has no producer ->
-            -- create_problem adds |basic_source|nutrients.
+            -- create_problem adds |initial_source|nutrients.
             line("bioflux",
                 { item("bioflux", 2) },
                 { item("nutrients", 0.25), item("yumako-mash", 5), item("jelly", 4) }),
@@ -350,14 +350,14 @@ table.insert(cases, {
         harness.assert_near(vars.x["recipe/jellynut-processing/normal"],       0.055556, 1e-3, "jellynut-processing runs")
         harness.assert_near(vars.x["recipe/grow-jellystem/normal"],            2 / 3, 1e-3, "grow-jellystem runs")
 
-        -- Only nutrients is a legitimate basic_source (no producer recipe).
-        harness.assert_near(vars.x["|basic_source|item/nutrients/normal"], 7.340278, 1e-2,
-            "nutrients supplied externally (the one legit basic_source)")
+        -- Only nutrients is a legitimate initial_source (no producer recipe).
+        harness.assert_near(vars.x["|initial_source|item/nutrients/normal"], 7.340278, 1e-2,
+            "nutrients supplied externally (the one legit initial_source)")
 
-        -- The deficit-prone materials must NOT get a basic_source here.
+        -- The deficit-prone materials must NOT get a initial_source here.
         for _, mat in ipairs({ "bioflux", "yumako", "jellynut", "yumako-seed", "jellynut-seed" }) do
-            harness.assert_near(vars.x["|basic_source|item/" .. mat .. "/normal"] or 0, 0, 1e-9,
-                "|basic_source|" .. mat .. " must not exist (not a deficit when nutrients is external)")
+            harness.assert_near(vars.x["|initial_source|item/" .. mat .. "/normal"] or 0, 0, 1e-9,
+                "|initial_source|" .. mat .. " must not exist (not a deficit when nutrients is external)")
         end
 
         -- Every shortage_source stays at zero: loop closes via real recipes.

@@ -15,7 +15,7 @@
 -- isolation, find_deficit_materials DOES flag oxide-asteroid-chunk/normal
 -- (oxide reprocessing consumes 0.585 vs 0.2925 for metallic/carbonic, so o/
 -- norm's unit-rate net is -73%, over the 50% threshold; m/norm and c/norm are
--- only -19% and stay unflagged). That single |basic_source|o/norm is enough:
+-- only -19% and stay unflagged). That single |initial_source|o/norm is enough:
 -- oxide reprocessing cross-produces metallic and carbonic chunks too, so the
 -- LP bootstraps the WHOLE cascade from oxide normal chunks and the upcycle
 -- runs to completion with zero shortage. See the second case below.
@@ -30,7 +30,7 @@
 -- (consume 0.2925/0.585, no self-product) so o/norm's ratio is -0.731 and it
 -- gets flagged; the real recipes consume the gross 0.45/0.9 and re-emit their
 -- own chunk, so o/norm's ratio is only -0.475 -- just under the 50% threshold
--- -- and NOTHING gets flagged, so no |basic_source| seeds the cascade and the
+-- -- and NOTHING gets flagged, so no |initial_source| seeds the cascade and the
 -- LP eats a legendary shortage. This reproduces in a single solve; it is not
 -- a full-factory artifact. The first case below still stands as a numerical-
 -- robustness + behaviour snapshot of the no-source matrix.
@@ -338,7 +338,7 @@ table.insert(cases, {
     -- The empirical counterpart to the snapshot above: the SAME cascade fed
     -- through create_problem from recipe fixtures. find_deficit_materials
     -- flags only oxide-asteroid-chunk/normal (-73% at unit rate), which gets
-    -- a |basic_source|. Oxide reprocessing cross-produces metallic/carbonic
+    -- a |initial_source|. Oxide reprocessing cross-produces metallic/carbonic
     -- chunks, so that single base supply bootstraps the entire cascade: all
     -- 12 reprocessing recipes run, every tier upcycles, the three crushers
     -- hit their pinned rate, and NO shortage_source fires.
@@ -437,8 +437,8 @@ table.insert(cases, {
         end
 
         -- A base chunk supply bootstraps the cascade (today: o/norm).
-        harness.assert_true((vars.x["|basic_source|item/oxide-asteroid-chunk/normal"] or 0) > 0.1,
-            "a base chunk |basic_source| is active to seed the cascade")
+        harness.assert_true((vars.x["|initial_source|item/oxide-asteroid-chunk/normal"] or 0) > 0.1,
+            "a base chunk |initial_source| is active to seed the cascade")
 
         -- Crucially: NO shortage anywhere. The upcycle is fully supplied by
         -- the recipe chain off the base chunk(s).
@@ -471,7 +471,7 @@ table.insert(cases, {
     -- denominator and the deficit ratios came out
     --     o/norm  net -0.4275 / cons 0.90 = -0.475   (just under -0.5!)
     --     m/norm, c/norm  net -0.05625 / cons 0.45 = -0.125
-    -- so nothing cleared the 50% threshold, no |basic_source| was created, the
+    -- so nothing cleared the 50% threshold, no |initial_source| was created, the
     -- cascade idled and the LP ate a 0.19 shortage on each legendary chunk
     -- (matching the in-game LP). compute_reachable_materials is EMPTY here, so
     -- the `deficits MINUS pre_reachable` filter was never the cause -- this is
@@ -480,7 +480,7 @@ table.insert(cases, {
     -- THE FIX: find_deficit_materials now measures the deficit against internal
     -- PRODUCTION instead of consumption (production = net + consumption), so
     -- self-production cancels out of the ratio: o/norm becomes -0.4275 / 0.4725
-    -- = -0.905, clearing the threshold. o/norm gets a |basic_source|, oxide
+    -- = -0.905, clearing the threshold. o/norm gets a |initial_source|, oxide
     -- reprocessing cross-produces metallic/carbonic, and the whole cascade
     -- bootstraps. Asserted below: every reprocessing recipe runs and no
     -- legendary shortage fires.

@@ -47,7 +47,7 @@ Variables in the LP (all defined in [solver/create_problem.lua](solver/create_pr
 | Variable | Class | Cost | Attached to | Role |
 |---|---|---|---|---|
 | primal recipe variable | primal | `0` | one per in-scope recipe | decision: how much to run |
-| `\|basic_source\|<material>` | slack source | `slack_cost` | raw inputs and cycle-entry deficits | supplies external material at zero cost |
+| `\|initial_source\|<material>` | slack source | `slack_cost` | raw inputs and cycle-entry deficits | supplies external material at zero cost |
 | `\|final_sink\|<material>` | slack sink | `slack_cost` | user-requested products | absorbs the final output |
 | `\|surplus_sink\|<material>` | elastic sink | `elastic_cost` | every intermediate | absorbs overshoot when balance is over-determined |
 | `\|shortage_source\|<material>` | elastic source | `elastic_cost` | intermediates unreachable from raw inputs (gated) | escape hatch for dead-end / mass-losing cycles |
@@ -56,7 +56,7 @@ Variables in the LP (all defined in [solver/create_problem.lua](solver/create_pr
 
 The three cost tiers form a load-bearing ordering `slack_cost` < `elastic_cost` < `target_cost` — inverting it would make the LP prefer wrong solutions. Concrete values live in [solver/create_problem.lua](solver/create_problem.lua).
 
-**Where costs are allowed to mean something.** The objective function carries meaningful weight at three kinds of variables only: **sources** (`|basic_source|`, `|shortage_source|`), **sinks** (`|final_sink|`, `|surplus_sink|`), and **constrained variables** (those that carry `target_cost`). Cost on a recipe variable itself is essentially meaningless: the recipe's role is already pinned by material balance, and any cost there leaks identically across every path that includes it. The intent "this recipe should run" is expressed at the constrained variable on the recipe's output, not on the recipe variable.
+**Where costs are allowed to mean something.** The objective function carries meaningful weight at three kinds of variables only: **sources** (`|initial_source|`, `|shortage_source|`), **sinks** (`|final_sink|`, `|surplus_sink|`), and **constrained variables** (those that carry `target_cost`). Cost on a recipe variable itself is essentially meaningless: the recipe's role is already pinned by material balance, and any cost there leaks identically across every path that includes it. The intent "this recipe should run" is expressed at the constrained variable on the recipe's output, not on the recipe variable.
 
 Two corollaries already baked into the design:
 

@@ -11,7 +11,7 @@
 -- Shared intermediates: processing-unit, low-density-structure.
 -- Branch-only: rocket-fuel (rocket-part) and flying-robot-frame (science).
 -- All raw inputs (electronic-circuit, copper-plate, ...) bottom out into
--- basic_source primals; this fixture intentionally has no further upstream
+-- initial_source primals; this fixture intentionally has no further upstream
 -- recipes so the LP layer is isolated from create_problem.
 --
 -- The expected optimum is exact: rocket-part = 50, utility-science-pack =
@@ -49,16 +49,16 @@ table.insert(cases, {
         p:add_objective("|final_sink|rocket-part",          0, false)
         p:add_objective("|final_sink|utility-science-pack", 0, false)
 
-        p:add_objective("|basic_source|electronic-circuit",   1,    false)
-        p:add_objective("|basic_source|advanced-circuit",     1,    false)
-        p:add_objective("|basic_source|sulfuric-acid",        0.1,  false)
-        p:add_objective("|basic_source|steel-plate",          1,    false)
-        p:add_objective("|basic_source|battery",              1,    false)
-        p:add_objective("|basic_source|electric-engine-unit", 1,    false)
-        p:add_objective("|basic_source|copper-plate",         1,    false)
-        p:add_objective("|basic_source|plastic-bar",          1,    false)
-        p:add_objective("|basic_source|solid-fuel",           1,    false)
-        p:add_objective("|basic_source|light-oil",            0.1,  false)
+        p:add_objective("|initial_source|electronic-circuit",   1,    false)
+        p:add_objective("|initial_source|advanced-circuit",     1,    false)
+        p:add_objective("|initial_source|sulfuric-acid",        0.1,  false)
+        p:add_objective("|initial_source|steel-plate",          1,    false)
+        p:add_objective("|initial_source|battery",              1,    false)
+        p:add_objective("|initial_source|electric-engine-unit", 1,    false)
+        p:add_objective("|initial_source|copper-plate",         1,    false)
+        p:add_objective("|initial_source|plastic-bar",          1,    false)
+        p:add_objective("|initial_source|solid-fuel",           1,    false)
+        p:add_objective("|initial_source|light-oil",            0.1,  false)
 
         p:add_objective("%negative_slack%|limit|rocket-part",          0,       false)
         p:add_objective("|elastic||limit|rocket-part",                 1048576, false)
@@ -112,29 +112,29 @@ table.insert(cases, {
         p:add_subject_term("|final_sink|rocket-part",    "rocket-part",        -1)
         p:add_subject_term("recipe/utility-science-pack", "utility-science-pack", 0.178571)
         p:add_subject_term("|final_sink|utility-science-pack", "utility-science-pack", -1)
-        -- raw inputs <- basic_sources
+        -- raw inputs <- initial_sources
         p:add_subject_term("recipe/processing-unit",     "electronic-circuit", -2.5)
         p:add_subject_term("recipe/flying-robot-frame",  "electronic-circuit", -0.1875)
-        p:add_subject_term("|basic_source|electronic-circuit", "electronic-circuit", 1)
+        p:add_subject_term("|initial_source|electronic-circuit", "electronic-circuit", 1)
         p:add_subject_term("recipe/processing-unit",     "advanced-circuit",   -0.25)
-        p:add_subject_term("|basic_source|advanced-circuit", "advanced-circuit", 1)
+        p:add_subject_term("|initial_source|advanced-circuit", "advanced-circuit", 1)
         p:add_subject_term("recipe/processing-unit",     "sulfuric-acid",      -0.625)
-        p:add_subject_term("|basic_source|sulfuric-acid", "sulfuric-acid",       1)
+        p:add_subject_term("|initial_source|sulfuric-acid", "sulfuric-acid",       1)
         p:add_subject_term("recipe/flying-robot-frame",  "steel-plate",        -0.0625)
         p:add_subject_term("recipe/low-density-structure", "steel-plate",      -0.166667)
-        p:add_subject_term("|basic_source|steel-plate",  "steel-plate",         1)
+        p:add_subject_term("|initial_source|steel-plate",  "steel-plate",         1)
         p:add_subject_term("recipe/flying-robot-frame",  "battery",            -0.125)
-        p:add_subject_term("|basic_source|battery",      "battery",             1)
+        p:add_subject_term("|initial_source|battery",      "battery",             1)
         p:add_subject_term("recipe/flying-robot-frame",  "electric-engine-unit", -0.0625)
-        p:add_subject_term("|basic_source|electric-engine-unit", "electric-engine-unit", 1)
+        p:add_subject_term("|initial_source|electric-engine-unit", "electric-engine-unit", 1)
         p:add_subject_term("recipe/low-density-structure", "copper-plate",     -1.666667)
-        p:add_subject_term("|basic_source|copper-plate", "copper-plate",        1)
+        p:add_subject_term("|initial_source|copper-plate", "copper-plate",        1)
         p:add_subject_term("recipe/low-density-structure", "plastic-bar",      -0.416667)
-        p:add_subject_term("|basic_source|plastic-bar",  "plastic-bar",         1)
+        p:add_subject_term("|initial_source|plastic-bar",  "plastic-bar",         1)
         p:add_subject_term("recipe/rocket-fuel",         "solid-fuel",         -0.833333)
-        p:add_subject_term("|basic_source|solid-fuel",   "solid-fuel",          1)
+        p:add_subject_term("|initial_source|solid-fuel",   "solid-fuel",          1)
         p:add_subject_term("recipe/rocket-fuel",         "light-oil",          -0.833333)
-        p:add_subject_term("|basic_source|light-oil",    "light-oil",           1)
+        p:add_subject_term("|initial_source|light-oil",    "light-oil",           1)
         -- lower-bound rows: recipe_rate * out_per_recipe - neg_slack + elastic = limit
         p:add_subject_term("recipe/rocket-part",                       "|limit|rocket-part",  0.333333)
         p:add_subject_term("%negative_slack%|limit|rocket-part",       "|limit|rocket-part", -1)

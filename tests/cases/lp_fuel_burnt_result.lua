@@ -12,8 +12,8 @@
 --
 -- Without burnt_result handling the spent cell is never produced, so the
 -- reprocessing ingredient would be a producer-less boundary material (it would
--- pick up a |basic_source|) and the loop would not close. The assertions guard
--- exactly that: the spent cell is produced internally (no basic_source), the
+-- pick up a |initial_source|) and the loop would not close. The assertions guard
+-- exactly that: the spent cell is produced internally (no initial_source), the
 -- reprocessing recipe runs to absorb it instead of paying surplus_sink, and the
 -- reactor meets the heat demand.
 
@@ -85,12 +85,12 @@ table.insert(cases, {
             "reprocessing runs (got " .. tostring(vars.x["recipe/reprocessing/normal"]) .. ")")
 
         -- The spent cell is produced internally by the reactor, so it must NOT
-        -- acquire a |basic_source| (that would mean the solver treated it as a
+        -- acquire a |initial_source| (that would mean the solver treated it as a
         -- raw boundary input -- the pre-burnt_result behaviour this guards).
         harness.assert_true(
-            (vars.x["|basic_source|item/used-up-cell/normal"] or 0) < 1e-6,
+            (vars.x["|initial_source|item/used-up-cell/normal"] or 0) < 1e-6,
             "spent cell is produced, not sourced as raw (got "
-                .. tostring(vars.x["|basic_source|item/used-up-cell/normal"]) .. ")")
+                .. tostring(vars.x["|initial_source|item/used-up-cell/normal"]) .. ")")
         -- Nor a |shortage_source|: it is reachable through the reactor.
         harness.assert_true(
             (vars.x["|shortage_source|item/used-up-cell/normal"] or 0) < 1e-6,

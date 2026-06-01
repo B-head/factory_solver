@@ -231,7 +231,7 @@ table.insert(cases, {
     -- grow recipe makes only 0.166667 plant while process consumes 2, so
     -- plant's net is -1.833 (-92% of consumption) and gets flagged as a
     -- deficit -- even though at the TRUE optimum grow runs ~12x more than
-    -- process and plant balances. The spurious |basic_source|plant this
+    -- process and plant balances. The spurious |initial_source|plant this
     -- produces is what lets the LP bypass the recipe chain in-game.
     --
     -- A self-sustaining cycle flags nothing. find_deficit_materials gates

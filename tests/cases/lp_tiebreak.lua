@@ -8,7 +8,7 @@
 -- role redundant). With every recipe at cost 0, recipes that can each satisfy
 -- the constraint would form a degenerate optimum and the interior-point method
 -- would converge to the analytic centre (flow split evenly). A small
--- source_cost on |basic_source| (external material supply) restores a
+-- source_cost on |initial_source| (external material supply) restores a
 -- meaningful tie-break along the one axis the project's cost-location
 -- principle sanctions: raw input drawn, not recipe identity.
 --
@@ -59,7 +59,7 @@ local cases = {}
 -- Scenario 1: two recipes make B from A at different ratios --
 -- convert-efficient is 1 A -> 1 B, convert-wasteful is 2 A -> 1 B. A is an
 -- ingredient with no producer, so create_problem supplies it through a
--- |basic_source| at source_cost. The wasteful recipe draws twice the A and so
+-- |initial_source| at source_cost. The wasteful recipe draws twice the A and so
 -- costs twice as much at the source, so the LP runs only the efficient recipe.
 -- (Before source_cost this optimum was degenerate and the IPM split the 10 B/s
 -- demand roughly evenly, ~4.97 / ~5.03.)

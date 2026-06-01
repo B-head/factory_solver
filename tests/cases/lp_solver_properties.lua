@@ -98,7 +98,7 @@ table.insert(cases, {
         assert(vars, "packed variables returned")
         -- A cap binds: make-B can only run at 3.
         harness.assert_near(vars.x["recipe/make-B/normal"], 3, 0.05, "make-B capped by A supply")
-        harness.assert_near(vars.x["|basic_source|item/A/normal"], 3, 0.05, "A drawn at its cap")
+        harness.assert_near(vars.x["|initial_source|item/A/normal"], 3, 0.05, "A drawn at its cap")
         -- The 7/s shortfall on B is carried by the elastic, not by NaN/error.
         local elastic = vars.x["|elastic||limit|item/B/normal"] or 0
         harness.assert_true(elastic > 6.5,
@@ -130,8 +130,8 @@ table.insert(cases, {
         assert(vars, "packed variables returned")
         harness.assert_near(vars.x["recipe/ra/normal"], 5, 0.05, "block A at its own target")
         harness.assert_near(vars.x["recipe/rb/normal"], 3, 0.05, "block B at its own target")
-        harness.assert_near(vars.x["|basic_source|item/a1/normal"], 5, 0.05, "block A raw draw")
-        harness.assert_near(vars.x["|basic_source|item/b1/normal"], 3, 0.05, "block B raw draw")
+        harness.assert_near(vars.x["|initial_source|item/a1/normal"], 5, 0.05, "block A raw draw")
+        harness.assert_near(vars.x["|initial_source|item/b1/normal"], 3, 0.05, "block B raw draw")
     end,
 })
 

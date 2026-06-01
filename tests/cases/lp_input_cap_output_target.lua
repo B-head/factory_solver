@@ -8,7 +8,7 @@
 -- Why this is its own fixture, not a parametrisation of lp_dual_resource_caps:
 -- the |limit|plastic-bar row has a structurally different shape -- it
 -- couples a *recipe* primal (recipe/plastic-bar at +2) to a %negative_slack%
--- and an |elastic| primal, whereas upper-cap rows couple a *basic_source*
+-- and an |elastic| primal, whereas upper-cap rows couple a *initial_source*
 -- primal to a %positive_slack%. The LP must drive both the negative_slack
 -- AND the elastic to zero for the lower bound to bind exactly. A regression
 -- that lets elastic absorb the bound (the failure mode lp_lower_limit was
@@ -51,9 +51,9 @@ table.insert(cases, {
         p:add_objective("|surplus_sink|steam@[15,5000]",         1024, false)
 
         p:add_objective("|final_sink|plastic-bar",   0,   false)
-        p:add_objective("|basic_source|coal",        1,   false)
-        p:add_objective("|basic_source|water",       0.1, false)
-        p:add_objective("|basic_source|crude-oil",   0.1, false)
+        p:add_objective("|initial_source|coal",        1,   false)
+        p:add_objective("|initial_source|water",       0.1, false)
+        p:add_objective("|initial_source|crude-oil",   0.1, false)
 
         -- Upper-cap slack on crude; lower-target slack + elastic on plastic-bar.
         p:add_objective("%positive_slack%|limit|crude-oil",   1048576, false)
@@ -127,25 +127,25 @@ table.insert(cases, {
         p:add_subject_term("|final_sink|plastic-bar", "plastic-bar", -1)
 
         -- coal balance: consumed by plastic-bar / coal-liquefaction / boiler;
-        -- supplied by basic_source (uncapped this time).
+        -- supplied by initial_source (uncapped this time).
         p:add_subject_term("recipe/plastic-bar",                "coal", -1)
         p:add_subject_term("recipe/coal-liquefaction",          "coal", -2)
         p:add_subject_term("virtual_recipe/<run>boiler:water",  "coal", -0.45)
-        p:add_subject_term("|basic_source|coal",                "coal", 1)
+        p:add_subject_term("|initial_source|coal",                "coal", 1)
 
         -- water balance
         p:add_subject_term("recipe/light-oil-cracking",      "water", -15)
         p:add_subject_term("recipe/heavy-oil-cracking",      "water", -15)
         p:add_subject_term("recipe/advanced-oil-processing", "water", -10)
         p:add_subject_term("virtual_recipe/<run>boiler:water", "water", -6)
-        p:add_subject_term("|basic_source|water",            "water", 1)
+        p:add_subject_term("|initial_source|water",            "water", 1)
 
         -- crude-oil balance (single consumer, the only capped input)
         p:add_subject_term("recipe/advanced-oil-processing", "crude-oil", -20)
-        p:add_subject_term("|basic_source|crude-oil",        "crude-oil", 1)
+        p:add_subject_term("|initial_source|crude-oil",        "crude-oil", 1)
 
-        -- Upper-cap row: basic_source + slack = limit.
-        p:add_subject_term("|basic_source|crude-oil",          "|limit|crude-oil", 1)
+        -- Upper-cap row: initial_source + slack = limit.
+        p:add_subject_term("|initial_source|crude-oil",          "|limit|crude-oil", 1)
         p:add_subject_term("%positive_slack%|limit|crude-oil", "|limit|crude-oil", 1)
 
         -- Lower-target row: 2 * recipe_rate - negative_slack + elastic = 60.
@@ -163,7 +163,7 @@ table.insert(cases, {
         harness.assert_true(steps < 100, "converged in under 100 iterations (took " .. steps .. ")")
 
         -- Crude cap tight, plastic-bar target met exactly, both slacks zero.
-        harness.assert_near(vars.x["|basic_source|crude-oil"],          500, 5e-2, "crude saturated")
+        harness.assert_near(vars.x["|initial_source|crude-oil"],          500, 5e-2, "crude saturated")
         harness.assert_near(vars.x["%positive_slack%|limit|crude-oil"],   0, 1e-3, "crude slack idle")
         harness.assert_near(vars.x["%negative_slack%|limit|plastic-bar"], 0, 1e-3, "plastic-bar over-target slack idle")
         harness.assert_near(vars.x["|elastic||limit|plastic-bar"],        0, 1e-3,
@@ -180,7 +180,7 @@ table.insert(cases, {
 
         -- Coal demand rises naturally: 30 (plastic-bar) + 2 * 10.074627
         -- (coal-liquefaction) + 0.45 * 1.679104 (boiler) = 50.904851.
-        harness.assert_near(vars.x["|basic_source|coal"], 50.904851, 5e-2, "coal scales to meet the target")
+        harness.assert_near(vars.x["|initial_source|coal"], 50.904851, 5e-2, "coal scales to meet the target")
 
         -- Cracking + boiler intermediates pinned at the captured optimum.
         harness.assert_near(vars.x["recipe/light-oil-cracking"],   30.485075, 5e-3, "light-oil-cracking")

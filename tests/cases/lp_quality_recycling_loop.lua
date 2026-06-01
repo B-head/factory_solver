@@ -176,7 +176,7 @@ table.insert(cases, {
     -- tier, recyclers at every tier except legendary (recycling legendary
     -- has nowhere to upgrade), with an upper-bound constraint on legendary
     -- electronic-circuit. Iron-ore and copper-plate are not produced --
-    -- create_problem.lua bridges them through |basic_source| (matches the
+    -- create_problem.lua bridges them through |initial_source| (matches the
     -- in-game shape where mining drills feed the chain from outside the
     -- solver's view). Reachable in ~20 iterations with the long-step IPM.
     run = function()
@@ -248,7 +248,7 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "5-tier all-in-cycle: solver auto-promotes cu/normal + ir/normal to basic_source",
+    name = "5-tier all-in-cycle: solver auto-promotes cu/normal + ir/normal to initial_source",
     -- Same fixture as the test above but with iron-plate / copper-cable
     -- producer recipes removed: the chain has no open boundary and every
     -- material has a producer recipe in the line set, so the existing
@@ -300,28 +300,28 @@ table.insert(cases, {
         -- The promoted deficits must be present as LP variables and
         -- carry positive flow.
         harness.assert_true(
-            (vars.x["|basic_source|item/copper-cable/normal"] or 0) > 0,
-            "copper-cable/normal basic_source is active (got " ..
-                tostring(vars.x["|basic_source|item/copper-cable/normal"]) .. ")"
+            (vars.x["|initial_source|item/copper-cable/normal"] or 0) > 0,
+            "copper-cable/normal initial_source is active (got " ..
+                tostring(vars.x["|initial_source|item/copper-cable/normal"]) .. ")"
         )
         harness.assert_true(
-            (vars.x["|basic_source|item/iron-plate/normal"] or 0) > 0,
-            "iron-plate/normal basic_source is active (got " ..
-                tostring(vars.x["|basic_source|item/iron-plate/normal"]) .. ")"
+            (vars.x["|initial_source|item/iron-plate/normal"] or 0) > 0,
+            "iron-plate/normal initial_source is active (got " ..
+                tostring(vars.x["|initial_source|item/iron-plate/normal"]) .. ")"
         )
 
-        -- Higher-quality basic_sources must NOT exist: the source-SCC
+        -- Higher-quality initial_sources must NOT exist: the source-SCC
         -- gate keeps them out of the deficit set so the LP variable is
         -- never created.
         for i = 2, #QUALITY do
             local q = QUALITY[i]
             harness.assert_true(
-                vars.x["|basic_source|item/copper-cable/" .. q] == nil,
-                "copper-cable/" .. q .. " basic_source must not exist"
+                vars.x["|initial_source|item/copper-cable/" .. q] == nil,
+                "copper-cable/" .. q .. " initial_source must not exist"
             )
             harness.assert_true(
-                vars.x["|basic_source|item/iron-plate/" .. q] == nil,
-                "iron-plate/" .. q .. " basic_source must not exist"
+                vars.x["|initial_source|item/iron-plate/" .. q] == nil,
+                "iron-plate/" .. q .. " initial_source must not exist"
             )
         end
 

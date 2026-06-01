@@ -10,10 +10,10 @@
 --   produced AND consumed  -> |surplus_sink| (+ |shortage_source| if it is
 --                             a cycle material not reachable from raw input)
 --   product only           -> |final_sink|
---   ingredient only        -> |basic_source| at source_cost
+--   ingredient only        -> |initial_source| at source_cost
 --
 -- Fixture chain: raw -[r1]-> mid -[r2]-> final + byprod, with `final` pinned.
---   raw    : ingredient only      -> basic_source
+--   raw    : ingredient only      -> initial_source
 --   mid    : produced + consumed  -> surplus_sink (reachable, so NO shortage)
 --   final  : product only         -> final_sink
 --   byprod : product only         -> final_sink
@@ -54,18 +54,18 @@ table.insert(cases, {
 
         local function has(name) return problem.primals[name] ~= nil end
 
-        -- raw: ingredient only -> basic_source, nothing else.
-        harness.assert_true(has("|basic_source|item/raw/normal"), "raw -> basic_source")
+        -- raw: ingredient only -> initial_source, nothing else.
+        harness.assert_true(has("|initial_source|item/raw/normal"), "raw -> initial_source")
         harness.assert_true(not has("|final_sink|item/raw/normal"), "raw is not a final product")
         harness.assert_true(not has("|surplus_sink|item/raw/normal"), "raw is not an intermediate")
 
-        -- mid: produced + consumed -> surplus_sink, and NOT a basic_source /
+        -- mid: produced + consumed -> surplus_sink, and NOT a initial_source /
         -- final_sink. Reachable from raw, so the cycle escape hatch
         -- |shortage_source| must NOT be added.
         harness.assert_true(has("|surplus_sink|item/mid/normal"), "mid -> surplus_sink")
         harness.assert_true(not has("|shortage_source|item/mid/normal"),
             "mid is reachable from raw, so no shortage_source escape hatch")
-        harness.assert_true(not has("|basic_source|item/mid/normal"),
+        harness.assert_true(not has("|initial_source|item/mid/normal"),
             "mid has a producer, so it is not sourced externally")
         harness.assert_true(not has("|final_sink|item/mid/normal"),
             "mid is consumed downstream, so it is not a final product")
@@ -74,7 +74,7 @@ table.insert(cases, {
         harness.assert_true(has("|final_sink|item/final/normal"), "final -> final_sink")
         harness.assert_true(has("|final_sink|item/byprod/normal"),
             "byprod (product with no consumer) -> final_sink")
-        harness.assert_true(not has("|basic_source|item/byprod/normal"),
+        harness.assert_true(not has("|initial_source|item/byprod/normal"),
             "byprod is produced, not sourced")
 
         -- And the rates still solve correctly: r1 = r2 = 5, raw drawn 5,
@@ -85,7 +85,7 @@ table.insert(cases, {
         assert(vars, "packed variables returned")
         harness.assert_near(vars.x["recipe/r1/normal"], 5, 0.05, "r1 rate")
         harness.assert_near(vars.x["recipe/r2/normal"], 5, 0.05, "r2 rate")
-        harness.assert_near(vars.x["|basic_source|item/raw/normal"], 5, 0.05, "raw drawn")
+        harness.assert_near(vars.x["|initial_source|item/raw/normal"], 5, 0.05, "raw drawn")
         harness.assert_near(vars.x["|surplus_sink|item/mid/normal"], 0, 0.05,
             "mid balances exactly -- no surplus")
         harness.assert_near(vars.x["|final_sink|item/final/normal"], 5, 0.05, "final output")
@@ -105,9 +105,9 @@ table.insert(cases, {
     -- (2 loop in, 1.5 loop + 1 out back). The loss is deliberately MILD: net
     -- -0.5 against production 1.5 is a -0.33 ratio, under find_deficit's 50%
     -- threshold, so the deficit heuristic does NOT promote `loop` to a
-    -- |basic_source| -- it stays an "uncertain" intermediate and falls through
+    -- |initial_source| -- it stays an "uncertain" intermediate and falls through
     -- to the shortage escape hatch. (A strongly mass-losing self-loop, e.g.
-    -- 2 in -> 1 back, IS now caught as a basic_source cycle input, same as the
+    -- 2 in -> 1 back, IS now caught as a initial_source cycle input, same as the
     -- asteroid base chunk; the escape hatch is for losses the heuristic can't
     -- confidently call a raw input.)
     run = function()
@@ -139,18 +139,18 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "a strongly mass-losing dead-end self-loop is fed by basic_source and does not degenerate",
+    name = "a strongly mass-losing dead-end self-loop is fed by initial_source and does not degenerate",
     -- Companion to the mild-loss escape-hatch case above, and the guard that
     -- the production-denominator deficit fix did not trade one degeneracy for
     -- another. Here the self-loop loses heavily: spin consumes 2 loop and
     -- returns 1 loop + 1 out (consumption = 2x production), so
     -- find_deficit_materials classifies `loop` as a genuine cycle entry input
-    -- and gives it a |basic_source| (cons > 1.5x prod) rather than the
+    -- and gives it a |initial_source| (cons > 1.5x prod) rather than the
     -- shortage escape hatch. The load-bearing check is that the LP STILL meets
     -- the `out` demand from that base supply -- it must not collapse to the
     -- all-zero solution. (This is the exact recipe the old consumption-
     -- denominator heuristic left to shortage_source; the fix reclassifies it
-    -- to basic_source, and the demand must still be served either way.)
+    -- to initial_source, and the demand must still be served either way.)
     run = function()
         local lines = {
             line("spin", { item("loop", 1), item("out", 1) }, { item("loop", 2) }),
@@ -162,10 +162,10 @@ table.insert(cases, {
 
         local problem = cp.create_problem("deadend-strong-loss", constraints, lines)
 
-        harness.assert_true(problem.primals["|basic_source|item/loop/normal"] ~= nil,
-            "strongly mass-losing loop -> basic_source cycle input")
+        harness.assert_true(problem.primals["|initial_source|item/loop/normal"] ~= nil,
+            "strongly mass-losing loop -> initial_source cycle input")
         harness.assert_true(problem.primals["|shortage_source|item/loop/normal"] == nil,
-            "no shortage_source: the deficit heuristic claims loop as a basic_source")
+            "no shortage_source: the deficit heuristic claims loop as a initial_source")
         harness.assert_true(problem.primals["|surplus_sink|item/loop/normal"] ~= nil,
             "still gets its surplus_sink as a produced + consumed material")
 
@@ -178,8 +178,8 @@ table.insert(cases, {
             "spin runs at the demanded rate (got " .. tostring(vars.x["recipe/spin/normal"]) .. ")")
         harness.assert_near(vars.x["|final_sink|item/out/normal"], 1, 0.05, "out output")
         -- spin's net -1 loop/run is covered by the base supply, no shortage.
-        harness.assert_near(vars.x["|basic_source|item/loop/normal"], 1, 0.05,
-            "basic_source feeds the loop's net consumption")
+        harness.assert_near(vars.x["|initial_source|item/loop/normal"], 1, 0.05,
+            "initial_source feeds the loop's net consumption")
     end,
 })
 
@@ -210,9 +210,9 @@ table.insert(cases, {
             "loop -> surplus_sink")
         harness.assert_true(problem.primals["|shortage_source|item/loop/normal"] == nil,
             "no shortage_source: loop is reachable from raw via feed")
-        harness.assert_true(problem.primals["|basic_source|item/loop/normal"] == nil,
-            "no basic_source: loop has a real producer (not a source-SCC deficit)")
-        harness.assert_true(problem.primals["|basic_source|item/raw/normal"] ~= nil,
+        harness.assert_true(problem.primals["|initial_source|item/loop/normal"] == nil,
+            "no initial_source: loop has a real producer (not a source-SCC deficit)")
+        harness.assert_true(problem.primals["|initial_source|item/raw/normal"] ~= nil,
             "raw is the genuine external input")
 
         local state, vars = harness.solve_to_completion(lp, problem,
@@ -223,7 +223,7 @@ table.insert(cases, {
         -- from raw, not by a shortage.
         harness.assert_near(vars.x["recipe/spin/normal"], 1, 0.05, "spin makes the out demand")
         harness.assert_near(vars.x["recipe/feed/normal"], 1, 0.1, "feed supplies the loop deficit from raw")
-        harness.assert_near(vars.x["|basic_source|item/raw/normal"], 1, 0.1, "raw drawn to feed the cycle")
+        harness.assert_near(vars.x["|initial_source|item/raw/normal"], 1, 0.1, "raw drawn to feed the cycle")
     end,
 })
 

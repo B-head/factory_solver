@@ -1,13 +1,13 @@
 -- Detects strongly connected components in the recipe graph and identifies
 -- materials inside cycles that need external supply. The goal is to extend
--- the `|basic_source|` boundary beyond "ingredients with no producer in the
+-- the `|initial_source|` boundary beyond "ingredients with no producer in the
 -- line set" (the rule encoded by compute_reachable_materials): when the
 -- chain is fully cyclic, that seed is empty and the LP falls back to
 -- `|shortage_source|` at penalty cost for *every* material in the cycle,
 -- with no signal about which materials are the "natural" external inputs.
 --
 -- This module provides the structural analysis. Wiring its result into
--- create_problem.lua so deficit materials get a free `|basic_source|`
+-- create_problem.lua so deficit materials get a free `|initial_source|`
 -- instead of a penalised `|shortage_source|` is a follow-up step.
 --
 -- Algorithm (Phase 1):

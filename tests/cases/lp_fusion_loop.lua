@@ -76,7 +76,7 @@ table.insert(cases, {
             p:add_objective("|shortage_source|" .. f, 1024, false)
         end
 
-        p:add_objective("|basic_source|power-cell", 1, false)
+        p:add_objective("|initial_source|power-cell", 1, false)
         p:add_objective("%positive_slack%|limit|power-cell", 1048576, false)
 
         for _, f in ipairs(fluids) do
@@ -121,12 +121,12 @@ table.insert(cases, {
         p:add_subject_term("|surplus_sink|plasma@range", "plasma@range", -1)
         p:add_subject_term("|shortage_source|plasma@range", "plasma@range", 1)
 
-        -- power-cell: reactor consumes 0.00025, basic_source supplies.
+        -- power-cell: reactor consumes 0.00025, initial_source supplies.
         p:add_subject_term("r/reactor",            "power-cell", -0.00025)
-        p:add_subject_term("|basic_source|power-cell", "power-cell", 1)
+        p:add_subject_term("|initial_source|power-cell", "power-cell", 1)
 
-        -- limit row: basic_source + slack = 1/60.
-        p:add_subject_term("|basic_source|power-cell",          "|limit|power-cell", 1)
+        -- limit row: initial_source + slack = 1/60.
+        p:add_subject_term("|initial_source|power-cell",          "|limit|power-cell", 1)
         p:add_subject_term("%positive_slack%|limit|power-cell", "|limit|power-cell", 1)
 
         local state, vars, steps = harness.solve_to_completion(lp, p,
@@ -137,7 +137,7 @@ table.insert(cases, {
         harness.assert_true(steps < 100, "converged in under 100 iterations (took " .. steps .. ")")
 
         -- Power-cell input pinned at the cap; slack idle.
-        harness.assert_near(vars.x["|basic_source|power-cell"], 1 / 60, 1e-5, "power-cell input pinned at 1/min")
+        harness.assert_near(vars.x["|initial_source|power-cell"], 1 / 60, 1e-5, "power-cell input pinned at 1/min")
         harness.assert_near(vars.x["%positive_slack%|limit|power-cell"], 0, 1e-3, "power-cell cap slack idle")
 
         -- Loop rates: reactor = (1/60)/0.00025 = 66.667, cooling matches,

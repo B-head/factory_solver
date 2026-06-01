@@ -128,7 +128,7 @@ end
 ---
 ---The shape and amount magnitudes are tuned to mirror the in-game LP
 ---captured in the user's factorio-current.log: iron-ore / copper-ore
----enter as |basic_source| inputs, iron-plate and copper-plate smelters
+---enter as |initial_source| inputs, iron-plate and copper-plate smelters
 ---bring them to plate form, copper-cable comes off copper-plate with
 ---a heavy productivity multiplier (the player's actual recipe carries
 ---enough productivity research + quality modules to push net product

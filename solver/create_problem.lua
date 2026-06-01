@@ -6,7 +6,7 @@ local fs_log = require "fs_log"
 local log = fs_log.for_module("solver.create_problem")
 
 local slack_cost = 0
--- Small per-unit cost on |basic_source| (external material supply). It sits
+-- Small per-unit cost on |initial_source| (external material supply). It sits
 -- well below elastic_cost, so it never competes with the shortage/surplus
 -- penalties or changes reachability gating, but it breaks ties between
 -- recipes that produce the same product at different material efficiency:
@@ -243,7 +243,7 @@ end
 ---
 ---`extra_seeds` lets callers inject additional seed materials (e.g. the
 ---deficit set from `material_cycles.find_deficit_materials`, which are
----cycle entry points that will receive a `|basic_source|` and therefore
+---cycle entry points that will receive a `|initial_source|` and therefore
 ---behave like raw inputs for reachability purposes). Without this, an
 ---all-in-cycle chain has an empty seed set and the BFS never fires.
 ---@param production_lines NormalizedProductionLine[]
@@ -317,7 +317,7 @@ end
 ---  - recipe ↔ |limit|<recipe> for non-bridge lines (so a Constraint that
 ---    pins the recipe variable itself anchors the line)
 ---  - <material> ↔ |limit|<material> and <material> ↔ |limit|<bare-fluid>:
----    `|basic_source|` and `|shortage_source|` always link these in the
+---    `|initial_source|` and `|shortage_source|` always link these in the
 ---    actual LP (the source slack contributes to both the equivalence dual
 ---    and the limit aggregation), so a bare-fluid Constraint must be able
 ---    to reach a consumer-only recipe that has no direct |limit| edge.
@@ -542,7 +542,7 @@ function M.create_problem(solution_name, constraints, production_lines)
     problem.inactive_recipe_variables = inactive_recipe_variables
 
     -- Identify cycle materials that need external supply and seed reachability
-    -- with them, so the |basic_source| we add downstream behaves like a raw
+    -- with them, so the |initial_source| we add downstream behaves like a raw
     -- input. Filter to materials not already reachable through the open
     -- boundary -- an iron-ore that already has a mining recipe doesn't need
     -- a second free supply line just because it also participates in a cycle.
@@ -620,7 +620,7 @@ function M.create_problem(solution_name, constraints, production_lines)
             problem:add_subject_term(elastic_name, constraint_name, -1)
         end
         -- Cycle entry points identified by find_deficit_materials get a
-        -- |basic_source| at source_cost: they are the natural external
+        -- |initial_source| at source_cost: they are the natural external
         -- inputs of the cycle (think cu/normal + ir/normal in a quality
         -- recycling chain with no copper / iron producer registered).
         -- Without this, an all-in-cycle chain has no way to start and the
@@ -629,7 +629,7 @@ function M.create_problem(solution_name, constraints, production_lines)
         -- external input behind the slack-vs-source distinction. source_cost
         -- is far below elastic_cost so the shortage gate is unaffected.
         if deficits[constraint_name] then
-            local slack_name = "|basic_source|" .. constraint_name
+            local slack_name = "|initial_source|" .. constraint_name
             problem:add_objective(slack_name, source_cost_for(constraint_name))
             problem:add_subject_term(slack_name, constraint_name, 1)
             problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
@@ -671,7 +671,7 @@ function M.create_problem(solution_name, constraints, production_lines)
     for constraint_name, _ in pairs(included_ingresients) do
         problem:add_equivalence_constraint(constraint_name, 0)
 
-        local slack_name = "|basic_source|" .. constraint_name
+        local slack_name = "|initial_source|" .. constraint_name
         problem:add_objective(slack_name, source_cost_for(constraint_name))
         problem:add_subject_term(slack_name, constraint_name, 1)
         problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)

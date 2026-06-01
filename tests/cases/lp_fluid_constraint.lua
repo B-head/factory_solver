@@ -78,7 +78,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "bare-fluid equal constraint pins range-temperature ingredient",
     -- generator consumes steam@[15,1000]; the user requests "fluid/steam == 2/s".
-    -- Without a producer recipe in the line set the |basic_source| supplies it,
+    -- Without a producer recipe in the line set the |initial_source| supplies it,
     -- and the bare-fluid limit must aggregate that source flow.
     run = function()
         local lines = {
@@ -165,7 +165,7 @@ table.insert(cases, {
         }
         local constraints = {
             -- Pin both downstream products. The temperature-specific cap then
-            -- forces |surplus_sink| / |basic_source| to absorb the mismatch
+            -- forces |surplus_sink| / |initial_source| to absorb the mismatch
             -- on the low-steam side without dragging the high-steam side.
             { type = "item", name = "p-low", quality = "normal",
               limit_type = "equal", limit_amount_per_second = 10 },

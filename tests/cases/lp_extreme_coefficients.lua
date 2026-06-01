@@ -26,11 +26,11 @@ table.insert(cases, {
     name = "vanilla nuclear power LP with 10^10 coefficient range converges",
     -- Captured from vanilla (no Space Age) with the trace-dumped subject
     -- matrix. Layout:
-    --   uranium-fuel-cell (basic_source, capped at 1/60 per sec by an upper-
+    --   uranium-fuel-cell (initial_source, capped at 1/60 per sec by an upper-
     --   limit constraint) --[reactor]--> <heat> --[heat-exchanger]-->
     --   steam@500 + consumes water@[15,100] <-[bridge]- water@15 <-[pump]--
     -- All surplus_sinks priced at 1024, the limit slack at 2^20, and the
-    -- basic_source at 1 -- the BIG-M layered cost stack create_problem
+    -- initial_source at 1 -- the BIG-M layered cost stack create_problem
     -- emits, preserved verbatim to keep the fixture representative.
     run = function()
         local p = pg.new("vanilla-nuclear")
@@ -44,7 +44,7 @@ table.insert(cases, {
         p:add_objective("|surplus_sink|heat", 1024, false)
         p:add_objective("|surplus_sink|water@15", 1024, false)
         p:add_objective("|surplus_sink|water@[15,100]", 1024, false)
-        p:add_objective("|basic_source|uranium-fuel-cell", 1, false)
+        p:add_objective("|initial_source|uranium-fuel-cell", 1, false)
         p:add_objective("%positive_slack%|limit|uranium-fuel-cell", 1048576, false)
 
         p:add_equivalence_constraint("steam@500", 0)
@@ -73,9 +73,9 @@ table.insert(cases, {
 
         -- And the opposite extreme: a 0.005 coefficient sharing the LP.
         p:add_subject_term("recipe/nuclear-reactor",                       "uranium-fuel-cell", -0.005)
-        p:add_subject_term("|basic_source|uranium-fuel-cell",              "uranium-fuel-cell",  1)
+        p:add_subject_term("|initial_source|uranium-fuel-cell",              "uranium-fuel-cell",  1)
 
-        p:add_subject_term("|basic_source|uranium-fuel-cell",              "|limit|uranium-fuel-cell", 1)
+        p:add_subject_term("|initial_source|uranium-fuel-cell",              "|limit|uranium-fuel-cell", 1)
         p:add_subject_term("%positive_slack%|limit|uranium-fuel-cell",     "|limit|uranium-fuel-cell", 1)
 
         local state, vars, steps = harness.solve_to_completion(lp, p,
@@ -85,7 +85,7 @@ table.insert(cases, {
         assert(vars, "packed variables returned")
         harness.assert_true(steps < 100, "converged in under 100 iterations (took " .. steps .. ")")
 
-        -- Expected rates derived from the limit (basic_source <= 1/60):
+        -- Expected rates derived from the limit (initial_source <= 1/60):
         --   reactor       = (1/60) / 0.005           = 10/3
         --   heat-exch     = reactor * 40e6 / 10e6    = 40/3
         --   bridge        = heat-exch * 10.309278    = 137.457...
@@ -97,7 +97,7 @@ table.insert(cases, {
         harness.assert_near(vars.x["recipe/bridge-water"],               137.457045, 1e-2, "bridge flow")
         harness.assert_near(vars.x["recipe/pump-water"],                 0.114548,  1e-4, "pump rate")
         harness.assert_near(vars.x["recipe/steam-turbine"],              22.909507, 1e-3, "turbine rate")
-        harness.assert_near(vars.x["|basic_source|uranium-fuel-cell"],   1 / 60,    1e-5, "uranium uptake at 1/min")
+        harness.assert_near(vars.x["|initial_source|uranium-fuel-cell"],   1 / 60,    1e-5, "uranium uptake at 1/min")
         harness.assert_near(vars.x["%positive_slack%|limit|uranium-fuel-cell"], 0,  1e-4, "limit slack idle")
     end,
 })

@@ -94,7 +94,7 @@ table.insert(cases, {
     -- boiler produces steam@500, generator requires steam@[15,200]. 500 is
     -- not in [15,200]; the bridge primal must not exist. (The LP itself is
     -- intentionally unbounded in this scenario: steam@500 only has free
-    -- final_sink and steam@[15,200] only has free basic_source, so the
+    -- final_sink and steam@[15,200] only has free initial_source, so the
     -- combination of negative recipe cost + cost-0 slacks does not converge.
     -- That outcome belongs to a higher layer; here we only assert the bridge
     -- gating.)
