@@ -3,6 +3,18 @@ local flib_table = require "__flib__/table"
 
 local M = {}
 
+---Factorio runs the simulation at a fixed 60 ticks per second, so a per-tick
+---rate becomes per-second by multiplying by this. Single source of truth for
+---the conversion the accessor / solver layers lean on; re-exported as
+---`accessor.second_per_tick` for the consumers that still read it there.
+M.second_per_tick = 60
+
+---Relative residual cutoff used to decide a material's net per-second flow is
+---effectively zero against its gross throughput (see accessor.is_negligible /
+---number_format.is_negligible). Lives here as a shared numeric epsilon next to
+---is_nan / is_infinite; re-exported as `accessor.tolerance`.
+M.tolerance = (10 ^ -6) / 2
+
 ---@type table<TimeScale, number>
 M.scale_per_second = {
     second = 1,
