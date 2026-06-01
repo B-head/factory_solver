@@ -596,6 +596,25 @@ local function unpack_factory_limit_constraint(factory, recipe_typed_name)
     }
 end
 
+---Decode a Helmod product / ingredient entry's fluid temperature into the
+---range-only model. Helmod carries either a single `temperature` (collapsed to
+---the degenerate range [T,T], mirroring unpack_fuel_typed_name) or, on a
+---round-trip from factory_solver's own export, an explicit
+---`minimum_temperature` / `maximum_temperature` pair. Only meaningful for
+---fluids; callers gate on type. Returns (nil, nil) for a temperature-less entry
+---so the resulting Constraint stays a bare fluid.
+---@param entry any
+---@return number? minimum_temperature
+---@return number? maximum_temperature
+local function unpack_fluid_temperature(entry)
+    if type(entry) ~= "table" then return nil, nil end
+    local temperature = tonumber(entry.temperature)
+    if temperature then
+        return temperature, temperature
+    end
+    return tonumber(entry.minimum_temperature), tonumber(entry.maximum_temperature)
+end
+
 ---Convert Helmod's `block.products` / `block.ingredients` entries whose
 ---`input` is set into factory_solver Constraints. Helmod uses `input` as
 ---the user-specified target rate per `Model.time`, so we normalise to
@@ -624,12 +643,18 @@ local function append_io_constraints(dict, time, out, warnings)
             else
                 local t = p.type
                 if t ~= "item" and t ~= "fluid" then t = infer_item_or_fluid(name) end
+                local min_temp, max_temp
+                if t == "fluid" then
+                    min_temp, max_temp = unpack_fluid_temperature(p)
+                end
                 out[#out + 1] = {
                     type = t,
                     name = name,
                     quality = read_quality(p.quality),
                     limit_type = "lower",
                     limit_amount_per_second = input / divisor,
+                    minimum_temperature = min_temp,
+                    maximum_temperature = max_temp,
                 }
             end
         end
@@ -675,7 +700,16 @@ local function append_block_objectives(block, time, out, seen, warnings)
                         local t = (raw_t == "item" or raw_t == "fluid") and raw_t
                             or infer_item_or_fluid(name)
                         local quality = read_quality(entry and entry.quality)
-                        local seen_key = string.format("%s/%s/%s", t, name, quality)
+                        local min_temp, max_temp
+                        if t == "fluid" then
+                            min_temp, max_temp = unpack_fluid_temperature(entry)
+                        end
+                        -- Temperature is part of the variable identity: two
+                        -- objectives on the same fluid at different temperatures
+                        -- are distinct constraints, so the dedup key must include
+                        -- it (otherwise steam@500 and steam@165 collapse to one).
+                        local seen_key = string.format("%s/%s/%s/%s/%s", t, name, quality,
+                            tostring(min_temp), tostring(max_temp))
                         if not seen[seen_key] then
                             seen[seen_key] = true
                             out[#out + 1] = {
@@ -684,6 +718,8 @@ local function append_block_objectives(block, time, out, seen, warnings)
                                 quality = quality,
                                 limit_type = "lower",
                                 limit_amount_per_second = value / divisor,
+                                minimum_temperature = min_temp,
+                                maximum_temperature = max_temp,
                             }
                         end
                     end
