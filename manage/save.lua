@@ -663,7 +663,11 @@ function M.new_production_line(player_index, solution, recipe_typed_name, fuel_t
     -- Without this the fuel is pinned to the referenced single temperature.
     -- Only newly created lines are corrected here; production lines already
     -- saved with a wrongly pinned fuel temperature are not migrated (the user
-    -- can re-pick the fuel to refresh it).
+    -- can re-pick the fuel to refresh it). A machine change on an existing line
+    -- is reconciled separately by acc.reconcile_fuel_for_machine (the
+    -- on_make_fuel_table / apply_machine_clipboard paths); this branch keeps its
+    -- own bare-fluid fallback because a recipe-picker fuel may name a fluid the
+    -- chosen machine doesn't accept.
     if fuel_typed_name and fuel_typed_name.type == "fluid" then
         local fixed = acc.try_get_fixed_fuel(machine)
         if fixed and fixed.type == "fluid" and fixed.name == fuel_typed_name.name then
@@ -818,27 +822,16 @@ function M.apply_machine_clipboard(player_index, solution, line_index)
         local new_machine_typed_name = flib_table.deep_copy(clipboard.machine_typed_name)
         local new_machine = tn.typed_name_to_machine(new_machine_typed_name)
 
-        local new_fuel_typed_name = nil
-        if clipboard.fuel_typed_name and acc.is_use_fuel(new_machine) then
-            local fuel_categories = acc.try_get_fuel_categories(new_machine)
-            local fuel_ok = false
-            if fuel_categories then
-                local fuels = acc.get_fuels_in_categories(fuel_categories)
-                for _, fuel in ipairs(fuels) do
-                    if fuel.name == clipboard.fuel_typed_name.name then
-                        fuel_ok = true
-                        break
-                    end
-                end
-            elseif acc.is_use_any_fluid_fuel(new_machine) then
-                fuel_ok = clipboard.fuel_typed_name.type == "fluid"
-            end
-            if fuel_ok then
-                new_fuel_typed_name = flib_table.deep_copy(clipboard.fuel_typed_name)
-            else
-                new_fuel_typed_name = preset.get_fuel_preset(player_index, new_machine_typed_name)
-            end
-        elseif acc.is_use_fuel(new_machine) then
+        -- Reconcile the clipboard fuel to the target machine across every fuel mode:
+        -- heat / fixed-filter fluid keep or adopt the machine's intrinsic fuel (a
+        -- fluid temperature is kept-or-snapped), item / any-fluid keep an in-list
+        -- fuel, otherwise fall back to this machine's preset. A fuel-less machine
+        -- yields nil. Mirrors the dialog reconciliation in on_make_fuel_table.
+        local clipboard_fuel = clipboard.fuel_typed_name
+            and flib_table.deep_copy(clipboard.fuel_typed_name) or nil
+        local new_fuel_typed_name, needs_preset =
+            acc.reconcile_fuel_for_machine(clipboard_fuel, new_machine)
+        if needs_preset then
             new_fuel_typed_name = preset.get_fuel_preset(player_index, new_machine_typed_name)
         end
 

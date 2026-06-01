@@ -755,6 +755,21 @@ function handlers.on_make_fuel_table(event)
     local machine = tn.typed_name_to_machine(machine_typed_name)
     local fuel_typed_name = dialog_tags.fuel_typed_name --[[@as TypedName?]]
 
+    -- Reconcile the stored fuel to the (possibly just-changed) machine across every
+    -- fuel mode, so a switch between item / heat / fluid fuels updates the selection
+    -- in both directions (Power column / fuel amount follow the machine). Done before
+    -- the visibility short-circuit so it still runs when the picker is hidden (e.g. a
+    -- heat machine or a range-only fluid machine with no variant buttons). Idempotent,
+    -- so the on_fuel_click re-dispatch leaves a fresh pick untouched.
+    local reconciled, needs_preset = acc.reconcile_fuel_for_machine(fuel_typed_name, machine)
+    if needs_preset then
+        reconciled = assert(preset.get_fuel_preset(event.player_index, machine_typed_name))
+    end
+    if reconciled then
+        dialog_tags.fuel_typed_name = reconciled
+    end
+    dialog.tags = dialog_tags
+
     if not elem.visible then
         return
     end
@@ -770,17 +785,6 @@ function handlers.on_make_fuel_table(event)
     local temp_variants = acc.get_fluid_fuel_temperature_variants(machine)
 
     if fuels or (temp_variants and 0 < #temp_variants) then
-        if fuels then
-            local fuel_name = fuel_typed_name and fuel_typed_name.name
-            local pos = fs_util.find(fuels, function(value)
-                return value.name == fuel_name
-            end)
-            if not pos then
-                fuel_typed_name = assert(preset.get_fuel_preset(event.player_index, machine_typed_name))
-                dialog_tags.fuel_typed_name = fuel_typed_name
-            end
-        end
-
         elem.clear()
 
         local function add_button(craft)

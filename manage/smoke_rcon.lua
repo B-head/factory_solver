@@ -653,6 +653,183 @@ function M.check_force_caches()
     return "OK"
 end
 
+---Asserts that the stored fuel follows a machine change across every fuel mode,
+---the bug behind acc.reconcile_fuel_for_machine / reconcile_fluid_fuel_for_machine.
+---Fluid leg: a default RANGE re-derives to the new machine's acceptance range, an
+---in-range single pick survives, an out-of-range one snaps, idempotent. Cross-type
+---leg: switching to a heat machine pins <heat>, to a fixed-filter fluid machine
+---adopts its fluid, to an item/any-fluid machine keeps an in-list fuel or signals
+---needs_preset; a void machine takes no fuel. Driven off the data_test.lua synthetic
+---machines, all on the fs-test-machine category (fs-test-fes-no-scale = wide steam,
+---fes-window-100-300 = steam window [100,300], fs-test-cm-heat, fs-test-cm-multi-fuel,
+---fs-test-fes-any-fluid, fs-test-cm-void); guarded on presence so a stripped build
+---skips instead of failing. Also exercises the persisted apply_machine_clipboard path.
+---Returns "OK" or "ERROR: <detail>".
+---@return string
+function M.check_fuel_reconciliation()
+    local wide_machine = prototypes.entity["fs-test-fes-no-scale"]
+    local narrow_machine = prototypes.entity["fes-window-100-300"]
+    if not (wide_machine and narrow_machine) then
+        log.info("check_fuel_reconciliation: data_test machines absent, skipped")
+        return "OK"
+    end
+
+    local ok, err = pcall(function()
+        -- The two machines' acceptance ranges, straight from the prototype.
+        local wide = acc.try_get_fixed_fuel(wide_machine)
+        local narrow = acc.try_get_fixed_fuel(narrow_machine)
+        assert(wide and wide.type == "fluid" and wide.name == "steam",
+            "wide machine fixed fuel is not steam")
+        assert(narrow and narrow.type == "fluid" and narrow.name == "steam",
+            "narrow machine fixed fuel is not steam")
+        -- (1) wide machine has a real range straddling the narrow window.
+        assert(wide.minimum_temperature ~= wide.maximum_temperature
+            and wide.minimum_temperature < 100 and wide.maximum_temperature > 300,
+            "wide machine steam acceptance is not a range straddling [100,300]")
+        -- (2) narrow machine is exactly the fluid_box window [100,300].
+        assert(narrow.minimum_temperature == 100 and narrow.maximum_temperature == 300,
+            "narrow machine steam acceptance is not [100,300]")
+
+        -- (3) the bug: a default range follows the machine change to the narrow one.
+        local followed = acc.reconcile_fluid_fuel_for_machine(
+            tn.create_typed_name("fluid", "steam", nil,
+                wide.minimum_temperature, wide.maximum_temperature), narrow_machine)
+        assert(followed.minimum_temperature == 100 and followed.maximum_temperature == 300,
+            "stale range did not follow the machine change to [100,300]")
+
+        -- (4) a deliberate in-range single pick is preserved.
+        local kept = acc.reconcile_fluid_fuel_for_machine(
+            tn.create_typed_name("fluid", "steam", nil, 200, 200), narrow_machine)
+        assert(kept.minimum_temperature == 200 and kept.maximum_temperature == 200,
+            "in-range single pick was not preserved")
+
+        -- (5) an out-of-range single pick snaps to the machine's range.
+        local snapped = acc.reconcile_fluid_fuel_for_machine(
+            tn.create_typed_name("fluid", "steam", nil, 500, 500), narrow_machine)
+        assert(snapped.minimum_temperature == 100 and snapped.maximum_temperature == 300,
+            "out-of-range single pick did not snap to [100,300]")
+
+        -- (6) idempotent: the machine's own range round-trips unchanged in value.
+        local idem = acc.reconcile_fluid_fuel_for_machine(
+            tn.create_typed_name("fluid", "steam", nil, 100, 300), narrow_machine)
+        assert(idem.minimum_temperature == 100 and idem.maximum_temperature == 300,
+            "reconcile is not idempotent on the machine's own range")
+
+        -- (7) cross-type: switching between item / heat / fluid fuels in either
+        -- direction updates the selection. reconcile_fuel_for_machine returns
+        -- (fuel, needs_preset); the test fuels are a steam range, a coal item, and
+        -- the <heat> virtual material.
+        local steam_fuel = tn.create_typed_name("fluid", "steam", nil,
+            wide.minimum_temperature, wide.maximum_temperature)
+        local coal_fuel = prototypes.item["coal"] and tn.create_typed_name("item", "coal")
+        local heat_fuel = tn.create_typed_name("virtual_material", "<heat>")
+
+        local heat_machine = prototypes.entity["fs-test-cm-heat"]
+        if heat_machine then
+            for _, from in ipairs({ steam_fuel, coal_fuel }) do
+                if from then
+                    local f, np = acc.reconcile_fuel_for_machine(from, heat_machine)
+                    assert(f and f.type == "virtual_material" and f.name == "<heat>" and not np,
+                        "switch to heat machine did not pin <heat>")
+                end
+            end
+        end
+
+        -- fixed-filter fluid machine adopts its own fluid when fed a non-fluid fuel.
+        if coal_fuel then
+            local f, np = acc.reconcile_fuel_for_machine(coal_fuel, narrow_machine)
+            assert(f and f.type == "fluid" and f.name == "steam"
+                and f.minimum_temperature == 100 and f.maximum_temperature == 300 and not np,
+                "switch from item fuel to fluid machine did not adopt steam [100,300]")
+        end
+        do
+            local f, np = acc.reconcile_fuel_for_machine(heat_fuel, narrow_machine)
+            assert(f and f.type == "fluid" and f.name == "steam" and not np,
+                "switch from heat to fluid machine did not adopt the machine's fluid")
+        end
+
+        local burner = prototypes.entity["fs-test-cm-multi-fuel"]
+        if burner then
+            -- a fluid fuel is invalid for an item burner -> needs_preset.
+            local _, np_fluid = acc.reconcile_fuel_for_machine(steam_fuel, burner)
+            assert(np_fluid, "fluid fuel on an item burner did not request a preset")
+            if coal_fuel then
+                -- coal (chemical) is in the burner's fuel list -> kept as-is.
+                local f, np = acc.reconcile_fuel_for_machine(coal_fuel, burner)
+                assert(f and f.type == "item" and f.name == "coal" and not np,
+                    "in-list item fuel was not kept on the burner")
+            end
+        end
+
+        local anyfluid = prototypes.entity["fs-test-fes-any-fluid"]
+        if anyfluid then
+            -- A fuel in the machine's candidate list is kept; an item fuel is not
+            -- (-> needs_preset). The any-fluid candidate set is get_any_fluid_fuels
+            -- (fuel-value fluids), so sample it rather than assume a specific fluid.
+            local any_fuels = acc.get_any_fluid_fuels()
+            if #any_fuels > 0 then
+                local sample = any_fuels[1]
+                local f, np = acc.reconcile_fuel_for_machine(
+                    tn.create_typed_name("fluid", sample.name), anyfluid)
+                assert(f and f.type == "fluid" and f.name == sample.name and not np,
+                    "in-list fluid fuel was not kept on the any-fluid machine")
+            end
+            if coal_fuel then
+                local _, np_item = acc.reconcile_fuel_for_machine(coal_fuel, anyfluid)
+                assert(np_item, "item fuel on an any-fluid machine did not request a preset")
+            end
+        end
+
+        local void_machine = prototypes.entity["fs-test-cm-void"]
+        if void_machine and coal_fuel then
+            -- a fuel-less machine reconciles to no fuel and never needs a preset.
+            local f, np = acc.reconcile_fuel_for_machine(coal_fuel, void_machine)
+            assert(f == nil and not np, "void machine did not reconcile to a nil fuel")
+        end
+
+        -- (8) persisted path: a machine paste re-derives the line's fuel range.
+        -- Build a line on the wide machine, snapshot it to the clipboard, then
+        -- paste the narrow machine onto it and assert the fuel range followed.
+        save.init_force_data(FORCE_INDEX)
+        save.init_player_data(PLAYER_INDEX)
+        local solutions = storage.forces[FORCE_INDEX].solutions
+        local solution_name = save.new_solution(solutions, "fuel_reconcile_probe")
+        local solution = solutions[solution_name]
+        local recipe_tn = tn.create_typed_name("recipe", "fs-test-machine-recipe")
+
+        save.new_production_line(PLAYER_INDEX, solution, recipe_tn)
+        local line = solution.production_lines[1]
+        -- Pin the line onto the wide machine with its default (range) fuel.
+        line.machine_typed_name = tn.create_typed_name("machine", "fs-test-fes-no-scale")
+        line.fuel_typed_name = acc.try_get_fixed_fuel(
+            tn.typed_name_to_machine(line.machine_typed_name))
+        assert(line.fuel_typed_name
+            and line.fuel_typed_name.minimum_temperature ~= line.fuel_typed_name.maximum_temperature,
+            "seeded wide-machine line fuel is not a range")
+
+        save.set_machine_clipboard(PLAYER_INDEX, {
+            machine_typed_name = tn.create_typed_name("machine", "fes-window-100-300"),
+            fuel_typed_name = acc.try_get_fixed_fuel(
+                tn.typed_name_to_machine(tn.create_typed_name("machine", "fes-window-100-300"))),
+            substrate_tile_name = nil,
+            module_typed_names = {},
+            affected_by_beacons = {},
+        }, "machine_fuel")
+        local result = save.apply_machine_clipboard(PLAYER_INDEX, solution, 1)
+        assert(result == "ok", "apply_machine_clipboard rejected the paste: " .. tostring(result))
+        local pasted = solution.production_lines[1].fuel_typed_name
+        assert(pasted and pasted.type == "fluid" and pasted.name == "steam"
+            and pasted.minimum_temperature == 100 and pasted.maximum_temperature == 300,
+            "pasted line fuel did not follow the narrow machine to [100,300]")
+
+        solutions[solution_name] = nil -- leave no probe solution behind
+    end)
+    if not ok then
+        return "ERROR: fuel reconciliation check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -664,6 +841,7 @@ function M.register()
         state = M.state,
         check_read_side = M.check_read_side,
         check_force_caches = M.check_force_caches,
+        check_fuel_reconciliation = M.check_fuel_reconciliation,
     })
 end
 

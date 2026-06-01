@@ -851,6 +851,83 @@ function M.try_get_fixed_fuel(machine)
     end
 end
 
+---Reconcile a (possibly stale) fluid fuel selection against `machine` so the
+---stored temperature follows the machine's current acceptance range. A default
+---RANGE is re-derived to the machine's range; a deliberate single-temperature
+---pick (min==max) is preserved when still accepted, else snapped to the range.
+---A fluid that the fixed-filter machine doesn't accept comes back as the
+---machine's own fuel. Non-fluid fuels (item/heat) and filterless any-fluid
+---machines (try_get_fixed_fuel returns nil) are returned unchanged. Mirrors the
+---new-line derivation in save.new_production_line; idempotent so repeated calls
+---(e.g. the on_fuel_click re-dispatch into on_make_fuel_table) are value no-ops.
+---@param fuel_typed_name TypedName?
+---@param machine LuaEntityPrototype
+---@return TypedName?
+function M.reconcile_fluid_fuel_for_machine(fuel_typed_name, machine)
+    if not (fuel_typed_name and fuel_typed_name.type == "fluid") then
+        return fuel_typed_name
+    end
+    local fixed = M.try_get_fixed_fuel(machine)
+    if not (fixed and fixed.type == "fluid") then
+        return fuel_typed_name -- filterless any-fluid / non-fluid fuel: leave as-is
+    end
+    if fuel_typed_name.name == fixed.name then
+        local mn, mx = fuel_typed_name.minimum_temperature, fuel_typed_name.maximum_temperature
+        local lo, hi = fixed.minimum_temperature, fixed.maximum_temperature
+        if mn ~= nil and mn == mx and lo ~= nil and hi ~= nil and lo <= mn and mn <= hi then
+            return fuel_typed_name -- in-range single pick preserved
+        end
+    end
+    return fixed -- stale range / out-of-range pick / different fluid -> machine range
+end
+
+---Reconcile a stored fuel to `machine` across every fuel mode, for use when the
+---machine changes (a switch between item / heat / fluid fuels must update the
+---selection in both directions). Returns (fuel, needs_preset):
+--- * fuel-less machine (electric / void): (nil, false) -- caller leaves fuel as-is.
+--- * heat machine: (<heat>, false).
+--- * fixed-filter fluid machine: (reconciled fluid, false) -- a fluid fuel keeps or
+---   snaps its temperature, a non-fluid fuel adopts the machine's fluid range.
+--- * item (burner) / filterless any-fluid machine: the current fuel if it is still
+---   in the machine's fuel list, else (nil, true) so the caller substitutes its
+---   preset (accessor cannot reach manage/preset).
+---@param fuel_typed_name TypedName?
+---@param machine LuaEntityPrototype
+---@return TypedName?, boolean
+function M.reconcile_fuel_for_machine(fuel_typed_name, machine)
+    if not M.is_use_fuel(machine) then
+        return nil, false
+    end
+    local fixed = M.try_get_fixed_fuel(machine)
+    if fixed and fixed.type == "virtual_material" then
+        return fixed, false -- heat
+    elseif fixed and fixed.type == "fluid" then
+        if fuel_typed_name and fuel_typed_name.type == "fluid" then
+            return M.reconcile_fluid_fuel_for_machine(fuel_typed_name, machine), false
+        end
+        return fixed, false -- coming from a non-fluid fuel: adopt the machine's fluid
+    end
+
+    -- item (burner) or filterless any-fluid: keep an in-list fuel, else need preset.
+    local fuels
+    local categories = M.try_get_fuel_categories(machine)
+    if categories then
+        fuels = M.get_fuels_in_categories(categories)
+    elseif M.is_use_any_fluid_fuel(machine) then
+        fuels = M.get_any_fluid_fuels()
+    end
+    if fuels and fuel_typed_name then
+        local name = fuel_typed_name.name
+        local pos = fs_util.find(fuels, function(value)
+            return value.name == name
+        end)
+        if pos then
+            return fuel_typed_name, false
+        end
+    end
+    return nil, true
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@return boolean

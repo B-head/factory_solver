@@ -293,6 +293,18 @@ try {
         Write-Host "SMOKE FAIL: [force_caches] $caches"
         $allPass = $false
     }
+
+    # Fuel follows a machine change across every fuel mode (the on_make_fuel_table /
+    # apply_machine_clipboard reconciliation). Solution-independent, driven off
+    # data_test.lua machines, so it runs once up front too.
+    $fuelReconcile = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_fuel_reconciliation'))"
+    if ($fuelReconcile -eq "OK") {
+        Write-Host "SMOKE PASS: [fuel_reconcile] fuel follows machine change (item/heat/fluid)"
+    } else {
+        Write-Host "SMOKE FAIL: [fuel_reconcile] $fuelReconcile"
+        $allPass = $false
+    }
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"
