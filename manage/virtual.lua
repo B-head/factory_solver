@@ -250,6 +250,8 @@ function M.register_fluid_temperature_range(materials, fluid_name, min_temperatu
         subgroup_name = fluid_proto.subgroup.name,
         hidden = fluid_proto.hidden,
         source_fluid_name = fluid_name,
+        minimum_temperature = min_temperature,
+        maximum_temperature = max_temperature,
     }
 end
 
@@ -346,16 +348,10 @@ function M.create_source_sink_virtuals(materials, recipes)
     -- registered range.
     local ranges = {}   ---@type table<string, table<string, number[]>>
     for _, m in pairs(materials) do
-        if m.source_fluid_name then
-            -- Permissive capture + tonumber: "%g" keys go scientific at >=1e6
-            -- (e.g. "fluid/plasma@[1e+06,1e+07]"), which a digit-only pattern
-            -- would silently skip.
-            local fn2, lo, hi = string.match(m.name, "^fluid/(.-)@%[([^,]+),([^%]]+)%]$")
-            local lo_n, hi_n = tonumber(lo), tonumber(hi)
-            if fn2 and lo_n and hi_n then
-                ranges[fn2] = ranges[fn2] or {}
-                ranges[fn2][lo .. "," .. hi] = { lo_n, hi_n }
-            end
+        if m.source_fluid_name and m.minimum_temperature ~= nil then
+            local lo_n, hi_n = m.minimum_temperature, m.maximum_temperature
+            ranges[m.source_fluid_name] = ranges[m.source_fluid_name] or {}
+            ranges[m.source_fluid_name][string.format("%g,%g", lo_n, hi_n)] = { lo_n, hi_n }
         end
     end
 

@@ -1061,20 +1061,17 @@ function M.get_fluid_fuel_temperature_variants(machine)
         return {}
     end
 
-    -- Collect the registered single-temperature points (degenerate ranges,
-    -- l == h) of this fluid that fall within the acceptance range. Keys are
-    -- range-only ("fluid/x@[l,h]"); a permissive capture + tonumber handles the
-    -- "%g" scientific notation large temperatures stringify to (e.g. plasma).
-    local prefix = "fluid/" .. filter.name .. "@"
-    local prefix_len = #prefix
+    -- Collect this fluid's registered single-temperature points (the degenerate
+    -- ranges where minimum_temperature == maximum_temperature) that fall within
+    -- the acceptance range. Matched off VirtualMaterial fields, not the name key,
+    -- so the filter is grep-discoverable and survives a key-format change.
     local points = {}
-    for key, material in pairs(storage.virtuals.material) do
-        if string.sub(key, 1, prefix_len) == prefix then
-            local l, h = string.match(key, "@%[([^,]+),([^%]]+)%]$")
-            local ln, hn = tonumber(l), tonumber(h)
-            if ln and hn and ln == hn and lo <= ln and ln <= hi then
-                points[#points + 1] = material
-            end
+    for _, material in pairs(storage.virtuals.material) do
+        if material.source_fluid_name == filter.name
+            and material.minimum_temperature ~= nil
+            and material.minimum_temperature == material.maximum_temperature
+            and lo <= material.minimum_temperature and material.minimum_temperature <= hi then
+            points[#points + 1] = material
         end
     end
     if #points == 0 then return {} end
@@ -1097,6 +1094,8 @@ function M.get_fluid_fuel_temperature_variants(machine)
             subgroup_name = filter.subgroup.name,
             hidden = filter.hidden,
             source_fluid_name = filter.name,
+            minimum_temperature = lo,
+            maximum_temperature = hi,
         }
     end
 

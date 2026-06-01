@@ -204,6 +204,15 @@ __factory_solver__storage = {}
 ---@field hidden boolean
 ---@field source_entity_name string?
 ---@field source_fluid_name string?
+--- The temperature range a fluid temperature variant covers. Set only for the
+--- fluid temperature variants register_fluid_temperature_range builds (nil on
+--- <heat> / <research> / space-rocket materials). Derived from the same clamped
+--- lo/hi that builds the "fluid/x@[lo,hi]" name key at that single construction
+--- point, so the fields and the name can never diverge. A point temperature is
+--- the degenerate range minimum_temperature == maximum_temperature. Prefer these
+--- over re-parsing the name string, so temperature matching is grep-discoverable.
+---@field minimum_temperature number?
+---@field maximum_temperature number?
 
 ---Virtual recipes describe machine-driven conversions that have no LuaRecipePrototype
 ---(boiler heating, generator fuel burn, mining, plant growth, lab research,

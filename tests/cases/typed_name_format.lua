@@ -186,6 +186,28 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
+    name = "craft_to_typed_name reads temperature from VirtualMaterial fields, not the name",
+    -- The primary path uses the explicit source_fluid_name + min/max fields a
+    -- registered VirtualMaterial carries. The name here is deliberately a
+    -- mismatched placeholder to prove the fields win over any name parsing.
+    run = function()
+        local virtual_material = {
+            type = "virtual_material",
+            name = "fluid/decoy@[0,0]",
+            source_fluid_name = "steam",
+            minimum_temperature = 165,
+            maximum_temperature = 500,
+        }
+        local typed_name = tn.craft_to_typed_name(virtual_material)
+        harness.assert_eq(typed_name.type, "fluid")
+        harness.assert_eq(typed_name.name, "steam")
+        harness.assert_eq(typed_name.minimum_temperature, 165)
+        harness.assert_eq(typed_name.maximum_temperature, 500)
+        harness.assert_eq(tn.typed_name_to_variable_name(typed_name), "fluid/steam@[165,500]")
+    end,
+})
+
+table.insert(cases, {
     name = "craft_to_typed_name keeps non-temperature virtual_material as-is",
     run = function()
         local virtual_material = { type = "virtual_material", name = "<heat>" }
