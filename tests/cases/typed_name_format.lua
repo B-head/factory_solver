@@ -29,7 +29,6 @@ table.insert(cases, {
     run = function()
         local t = tn.create_typed_name("fluid", "steam")
         harness.assert_eq(tn.typed_name_to_variable_name(t), "fluid/steam")
-        harness.assert_true(tn.is_bare_fluid(t), "is_bare_fluid is true for bare fluid")
     end,
 })
 
@@ -38,7 +37,6 @@ table.insert(cases, {
     run = function()
         local t = tn.create_typed_name("fluid", "steam", nil, 165, 165)
         harness.assert_eq(tn.typed_name_to_variable_name(t), "fluid/steam@[165,165]")
-        harness.assert_true(not tn.is_bare_fluid(t), "point-temp fluid is not bare")
     end,
 })
 
@@ -47,7 +45,6 @@ table.insert(cases, {
     run = function()
         local t = tn.create_typed_name("fluid", "steam", nil, 15, 1000)
         harness.assert_eq(tn.typed_name_to_variable_name(t), "fluid/steam@[15,1000]")
-        harness.assert_true(not tn.is_bare_fluid(t), "range-temp fluid is not bare")
     end,
 })
 
@@ -57,14 +54,6 @@ table.insert(cases, {
         local t = tn.create_typed_name("fluid", "steam", "legendary")
         harness.assert_eq(t.quality, "normal")
         harness.assert_eq(tn.typed_name_to_variable_name(t), "fluid/steam")
-    end,
-})
-
-table.insert(cases, {
-    name = "is_bare_fluid is false for non-fluid TypedName",
-    run = function()
-        local t = tn.create_typed_name("item", "iron-plate")
-        harness.assert_true(not tn.is_bare_fluid(t), "items are never 'bare fluids'")
     end,
 })
 
@@ -142,46 +131,27 @@ table.insert(cases, {
 table.insert(cases, {
     name = "large temperatures format in scientific notation (%g) and round-trip",
     -- Fusion plasma sits at 1e6-1e7 °C; "%g" emits these as "1e+06" / "1e+07".
-    -- The variable name, the registered material key and the decode path must
-    -- all agree on that representation or the picker can't bind plasma.
+    -- The variable name and the registered material key must agree on that
+    -- representation or the picker can't bind plasma. The round-trip goes
+    -- through the VirtualMaterial fields, the only path craft_to_typed_name uses.
     run = function()
         local t = tn.create_typed_name("fluid", "fusion-plasma", nil, 1000000, 10000000)
         local var = tn.typed_name_to_variable_name(t)
         harness.assert_eq(var, "fluid/fusion-plasma@[1e+06,1e+07]")
 
-        local virtual_material = { type = "virtual_material", name = var }
+        local virtual_material = {
+            type = "virtual_material",
+            name = var,
+            source_fluid_name = "fusion-plasma",
+            minimum_temperature = 1000000,
+            maximum_temperature = 10000000,
+        }
         local decoded = tn.craft_to_typed_name(virtual_material)
         harness.assert_eq(decoded.type, "fluid")
         harness.assert_eq(decoded.name, "fusion-plasma")
         harness.assert_eq(decoded.minimum_temperature, 1000000)
         harness.assert_eq(decoded.maximum_temperature, 10000000)
         harness.assert_eq(tn.typed_name_to_variable_name(decoded), var)
-    end,
-})
-
-table.insert(cases, {
-    name = "craft_to_typed_name decodes legacy fluid/X@T to a degenerate range",
-    run = function()
-        local virtual_material = { type = "virtual_material", name = "fluid/steam@165" }
-        local typed_name = tn.craft_to_typed_name(virtual_material)
-        harness.assert_eq(typed_name.type, "fluid")
-        harness.assert_eq(typed_name.name, "steam")
-        harness.assert_eq(typed_name.minimum_temperature, 165)
-        harness.assert_eq(typed_name.maximum_temperature, 165)
-        harness.assert_eq(tn.typed_name_to_variable_name(typed_name), "fluid/steam@[165,165]")
-    end,
-})
-
-table.insert(cases, {
-    name = "craft_to_typed_name decodes fluid/X@[lo,hi] virtual material to fluid range",
-    run = function()
-        local virtual_material = { type = "virtual_material", name = "fluid/steam@[15,1000]" }
-        local typed_name = tn.craft_to_typed_name(virtual_material)
-        harness.assert_eq(typed_name.type, "fluid")
-        harness.assert_eq(typed_name.name, "steam")
-        harness.assert_eq(typed_name.minimum_temperature, 15)
-        harness.assert_eq(typed_name.maximum_temperature, 1000)
-        harness.assert_eq(tn.typed_name_to_variable_name(typed_name), "fluid/steam@[15,1000]")
     end,
 })
 

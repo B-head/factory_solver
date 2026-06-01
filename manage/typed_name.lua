@@ -84,16 +84,6 @@ function M.typed_name_to_elem_id(typed_name)
     end
 end
 
----Returns true when a fluid TypedName carries no temperature information.
----Non-fluid types always return false.
----@param typed_name TypedName
----@return boolean
-function M.is_bare_fluid(typed_name)
-    return typed_name.type == "fluid"
-        and typed_name.minimum_temperature == nil
-        and typed_name.maximum_temperature == nil
-end
-
 ---Formats the trailing temperature suffix for an LP variable name.
 ---Returns "" for bare and "@[<min>,<max>]" for any temperature (a point is the
 ---degenerate range [T,T], e.g. "@[165,165]").
@@ -304,41 +294,6 @@ function M.typed_name_to_machine(typed_name)
     end
 end
 
----Name-string fallback for craft_to_typed_name: decode a temperature-variant
----VirtualMaterial NAME (range-form "fluid/steam@[15,1000]", a point being
----"fluid/steam@[165,165]") into the underlying fluid TypedName. The primary
----path reads the variant's explicit minimum_temperature/maximum_temperature
----fields; this covers crafts that carry only a name (legacy / hand-built
----shells / tests). Return nil if the name is not a temperature-variant shape.
----The legacy single form "fluid/steam@165" is still decoded (mapped to the
----degenerate range [165,165]) so stale keys round-trip safely.
----@param name string
----@return TypedName?
-local function decode_fluid_temperature_virtual(name)
-    -- Capture the raw token between the delimiters and let tonumber parse it,
-    -- rather than a digit-only pattern: temperatures are emitted with "%g",
-    -- which switches to scientific notation at >=1e6 (fusion plasma keys look
-    -- like "fluid/plasma@[1e+06,1e+07]"). A "%d+%.?%d*" pattern silently fails
-    -- to match the "e+06" exponent, leaving the variant undecoded — the picker
-    -- then treats plasma as a virtual_material that binds to no recipe. Try the
-    -- range form first so the permissive single pattern can't swallow it.
-    local fluid_name2, lo, hi = string.match(name, "^fluid/(.-)@%[([^,]+),([^%]]+)%]$")
-    if fluid_name2 then
-        local l, h = tonumber(lo), tonumber(hi)
-        if l and h then
-            return M.create_typed_name("fluid", fluid_name2, nil, l, h)
-        end
-    end
-    local fluid_name, single = string.match(name, "^fluid/(.-)@(.+)$")
-    if fluid_name then
-        local t = tonumber(single)
-        if t then
-            return M.create_typed_name("fluid", fluid_name, nil, t, t)
-        end
-    end
-    return nil
-end
-
 ---comment
 ---@param craft Craft
 ---@return TypedName
@@ -358,16 +313,13 @@ function M.craft_to_typed_name(craft)
         -- A fluid temperature variant resolves to the underlying fluid variable,
         -- not the virtual_material shell, so the constraint matches the LP
         -- variable a real fluid output produces. Read it off the explicit fields
-        -- (set at registration) rather than re-parsing the name key.
+        -- set at registration (register_fluid_temperature_range), never by
+        -- re-parsing the name key. Non-fluid materials (<heat>, space rocket, …)
+        -- have no source_fluid_name and stay a virtual_material TypedName.
         if craft.source_fluid_name and craft.minimum_temperature ~= nil then
             return M.create_typed_name("fluid", craft.source_fluid_name, nil,
                 craft.minimum_temperature, craft.maximum_temperature)
         end
-        -- Fallback for a craft that carries only a name (no fields): legacy /
-        -- hand-built shells. Real runtime crafts come from storage.virtuals or a
-        -- field-bearing transient, so this is the name-only compatibility path.
-        local decoded = decode_fluid_temperature_virtual(craft.name)
-        if decoded then return decoded end
         return M.create_typed_name(craft.type, craft.name)
     else
         return M.create_typed_name(craft.type, craft.name)
