@@ -36,6 +36,17 @@ then
     fs_log.set_level("debug")
 end
 
+---Open the docked Build assistant for a player unless it is already shown.
+---Called at new-game / new-player time so the early-game Manual mode is visible
+---from the start; the panel is part of the saved GUI tree, so it survives
+---save/load, and the shortcut still toggles it off afterwards.
+---@param player LuaPlayer
+local function open_build_assistant_default(player)
+    if player.gui.left["factory_solver_build_assistant"] == nil then
+        fs_util.add_gui(player.gui.left, build_assistant)
+    end
+end
+
 script.on_init(function()
     flib_dictionary.on_init()
 
@@ -44,6 +55,7 @@ script.on_init(function()
     storage.players = {}
     for _, player in pairs(game.players) do
         save.init_player_data(player.index)
+        open_build_assistant_default(player)
         if __DebugAdapter then
             player.cheat_mode = true
         end
@@ -106,8 +118,10 @@ end)
 
 script.on_event(defines.events.on_player_created, function(event)
     save.init_player_data(event.player_index)
+    local player = game.players[event.player_index]
+    open_build_assistant_default(player)
     if __DebugAdapter then
-        game.players[event.player_index].cheat_mode = true
+        player.cheat_mode = true
     end
 end)
 
