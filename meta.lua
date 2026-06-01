@@ -45,6 +45,13 @@ __factory_solver__storage = {}
 ---@field opened_gui string[]
 ---@field machine_clipboard MachineClipboard?
 ---@field module_clipboard TypedName?
+---@field build_assistant_mode BuildAssistantMode
+
+---Which interaction style the docked Build assistant uses. "blueprint" hands
+---the player a temporary blueprint for construction-robot placement; "manual"
+---hands the actual machine/module item (or a ghost) via the engine's smart
+---pipette, for the early game before construction robots.
+---@alias BuildAssistantMode "manual"|"blueprint"
 
 ---Per-player clipboard for the Shift+Click copy/paste flow over production
 ---line rows in solution_editor. A copy snapshots the whole machine-side

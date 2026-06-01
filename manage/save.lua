@@ -30,6 +30,7 @@ function M.init_player_data(player_index)
             hidden_craft_visible = __DebugAdapter ~= nil,
             time_scale = "minute",
             amount_unit = "time",
+            build_assistant_mode = "manual",
             presets = {
                 fuel = preset.create_fuel_presets(),
                 fluid_fuel = preset.create_fluid_fuel_preset(),
@@ -55,6 +56,12 @@ function M.reinit_player_data(player_index)
         end
         if false then
             player_data.amount_unit = "time"
+        end
+        -- Build assistant gained a mode switch (manual / blueprint) after some
+        -- saves were created. Backfill to "manual" so old saves match the new
+        -- new-game default rather than rendering with a nil mode.
+        if not player_data.build_assistant_mode then
+            player_data.build_assistant_mode = "manual"
         end
         local presets = player_data.presets
         if presets then
