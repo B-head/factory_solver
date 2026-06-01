@@ -54,7 +54,9 @@ function handlers.on_make_preset_tables(event)
         elseif preset_type == "resource" then
             crafts = acc.get_machines_in_resource_category(category_name)
         elseif preset_type == "machine" then
-            crafts = acc.get_machines_in_category(category_name)
+            -- Category-wide preset excludes fixed_recipe machines: those are
+            -- offered per-recipe, never as a category default.
+            crafts = acc.get_general_machines_in_category(category_name)
         else
             assert()
         end

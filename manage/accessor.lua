@@ -480,6 +480,35 @@ function M.get_machines_in_category(category_name)
     return machines
 end
 
+---A crafting machine's engine-side `fixed_recipe` locks it to exactly one
+---recipe; an unset (nil) lock means it can run any recipe in its categories.
+---Reading `.fixed_recipe` is safe here because every caller passes a crafting
+---machine (the `crafting-category` entity filter guarantees the subtype, and it
+---reads back as nil on a machine without a lock).
+---@param machine LuaEntityPrototype
+---@param recipe_name string
+---@return boolean
+function M.machine_allows_recipe(machine, recipe_name)
+    return machine.fixed_recipe == nil or machine.fixed_recipe == recipe_name
+end
+
+---Machines in a category usable as a *category-wide* default: those without a
+---`fixed_recipe` lock. A fixed-recipe machine is recipe-specific and is offered
+---only through `get_machines_for_recipe` for its own recipe, never as a category
+---preset. Input is already sorted, so rebuild the sequence by hand (avoid
+---`flib_table.filter`, which preserves keys and would leave gaps).
+---@param category_name string
+---@return LuaEntityPrototype[]
+function M.get_general_machines_in_category(category_name)
+    local ret = {}
+    for _, machine in ipairs(M.get_machines_in_category(category_name)) do
+        if machine.fixed_recipe == nil then
+            ret[#ret + 1] = machine
+        end
+    end
+    return ret
+end
+
 ---comment
 ---@param category_name string
 ---@return LuaEntityPrototype[]
@@ -537,7 +566,15 @@ end
 function M.get_machines_for_recipe(recipe)
     ---@diagnostic disable-next-line: param-type-mismatch
     if recipe.object_name then
-        return M.get_machines_in_category(recipe.category)
+        -- Honour each machine's engine-side `fixed_recipe` lock: keep only those
+        -- with no lock (any recipe in the category) or locked to this recipe.
+        local ret = {}
+        for _, machine in ipairs(M.get_machines_in_category(recipe.category)) do
+            if M.machine_allows_recipe(machine, recipe.name) then
+                ret[#ret + 1] = machine
+            end
+        end
+        return ret
     elseif recipe.fixed_crafting_machine then
         return { tn.typed_name_to_machine(recipe.fixed_crafting_machine) }
     elseif recipe.resource_category then

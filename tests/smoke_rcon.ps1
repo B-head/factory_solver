@@ -318,6 +318,19 @@ try {
         Write-Host "SMOKE FAIL: [fuel_temps] $fuelTemps"
         $allPass = $false
     }
+
+    # The engine fixed_recipe lock is honoured for ordinary crafting machines: a
+    # machine locked to recipe A is offered for A only, B has no eligible machine,
+    # and the fixed-only category exposes no general machine preset.
+    # Solution-independent, driven off data_test.lua, so it runs once up front too.
+    $fixedRecipe = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_fixed_recipe_machine'))"
+    if ($fixedRecipe -eq "OK") {
+        Write-Host "SMOKE PASS: [fixed_recipe] machine offered only for its locked recipe"
+    } else {
+        Write-Host "SMOKE FAIL: [fixed_recipe] $fixedRecipe"
+        $allPass = $false
+    }
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"

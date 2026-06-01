@@ -911,6 +911,64 @@ function M.check_fluid_fuel_temperature_variants()
     return "OK"
 end
 
+---Exercises the engine `fixed_recipe` lock for an ordinary crafting machine (not
+---a rocket-silo). Driven off the data_test 8e fixture: a lone machine
+---fs-test-fixed-recipe-machine locked to fs-test-fixed-recipe-a, in category
+---fs-test-fixed-cat which also holds recipe ...-b. Asserts the machine is offered
+---for A only, that B has no eligible machine (uncraftable in-game), that the
+---category has no general (lock-free) machine, and so never becomes a
+---category-wide machine preset (unknown-entity sentinel). Guarded on presence so
+---a stripped build skips instead of failing.
+---@return string
+function M.check_fixed_recipe_machine()
+    local machine = prototypes.entity["fs-test-fixed-recipe-machine"]
+    local recipe_a = prototypes.recipe["fs-test-fixed-recipe-a"]
+    local recipe_b = prototypes.recipe["fs-test-fixed-recipe-b"]
+    if not (machine and recipe_a and recipe_b) then
+        log.info("check_fixed_recipe_machine: data_test fixtures absent, skipped")
+        return "OK"
+    end
+
+    local function has_machine(list, name)
+        for _, m in ipairs(list) do
+            if m.name == name then return true end
+        end
+        return false
+    end
+
+    local ok, err = pcall(function()
+        assert(machine.fixed_recipe == "fs-test-fixed-recipe-a",
+            "fixture machine is not locked to recipe A")
+
+        assert(acc.machine_allows_recipe(machine, "fs-test-fixed-recipe-a"),
+            "machine_allows_recipe rejected the machine's own fixed recipe")
+        assert(not acc.machine_allows_recipe(machine, "fs-test-fixed-recipe-b"),
+            "machine_allows_recipe permitted a recipe outside the lock")
+
+        local for_a = acc.get_machines_for_recipe(recipe_a)
+        assert(has_machine(for_a, "fs-test-fixed-recipe-machine"),
+            "fixed machine not offered for its own recipe A")
+
+        local for_b = acc.get_machines_for_recipe(recipe_b)
+        assert(not has_machine(for_b, "fs-test-fixed-recipe-machine"),
+            "fixed machine wrongly offered for recipe B")
+        assert(#for_b == 0,
+            "recipe B should have no eligible machine, got " .. #for_b)
+
+        assert(#acc.get_general_machines_in_category("fs-test-fixed-cat") == 0,
+            "fixed-only category reported a general machine")
+
+        local presets = preset.create_machine_presets()
+        local cat_preset = presets["fs-test-fixed-cat"]
+        assert(cat_preset and cat_preset.name == "unknown-entity",
+            "fixed-only category default is not the unknown-entity sentinel")
+    end)
+    if not ok then
+        return "ERROR: fixed recipe machine check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -924,6 +982,7 @@ function M.register()
         check_force_caches = M.check_force_caches,
         check_fuel_reconciliation = M.check_fuel_reconciliation,
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
+        check_fixed_recipe_machine = M.check_fixed_recipe_machine,
     })
 end
 

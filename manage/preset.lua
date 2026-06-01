@@ -170,7 +170,10 @@ function M.create_machine_presets(origin)
             goto continue
         end
 
-        local machines = acc.get_machines_in_category(category_name)
+        -- Category-wide default excludes fixed_recipe machines: a machine locked
+        -- to one recipe is offered per-recipe by get_machines_for_recipe, not as
+        -- the default for arbitrary recipes in the category.
+        local machines = acc.get_general_machines_in_category(category_name)
         ret[category_name] = M.get_default_preset(machines, "machine")
         ::continue::
     end
@@ -226,7 +229,17 @@ function M.get_machine_preset(player_index, recipe_typed_name)
         end
     elseif recipe_typed_name.type == "recipe" then
         local recipe = prototypes.recipe[recipe_typed_name.name]
-        return assert(player_data.presets.machine[recipe.category])
+        local preset = assert(player_data.presets.machine[recipe.category])
+        -- Honour the category default only if it can actually craft this recipe;
+        -- a machine locked to a different recipe (engine fixed_recipe) cannot.
+        -- Fall back to the first eligible machine for this exact recipe, which
+        -- resolves to the unknown-entity sentinel when none qualifies (a recipe
+        -- no machine can craft becomes a visibly-broken row, not a silent swap).
+        local machine = prototypes.entity[preset.name]
+        if machine and acc.machine_allows_recipe(machine, recipe.name) then
+            return preset
+        end
+        return M.get_default_preset(acc.get_machines_for_recipe(recipe), "machine")
     else
         return assert()
     end

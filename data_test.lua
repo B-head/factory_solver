@@ -744,15 +744,16 @@ if raw.fluid and raw.fluid["steam"] then
     })
 end
 
--- 8e. A REGULAR crafting machine carrying `fixed_recipe`. factory_solver reads
---     fixed_recipe only inside the rocket-silo virtual builder; every other
---     crafting machine is resolved purely by crafting-category
---     (get_machines_in_category), so the engine-side recipe lock is ignored.
+-- 8e. A REGULAR crafting machine carrying `fixed_recipe`. factory_solver honours
+--     the engine-side recipe lock for every crafting machine, not just the
+--     rocket-silo: acc.machine_allows_recipe filters get_machines_for_recipe so a
+--     machine is offered only for recipes its lock permits.
 --     This isolated category holds two recipes (A and B) but only one machine,
---     which is fixed to recipe A. Expected: the machine is offered for BOTH A
---     and B in the picker, and recipe B (which no machine can actually craft
---     in-game, since the sole candidate is locked to A) is still solvable —
---     documenting the category-only resolution / fixed_recipe-blind behaviour.
+--     which is fixed to recipe A. Expected: the machine is offered for recipe A
+--     ONLY; recipe B has no eligible machine (the sole candidate is locked to A,
+--     so B is uncraftable in-game and resolves to an unknown / broken row). The
+--     category also has no general (lock-free) machine, so it never appears as a
+--     category-wide machine preset. Asserted by smoke check_fixed_recipe_machine.
 if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"] then
     local fixed_machine = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
     fixed_machine.name = "fs-test-fixed-recipe-machine"
