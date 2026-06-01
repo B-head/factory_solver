@@ -2,6 +2,7 @@ local flib_table = require "__flib__/table"
 local flib_format = require "__flib__/format"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
+local nf = require "manage/number_format"
 local pre_solve = require "manage/pre_solve"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
@@ -510,14 +511,16 @@ function handlers.update_amount(event)
     local solution = assert(save.get_selected_solution(event.player_index))
 
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
+    local typed_name = tags.typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    -- Round away the solver's relative residual (see acc.round_display) rather
-    -- than padding by a fixed absolute amount: the slot's engine number
-    -- formatting truncates, so an unrounded near-integer rate reads one short.
-    -- An inactive line solves to 0, which round_display keeps a clean 0.
-    elem.number = acc.round_display(
-        fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required)
+    -- Pre-round to the material kind's display grid (nf.round_for_kind) so the
+    -- slot's engine number formatting -- which SI-abbreviates and FLOORS -- is
+    -- a no-op: a true 60 solved to 59.9999996 lands on 60, not "59.9". An
+    -- inactive line solves to 0, which round_for_kind keeps a clean 0.
+    elem.number = nf.round_for_kind(
+        fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required,
+        nf.kind_for_material(typed_name))
 end
 
 ---@param event EventDataTrait

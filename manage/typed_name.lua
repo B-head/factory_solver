@@ -1,18 +1,15 @@
-local flib_format = require "__flib__/format"
+local nf = require "manage/number_format"
 
 local M = {}
 
----Format a fluid temperature for display through flib's number formatter so
----very large values (fusion plasma at 1e6-1e7 °C) get an SI suffix ("1M")
----instead of scientific notation ("1e+06"). flib's third arg is a fixed display
----width that rounds badly (1500 -> "2 k"), so it is omitted; flib then floors to
----one decimal. The suffix carries a leading space ("1.5 k") that is stripped to
----keep slot labels compact ("1.5k"). Shared by the constraint slot labels
----(ui/common) and the fluid tooltip so both render identically.
+---Format a fluid temperature for display. Thin alias for
+---nf.format_temperature (the single source of truth), kept here because
+---callers across the codebase reference tn.format_temperature and the fluid
+---tooltip / constraint slot labels share it.
 ---@param temperature number
 ---@return string
 function M.format_temperature(temperature)
-    return (flib_format.number(temperature, true):gsub(" ", ""))
+    return nf.format_temperature(temperature)
 end
 
 ---comment

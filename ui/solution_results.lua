@@ -1,6 +1,7 @@
 local flib_format = require "__flib__/format"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
+local nf = require "manage/number_format"
 local report = require "manage/report"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
@@ -23,12 +24,18 @@ function handlers.make_final_products_table(event)
     end
     local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(save.get_research_bonuses(event.player_index), solution)
 
-    local function add(typed_name, number)
-        if number <= acc.tolerance then
+    local function add(entry)
+        local typed_name = entry.typed_name
+        -- Final Products are net > 0. Hide a net that is negligible RELATIVE to
+        -- the material's gross throughput (acc.is_negligible), so a recycling
+        -- loop's residual noise doesn't surface as a phantom product while a
+        -- genuine small surplus still shows.
+        local number = entry.amount_per_second
+        if number <= 0 or acc.is_negligible(number, entry.gross_per_second) then
             return
         end
         number = fs_util.to_scale(number, player_data.time_scale)
-        
+
         local craft = tn.typed_name_to_material(typed_name)
         local is_hidden = acc.is_hidden(craft)
         local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
@@ -37,7 +44,7 @@ function handlers.make_final_products_table(event)
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
-            number = acc.round_display(number),
+            number = nf.round_for_kind(number, nf.kind_for_material(typed_name)),
             tags = {
                 line_index = nil,
                 typed_name = typed_name,
@@ -51,15 +58,15 @@ function handlers.make_final_products_table(event)
     end
 
     for _, entry in pairs(item_totals) do
-        add(entry.typed_name, entry.amount_per_second)
+        add(entry)
     end
 
     for _, entry in pairs(fluid_totals) do
-        add(entry.typed_name, entry.amount_per_second)
+        add(entry)
     end
 
     for _, entry in pairs(virtual_totals) do
-        add(entry.typed_name, entry.amount_per_second)
+        add(entry)
     end
 end
 
@@ -76,8 +83,13 @@ function handlers.make_basic_ingredients_table(event)
     end
     local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(save.get_research_bonuses(event.player_index), solution)
 
-    local function add(typed_name, number)
-        if -acc.tolerance <= number then
+    local function add(entry)
+        local typed_name = entry.typed_name
+        -- Basic Ingredients are net < 0 (consumed from outside). Hide a net
+        -- that is negligible RELATIVE to gross throughput so a recycling loop's
+        -- residual noise doesn't surface as a phantom ingredient.
+        local number = entry.amount_per_second
+        if 0 <= number or acc.is_negligible(number, entry.gross_per_second) then
             return
         end
         number = fs_util.to_scale(-number, player_data.time_scale)
@@ -90,7 +102,7 @@ function handlers.make_basic_ingredients_table(event)
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
-            number = acc.round_display(number),
+            number = nf.round_for_kind(number, nf.kind_for_material(typed_name)),
             tags = {
                 line_index = nil,
                 typed_name = typed_name,
@@ -102,17 +114,17 @@ function handlers.make_basic_ingredients_table(event)
         }
         fs_util.add_gui(elem, def)
     end
-    
+
     for _, entry in pairs(item_totals) do
-        add(entry.typed_name, entry.amount_per_second)
+        add(entry)
     end
 
     for _, entry in pairs(fluid_totals) do
-        add(entry.typed_name, entry.amount_per_second)
+        add(entry)
     end
 
     for _, entry in pairs(virtual_totals) do
-        add(entry.typed_name, entry.amount_per_second)
+        add(entry)
     end
 end
 

@@ -1,31 +1,23 @@
 local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
 local tn = require "manage/typed_name"
+local nf = require "manage/number_format"
 
 local M = {}
 
 M.second_per_tick = 60
 M.tolerance = (10 ^ -6) / 2
 
--- The IPM converges to a RELATIVE residual of M.tolerance, so the absolute
--- noise left on a solved value of magnitude V is ~M.tolerance * V, not the bare
--- M.tolerance. A fixed absolute pad therefore cannot clean a value before it is
--- handed to a slot button's `number` field, whose engine formatting truncates:
--- a true 60 that solves to 59.9999996 still renders as 59. Round AWAY that
--- relative tail instead, to 5 significant figures (relative precision) so the
--- result matches the flib_format.number(x, true, 5) labels and reads correctly
--- whether the engine truncates or rounds. Rounding (not flooring/snapping)
--- keeps genuine fractional rates intact.
----@param value number
----@return number
-function M.round_display(value)
-    if value == 0 then
-        return 0
-    end
-    local sign = value < 0 and -1 or 1
-    local magnitude = value * sign
-    local factor = 10 ^ (4 - math.floor(math.log(magnitude, 10)))
-    return sign * math.floor(magnitude * factor + 0.5) / factor
+---True when a material's net per-second flow is within the solver's RELATIVE
+---residual of zero, judged against its gross throughput. Thin pass-through to
+---nf.is_negligible bound to this module's tolerance, so the totals UI's
+---show/hide cutoff scales with flow instead of using a fixed absolute pad
+---(which mistook a big recycling loop's ~1e-4 noise for a phantom ingredient).
+---@param net number
+---@param gross number
+---@return boolean
+function M.is_negligible(net, gross)
+    return nf.is_negligible(net, gross, M.tolerance)
 end
 
 ---comment

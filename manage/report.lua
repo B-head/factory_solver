@@ -12,15 +12,15 @@ local M = {}
 ---Per-second values are returned as-is; time-scale conversion is the UI's job.
 ---@param bonuses ResearchBonuses
 ---@param solution Solution
----@return table<string, { typed_name: TypedName, amount_per_second: number }>
----@return table<string, { typed_name: TypedName, amount_per_second: number }>
----@return table<string, { typed_name: TypedName, amount_per_second: number }>
+---@return table<string, { typed_name: TypedName, amount_per_second: number, gross_per_second: number }>
+---@return table<string, { typed_name: TypedName, amount_per_second: number, gross_per_second: number }>
+---@return table<string, { typed_name: TypedName, amount_per_second: number, gross_per_second: number }>
 function M.get_total_amounts(bonuses, solution)
-    ---@type table<string, { typed_name: TypedName, amount_per_second: number }>
+    ---@type table<string, { typed_name: TypedName, amount_per_second: number, gross_per_second: number }>
     local item_totals = {}
-    ---@type table<string, { typed_name: TypedName, amount_per_second: number }>
+    ---@type table<string, { typed_name: TypedName, amount_per_second: number, gross_per_second: number }>
     local fluid_totals = {}
-    ---@type table<string, { typed_name: TypedName, amount_per_second: number }>
+    ---@type table<string, { typed_name: TypedName, amount_per_second: number, gross_per_second: number }>
     local virtual_totals = {}
 
     -- Items / virtuals / fluids are all aggregated per LP-variable identity
@@ -28,15 +28,22 @@ function M.get_total_amounts(bonuses, solution)
     -- (normal / uncommon / …) and temperature variants of the same fluid stay
     -- in their own buckets — collapsing them would hide recycling-loop flow
     -- that the LP has already solved as distinct variables.
+    -- gross_per_second accumulates the sum of ABSOLUTE contributions while
+    -- amount_per_second accumulates the signed net. The net of a recycled
+    -- material is the small difference of large opposing flows, so its residual
+    -- noise scales with the gross, not an absolute constant -- the totals UI
+    -- divides by gross to decide negligibility (acc.is_negligible).
     local function add(bucket, typed_name, amount_per_second)
         local key = tn.typed_name_to_variable_name(typed_name)
         local entry = bucket[key]
         if entry then
             entry.amount_per_second = entry.amount_per_second + amount_per_second
+            entry.gross_per_second = entry.gross_per_second + math.abs(amount_per_second)
         else
             bucket[key] = {
                 typed_name = typed_name,
                 amount_per_second = amount_per_second,
+                gross_per_second = math.abs(amount_per_second),
             }
         end
     end

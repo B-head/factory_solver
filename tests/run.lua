@@ -110,6 +110,7 @@ local case_files = {
     "lp_quality_recycling_loop",
     "fs_log",
     "typed_name_format",
+    "number_format",
     "lp_fluid_bridge",
     "lp_fluid_constraint",
     "lp_lower_limit",
