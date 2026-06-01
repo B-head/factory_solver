@@ -1119,7 +1119,22 @@ function M.get_fluid_fuel_temperature_variants(machine)
     -- prototype; source_fluid_name is required by is_unresearched / tooltips.
     local range_key = string.format("fluid/%s@[%g,%g]", filter.name, lo, hi)
     local range_material = storage.virtuals.material[range_key]
-    if not range_material then
+    if range_material then
+        -- register_fluid_temperature_range stores the RAW (un-%g-normalized)
+        -- temperatures on the material; only its key is built with "%g". `lo, hi`
+        -- here come from try_get_fixed_fuel and are already %g-normalized to match
+        -- the reconciled fuel TypedName. Without re-normalizing, the picker
+        -- button's decoded TypedName (craft_to_typed_name reads these raw fields)
+        -- fails equals_typed_name's strict == against the stored selection for any
+        -- fluid whose acceptance bound isn't %g-clean in single precision, so the
+        -- default range variant never highlights as selected. Copy (never mutate
+        -- the shared storage entry) and overwrite with the normalized bounds.
+        local copy = {}
+        for k, v in pairs(range_material) do copy[k] = v end
+        copy.minimum_temperature = lo
+        copy.maximum_temperature = hi
+        range_material = copy
+    else
         ---@type VirtualMaterial
         range_material = {
             type = "virtual_material",
