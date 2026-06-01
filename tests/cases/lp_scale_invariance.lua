@@ -287,11 +287,13 @@ local function solve_warm(problem, prev_vars, tag, iterate_limit, tolerance)
     local tol = tolerance or 1e-6
     ---@type SolverState
     local state = "ready"
+    ---@type integer?
+    local iteration = nil
     ---@type PackedVariables?
     local vars = prev_vars
     local steps = 0
-    while type(state) == "number" or state == "ready" do
-        state, vars = lp.solve(problem, state, vars, tol, iterate_limit)
+    while state == "calculating" or state == "ready" do
+        state, iteration, vars = lp.solve(problem, state, iteration, vars, tol, iterate_limit)
         steps = steps + 1
         if steps > iterate_limit + 4 then
             error(tag .. ": solver did not reach a terminal state within "
@@ -386,10 +388,12 @@ table.insert(cases, {
         local p2 = cp.create_problem("chain-10pm", make(10 / 60), lines)
         ---@type SolverState
         local state2 = "ready"
+        ---@type integer?
+        local iteration2 = nil
         ---@type PackedVariables?
         local vars2 = vars1
         for _ = 1, 800 do
-            state2, vars2 = lp.solve(p2, state2, vars2, tol, 800)
+            state2, iteration2, vars2 = lp.solve(p2, state2, iteration2, vars2, tol, 800)
             if state2 == "finished" or state2 == "unfinished"
                 or state2 == "unbounded" or state2 == "unfeasible" then
                 break

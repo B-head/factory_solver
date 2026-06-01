@@ -356,7 +356,7 @@ try {
                 '^finished$'                          { $verdict = "PASS"; break }
                 '^(unfinished|unbounded|unfeasible)$' { $verdict = "FAIL"; break }
                 '^ERROR'                              { $verdict = "FAIL"; break }
-                default { }   # "ready" or a numeric iteration count: keep polling
+                default { }   # "ready" or "calculating": keep polling
             }
             if ($verdict) { break }
             if ((Get-Date) -gt $deadline) { $verdict = "FAIL"; $state = "deadline exceeded (last=$state)"; break }

@@ -19,7 +19,7 @@ function handlers.make_final_products_table(event)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     elem.clear()
-    if not solution or type(solution.solver_state) == "number" then
+    if not solution or solution.solver_state == "calculating" then
         return
     end
     local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(save.get_research_bonuses(event.player_index), solution)
@@ -78,7 +78,7 @@ function handlers.make_basic_ingredients_table(event)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     elem.clear()
-    if not solution or type(solution.solver_state) == "number" then
+    if not solution or solution.solver_state == "calculating" then
         return
     end
     local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(save.get_research_bonuses(event.player_index), solution)
@@ -195,7 +195,7 @@ function handlers.make_build_totals_table(event)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
     elem.clear()
-    if not solution or type(solution.solver_state) == "number" then
+    if not solution or solution.solver_state == "calculating" then
         return
     end
 

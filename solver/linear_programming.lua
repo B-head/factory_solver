@@ -143,12 +143,14 @@ end
 ---singular) the solve is retried with a fat ε·I regularisation.
 ---@param problem Problem Problems to solve.
 ---@param solver_state SolverState
+---@param iteration integer? The IPM iteration count carried across calls; meaningful only while solver_state == "calculating".
 ---@param raw_variables PackedVariables? The value returned by @{Problem:pack_variables}.
 ---@param tolerance number
 ---@param iterate_limit integer
 ---@return SolverState
+---@return integer? iteration
 ---@return PackedVariables? #Packed table of raw solution.
-function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
+function M.solve(problem, solver_state, iteration, raw_variables, tolerance, iterate_limit)
     if solver_state == "ready" then
         local b = problem:generate_limit_vector()
         local c = problem:generate_cost_vector()
@@ -166,9 +168,9 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
             log.trace("subject <A>:\n%s", problem:dump_subject_matrix())
         end
 
-        return 1, raw_variables
-    elseif type(solver_state) ~= "number" then
-        return solver_state, raw_variables
+        return "calculating", 1, raw_variables
+    elseif solver_state ~= "calculating" then
+        return solver_state, iteration, raw_variables
     end
 
     local A = problem:generate_subject_matrix()
@@ -211,9 +213,9 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         -- Warm-start recentering, applied only at the first IPM
         -- iteration after a fresh "ready" handoff (i.e. external
         -- warm-start: constraint edits, line edits, mod reload). The
-        -- "ready" -> 1 transition returns the caller's raw_variables
-        -- unchanged, so the first solve call to see real work has
-        -- solver_state == 1 with raw_variables from the *previous*
+        -- "ready" -> "calculating" (iteration 1) transition returns the
+        -- caller's raw_variables unchanged, so the first solve call to see
+        -- real work has iteration == 1 with raw_variables from the *previous*
         -- terminated solve. After a finished solve the complementarity
         -- x_i·s_i = 0 condition pins one side of every active
         -- constraint at the 2⁻⁵² lower clamp. Carrying those boundary
@@ -232,12 +234,12 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         -- small incremental edits, and wide enough to keep D²'s
         -- dynamic range under ~2²⁰ on the first Newton step.
         --
-        -- Subsequent iterations (solver_state >= 2) are internal IPM
+        -- Subsequent iterations (iteration >= 2) are internal IPM
         -- progression: x and s legitimately approach the boundary as
         -- the iterates close in on the optimum, and clamping would
         -- prevent convergence on LPs whose true optimum has small
         -- variable values.
-        if solver_state == 1 then
+        if iteration == 1 then
             local b_inf_norm = math.max(2 ^ -32, vector_inf_norm(b))
             local c_inf_norm = math.max(2 ^ -32, vector_inf_norm(c))
             x = x:clamp(b_inf_norm * 2 ^ -10, machine_upper_epsilon)
@@ -260,25 +262,25 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     local mu_criteria = vector_sum(duality_gap) / p_degree
 
     -- log.trace("i = %i, p_rel = %g, d_rel = %g, mu = %g",
-    --     solver_state, p_criteria, d_criteria, mu_criteria)
+    --     iteration, p_criteria, d_criteria, mu_criteria)
 
     if math.max(p_criteria, d_criteria, mu_criteria) <= tolerance then
         if fs_log.is_enabled("trace") then log.trace("primal <x>:\n%s", problem:dump_primal(x)) end
         log.trace("-- finished solve '%s' --", problem.name)
-        log.trace("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
+        log.trace("  iterate = %i, width = %i, height = %i", iteration, p_degree, d_degree)
 
-        return "finished", problem:pack_variables(x, y, s)
+        return "finished", iteration, problem:pack_variables(x, y, s)
     end
 
-    if iterate_limit <= solver_state then
+    if iterate_limit <= iteration then
         if fs_log.is_enabled("trace") then log.trace("primal <x>:\n%s", problem:dump_primal(x)) end
         log.trace("-- unfinished solve '%s' --", problem.name)
-        log.trace("  iterate = %i, width = %i, height = %i", solver_state, p_degree, d_degree)
+        log.trace("  iterate = %i, width = %i, height = %i", iteration, p_degree, d_degree)
 
         -- Drop the partial primal so the next re-prepare warm-starts from the
         -- default (make_primal_variables fallback) rather than from a stuck-
         -- at-clamp x that would just reproduce the same non-convergence.
-        return "unfinished", nil
+        return "unfinished", iteration, nil
     end
 
     -- Build the Newton system. The long-step path-following step targets
@@ -328,8 +330,8 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
         log.trace("-- unfinished solve '%s' (Cholesky lost precision) --",
             problem.name)
         log.trace("  iterate = %i, width = %i, height = %i",
-            solver_state, p_degree, d_degree)
-        return "unfinished", nil
+            iteration, p_degree, d_degree)
+        return "unfinished", iteration, nil
     end
 
     local p_step = math.min(1, step_fraction * find_step(x, x_step))
@@ -345,7 +347,7 @@ function M.solve(problem, solver_state, raw_variables, tolerance, iterate_limit)
     x = x:clamp(machine_lower_epsilon, machine_upper_epsilon)
     s = s:clamp(machine_lower_epsilon, machine_upper_epsilon)
 
-    return solver_state + 1, problem:pack_variables(x, y, s)
+    return "calculating", iteration + 1, problem:pack_variables(x, y, s)
 end
 
 return M

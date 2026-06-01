@@ -10,7 +10,7 @@
 ---@alias TimeScale "second"|"five_seconds"|"minute"|"ten_minutes"|"hour"|"ten_hours"|"fifty_hours"|"two_hundred_fifty_hours"|"thousand_hours"
 ---@alias AmountUnit "time"|"belt"|"storage"
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
----@alias SolverState integer|"ready"|"finished"|"unfinished"|"unbounded"|"unfeasible"
+---@alias SolverState "ready"|"calculating"|"finished"|"unfinished"|"unbounded"|"unfeasible"
 ---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
 -- Fluid temperature is carried range-only: a point temperature is the degenerate
 -- range minimum_temperature == maximum_temperature. There is no single-value
@@ -129,6 +129,7 @@ __factory_solver__storage = {}
 ---@field inactive_recipe_variables table<string, true>?
 ---@field problem Problem?
 ---@field solver_state SolverState
+---@field solver_iteration integer?
 ---@field raw_variables PackedVariables?
 ---@field done_lines table<string, true>?
 

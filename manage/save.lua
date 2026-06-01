@@ -253,6 +253,11 @@ function M.reinit_force_data(force_index)
             solution.problem = nil
             solution.raw_variables = nil
             solution.solver_state = "ready"
+            -- Normalize any legacy numeric solver_state from a save written
+            -- before the integer iteration counter was split out into its own
+            -- field. A "ready" solution ignores solver_iteration until the
+            -- solver sets it to 1.
+            solution.solver_iteration = nil
         end
     else
         M.init_force_data(force_index)

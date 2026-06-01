@@ -108,10 +108,11 @@ function M.assert_matrix_near(actual, expected, tol, msg)
     end
 end
 
----Drive `linear_programming.M.solve` from "ready" through the IPM iteration
----loop to a terminal state ("finished" / "unfinished" / "unbounded" /
----"unfeasible"). Matches the state machine that control.lua's on_tick pumps
----in production, but folds it into one synchronous loop instead of per-tick.
+---Drive `linear_programming.M.solve` from "ready" through the "calculating"
+---IPM iteration loop to a terminal state ("finished" / "unfinished" /
+---"unbounded" / "unfeasible"). Matches the state machine that control.lua's
+---on_tick pumps in production, but folds it into one synchronous loop instead
+---of per-tick.
 ---@param lp table The required `solver/linear_programming` module.
 ---@param problem Problem
 ---@param opts { tolerance?: number, iterate_limit?: number }?
@@ -124,10 +125,11 @@ function M.solve_to_completion(lp, problem, opts)
     local limit = opts.iterate_limit or default_iterate_limit
 
     local state = "ready"
+    local iteration = nil
     local vars = nil
     local steps = 0
-    while type(state) == "number" or state == "ready" do
-        state, vars = lp.solve(problem, state, vars, tol, limit)
+    while state == "calculating" or state == "ready" do
+        state, iteration, vars = lp.solve(problem, state, iteration, vars, tol, limit)
         steps = steps + 1
         if steps > limit + 4 then
             error("solver did not reach a terminal state within " .. limit .. " IPM iterations")

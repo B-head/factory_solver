@@ -18,7 +18,7 @@ function M.find_the_need_for_solve()
         end
 
         for _, solution in pairs(force_data.solutions) do
-            if type(solution.solver_state) == "number" or solution.solver_state == "ready" then
+            if solution.solver_state == "calculating" or solution.solver_state == "ready" then
                 return force_data, solution
             end
         end
@@ -54,9 +54,10 @@ function M.forwerd_solve(force_data, solution)
 
     local problem = assert(solution.problem)
 
-    solution.solver_state, solution.raw_variables = linear_programming.solve(
+    solution.solver_state, solution.solver_iteration, solution.raw_variables = linear_programming.solve(
         problem,
         solution.solver_state,
+        solution.solver_iteration,
         solution.raw_variables,
         acc.tolerance,
         iterate_limit

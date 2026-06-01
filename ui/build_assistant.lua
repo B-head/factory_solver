@@ -105,12 +105,12 @@ function handlers.make_build_table(event)
     local solution = save.get_selected_solution(event.player_index)
 
     -- on_calculation_changed fires every tick while the solver iterates
-    -- (solver_state is the numeric in-progress enum). Rebuilding then would
-    -- empty this fit-to-content docked panel each tick, collapsing it to just
-    -- the title until the solve lands. So during a mid-solve state keep the
+    -- (solver_state is the "calculating" in-progress state). Rebuilding then
+    -- would empty this fit-to-content docked panel each tick, collapsing it to
+    -- just the title until the solve lands. So during a mid-solve state keep the
     -- last-rendered rows untouched and rebuild only when a final state arrives;
     -- a missing solution still clears to empty.
-    if solution and type(solution.solver_state) == "number" then
+    if solution and solution.solver_state == "calculating" then
         return
     end
 
