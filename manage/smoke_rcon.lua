@@ -969,6 +969,91 @@ function M.check_fixed_recipe_machine()
     return "OK"
 end
 
+---Three general machines in fs-test-ing-cap disagree on ingredient_count (caps 2 / 4
+---/ 10). Asserts the cap filters get_machines_for_recipe by item-ingredient count (the
+---fluid ingredient is exempt) and that the category splits into machine-preset tiers:
+---a base key plus a DISTINCT "...|>2" tier that lists the two larger machines -- the
+---same data the machine-presets dialog renders as a separate row. Driven off the
+---data_test 8f fixture; guarded on presence so a stripped build skips instead of failing.
+---@return string
+function M.check_ingredient_count_machine()
+    local cap2 = prototypes.entity["fs-test-ing-cap-2"]
+    local cap4 = prototypes.entity["fs-test-ing-cap-4"]
+    local cap10 = prototypes.entity["fs-test-ing-cap-10"]
+    local ok_recipe = prototypes.recipe["fs-test-ing-ok"]
+    local over = prototypes.recipe["fs-test-ing-over"]
+    local fluid = prototypes.recipe["fs-test-ing-fluid"]
+    if not (cap2 and cap4 and cap10 and ok_recipe and over and fluid) then
+        log.info("check_ingredient_count_machine: data_test fixtures absent, skipped")
+        return "OK"
+    end
+
+    local function has_machine(list, name)
+        for _, m in ipairs(list) do
+            if m.name == name then return true end
+        end
+        return false
+    end
+
+    local ok, err = pcall(function()
+        assert(cap2.ingredient_count == 2, "cap-2 machine is not capped at 2")
+
+        -- Item-ingredient counting: the fluid ingredient does not count.
+        assert(acc.count_item_ingredients(ok_recipe) == 2, "ok recipe item count wrong")
+        assert(acc.count_item_ingredients(over) == 3, "over recipe item count wrong")
+        assert(acc.count_item_ingredients(fluid) == 2, "fluid recipe item count wrong (fluid counted?)")
+
+        assert(acc.machine_within_ingredient_count(cap2, ok_recipe), "cap-2 rejected a 2-item recipe")
+        assert(not acc.machine_within_ingredient_count(cap2, over), "cap-2 accepted a 3-item recipe")
+        assert(acc.machine_within_ingredient_count(cap2, fluid), "cap-2 rejected a 2-item + fluid recipe")
+        assert(acc.machine_within_ingredient_count(cap4, over), "cap-4 rejected a 3-item recipe")
+
+        -- Picker / get_machines_for_recipe reflects the cap.
+        local for_over = acc.get_machines_for_recipe(over)
+        assert(not has_machine(for_over, "fs-test-ing-cap-2"),
+            "capped machine offered for an over-cap recipe")
+        assert(has_machine(for_over, "fs-test-ing-cap-4") and has_machine(for_over, "fs-test-ing-cap-10"),
+            "over-cap recipe did not offer both eligible machines")
+        local for_ok = acc.get_machines_for_recipe(ok_recipe)
+        assert(#for_ok == 3, "in-cap recipe did not offer all three machines")
+        local for_fluid = acc.get_machines_for_recipe(fluid)
+        assert(#for_fluid == 3, "fluid recipe excluded a machine (fluid counted toward cap?)")
+
+        -- Preset tiering: base key for the 2-item recipe, "...|>2" for the 3-item one.
+        assert(preset.machine_preset_key("fs-test-ing-cap", 2) == "fs-test-ing-cap",
+            "2-item recipe did not map to the base preset key")
+        assert(preset.machine_preset_key("fs-test-ing-cap", 3) == "fs-test-ing-cap|>2",
+            "3-item recipe did not map to the |>2 preset tier")
+
+        -- The category produces a NEW, distinct preset row: a base tier listing all
+        -- three machines and a ">2" tier listing the two that can craft over-cap
+        -- recipes. The dialog renders exactly the tiers with >1 machine, so the ">2"
+        -- tier having two machines is what makes it a visible second row.
+        local tiers = preset.machine_preset_tiers("fs-test-ing-cap")
+        local base_tier, over_tier
+        for _, tier in ipairs(tiers) do
+            if tier.key == "fs-test-ing-cap" then base_tier = tier end
+            if tier.key == "fs-test-ing-cap|>2" then over_tier = tier end
+        end
+        assert(base_tier and base_tier.threshold == nil and #base_tier.machines == 3,
+            "base preset tier should list all three machines")
+        assert(over_tier and over_tier.threshold == 2 and #over_tier.machines == 2,
+            "the >2 preset tier should be a distinct row listing the two larger machines")
+
+        local presets = preset.create_machine_presets()
+        assert(presets["fs-test-ing-cap"], "base machine preset tier missing")
+        local over_preset = presets["fs-test-ing-cap|>2"]
+        assert(over_preset and over_preset.name ~= "fs-test-ing-cap-2",
+            "over-cap preset tier defaulted to a machine that cannot craft over-cap recipes")
+        assert(over_preset.name == "fs-test-ing-cap-4" or over_preset.name == "fs-test-ing-cap-10",
+            "over-cap preset tier default is not one of its eligible machines")
+    end)
+    if not ok then
+        return "ERROR: ingredient_count machine check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Exercises required_fluid normalization on mining virtual recipes. A drill
 ---consumes mineable.fluid_amount of the required fluid once per mining cycle --
 ---the same cadence at which products are yielded -- so create_resource_virtual
@@ -1077,6 +1162,7 @@ function M.register()
         check_fuel_reconciliation = M.check_fuel_reconciliation,
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
         check_fixed_recipe_machine = M.check_fixed_recipe_machine,
+        check_ingredient_count_machine = M.check_ingredient_count_machine,
         check_required_fluid_mining = M.check_required_fluid_mining,
         check_quality_module_slots = M.check_quality_module_slots,
     })

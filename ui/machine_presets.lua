@@ -2,6 +2,7 @@ local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local save = require "manage/save"
+local preset = require "manage/preset"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
 
@@ -46,68 +47,89 @@ function handlers.on_make_preset_tables(event)
             goto continue
         end
 
-        local crafts
+        -- Each row is one preset entry: a (key, caption, choices) triple, where
+        -- key is what the pick is stored under in presets[preset_type]. Most preset
+        -- types are one row per category; machine presets split a category into
+        -- ingredient_count tiers, each its own row and key (preset.machine_preset_tiers).
+        local rows
         if preset_type == "fuel" then
-            crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]])
+            rows = { { key = category_name, caption = category_name,
+                crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]]) } }
         elseif preset_type == "fluid_fuel" then
-            crafts = acc.get_any_fluid_fuels()
+            rows = { { key = category_name, caption = category_name,
+                crafts = acc.get_any_fluid_fuels() } }
         elseif preset_type == "resource" then
-            crafts = acc.get_machines_in_resource_category(category_name)
+            rows = { { key = category_name, caption = category_name,
+                crafts = acc.get_machines_in_resource_category(category_name) } }
         elseif preset_type == "machine" then
-            -- Category-wide preset excludes fixed_recipe machines: those are
+            -- Tier machine lists already exclude fixed_recipe machines: those are
             -- offered per-recipe, never as a category default.
-            crafts = acc.get_general_machines_in_category(category_name)
+            rows = {}
+            for _, tier in ipairs(preset.machine_preset_tiers(category_name)) do
+                local caption = tier.threshold
+                    and { "factory-solver-machine-preset-tier", category_name, tostring(tier.threshold) }
+                    or category_name
+                flib_table.insert(rows, { key = tier.key, caption = caption, crafts = tier.machines })
+            end
         else
             assert()
         end
 
-        if #crafts <= 1 then
-            goto continue
-        end
-
-        do
-            local def = {
-                type = "label",
-                caption = category_name,
-            }
-            fs_util.add_gui(elem, def)
-        end
-
-        do
-            local def_buttons = {}
-            for _, craft in ipairs(crafts) do
-                local typed_name = tn.craft_to_typed_name(craft)
-                local is_hidden = acc.is_hidden(craft)
-                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
-
-                local def = common.create_decorated_sprite_button {
-                    typed_name = typed_name,
-                    is_hidden = is_hidden,
-                    is_unresearched = is_unresearched,
-                    tags = {
-                        typed_name = typed_name,
-                        category_name = category_name,
-                        preset_type = preset_type,
-                    },
-                    handler = {
-                        [defines.events.on_gui_click] = handlers.on_preset_button_click,
-                        on_preset_changed = handlers.on_preset_change_toggle,
-                    },
-                }
-                flib_table.insert(def_buttons, def)
+        for _, row in ipairs(rows) do
+            if #row.crafts <= 1 then
+                goto continue_row
             end
 
-            local def_table = {
-                type = "frame",
-                style = "factory_solver_slot_background_frame",
-                {
-                    type = "table",
-                    style = "filter_slot_table",
-                    column_count = 6,
-                    children = def_buttons,
-                },
-            }
-            fs_util.add_gui(elem, def_table)
+            do
+                local def = {
+                    type = "label",
+                    caption = row.caption,
+                    -- Wrap inside the 160px-wide first column instead of clipping;
+                    -- single_line is a LuaStyle property so it must go in style_mods
+                    -- (ignored at element top level). Long ingredient_count tier
+                    -- captions span two lines; short category names stay one.
+                    style_mods = { single_line = false, maximal_width = 160 },
+                }
+                fs_util.add_gui(elem, def)
+            end
+
+            do
+                local def_buttons = {}
+                for _, craft in ipairs(row.crafts) do
+                    local typed_name = tn.craft_to_typed_name(craft)
+                    local is_hidden = acc.is_hidden(craft)
+                    local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+
+                    local def = common.create_decorated_sprite_button {
+                        typed_name = typed_name,
+                        is_hidden = is_hidden,
+                        is_unresearched = is_unresearched,
+                        tags = {
+                            typed_name = typed_name,
+                            category_name = row.key,
+                            preset_type = preset_type,
+                        },
+                        handler = {
+                            [defines.events.on_gui_click] = handlers.on_preset_button_click,
+                            on_preset_changed = handlers.on_preset_change_toggle,
+                        },
+                    }
+                    flib_table.insert(def_buttons, def)
+                end
+
+                local def_table = {
+                    type = "frame",
+                    style = "factory_solver_slot_background_frame",
+                    {
+                        type = "table",
+                        style = "filter_slot_table",
+                        column_count = 6,
+                        children = def_buttons,
+                    },
+                }
+                fs_util.add_gui(elem, def_table)
+            end
+            ::continue_row::
         end
         ::continue::
     end
@@ -151,19 +173,19 @@ function handlers.on_preset_change_toggle(event)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
 
     local dialog_tags = dialog.tags
-    local preset
+    local selected
     if preset_type == "fuel" then
-        preset = dialog_tags.presets.fuel[category_name]
+        selected = dialog_tags.presets.fuel[category_name]
     elseif preset_type == "fluid_fuel" then
-        preset = dialog_tags.presets.fluid_fuel
+        selected = dialog_tags.presets.fluid_fuel
     elseif preset_type == "resource" then
-        preset = dialog_tags.presets.resource[category_name]
+        selected = dialog_tags.presets.resource[category_name]
     elseif preset_type == "machine" then
-        preset = dialog_tags.presets.machine[category_name]
+        selected = dialog_tags.presets.machine[category_name]
     end
-    assert(preset)
+    assert(selected)
 
-    elem.toggled = tn.equals_typed_name(preset, typed_name, true)
+    elem.toggled = tn.equals_typed_name(selected, typed_name, true)
 end
 
 ---@param event EventData.on_gui_click

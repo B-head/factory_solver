@@ -192,6 +192,7 @@ __factory_solver__storage = {}
 ---@field material table<string, VirtualMaterial>
 ---@field recipe table<string, VirtualRecipe>
 ---@field fuel_categories_dictionary table<string, { [string]: true }>
+---@field machine_ingredient_tiers table<string, integer[]>
 
 ---@class VirtualMaterial
 ---@field type "virtual_material"

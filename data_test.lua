@@ -787,6 +787,78 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     })
 end
 
+-- 8f. Three general machines in one isolated category disagreeing on ingredient_count
+--     (item-ingredient cap; fluids exempt), with caps 2 / 4 / 10 and explicit order
+--     a/b/c so the preset sort is deterministic. factory_solver filters a machine out
+--     of a recipe whose item-ingredient count exceeds its cap, and splits the category
+--     into per-cap machine-preset tiers. Expected:
+--       * picker: -over (3 items) is offered the cap>=3 machines (4 and 10) only;
+--         -ok (2 items) and -fluid (2 items + 1 fluid) are offered all three.
+--       * presets: a base tier "fs-test-ing-cap" (all three) plus a DISTINCT
+--         "fs-test-ing-cap|>2" tier (the 4 and 10 machines). The latter renders as a
+--         second row in the machine-presets dialog because it lists two machines; the
+--         "|>4" tier has a single machine and is hidden like any one-choice row.
+--     Asserted by smoke check_ingredient_count_machine.
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"] then
+    local function cap_machine(name, cap, order)
+        local e = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+        e.name = name
+        e.localised_name = name
+        e.order = order
+        e.minable = nil
+        e.next_upgrade = nil
+        e.placeable_by = nil
+        e.crafting_categories = { "fs-test-ing-cap" }
+        e.ingredient_count = cap
+        return e
+    end
+
+    extend_test({
+        { type = "recipe-category", name = "fs-test-ing-cap" },
+        cap_machine("fs-test-ing-cap-2", 2, "a"),
+        cap_machine("fs-test-ing-cap-4", 4, "b"),
+        cap_machine("fs-test-ing-cap-10", 10, "c"),
+        {
+            type = "recipe",
+            name = "fs-test-ing-ok",
+            category = "fs-test-ing-cap",
+            enabled = true,
+            energy_required = 1,
+            ingredients = {
+                { type = "item", name = "iron-plate", amount = 1 },
+                { type = "item", name = "copper-plate", amount = 1 },
+            },
+            results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
+        },
+        {
+            type = "recipe",
+            name = "fs-test-ing-over",
+            category = "fs-test-ing-cap",
+            enabled = true,
+            energy_required = 1,
+            ingredients = {
+                { type = "item", name = "iron-plate", amount = 1 },
+                { type = "item", name = "copper-plate", amount = 1 },
+                { type = "item", name = "stone", amount = 1 },
+            },
+            results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
+        },
+        {
+            type = "recipe",
+            name = "fs-test-ing-fluid",
+            category = "fs-test-ing-cap",
+            enabled = true,
+            energy_required = 1,
+            ingredients = {
+                { type = "item", name = "iron-plate", amount = 1 },
+                { type = "item", name = "copper-plate", amount = 1 },
+                { type = "fluid", name = "water", amount = 10 },
+            },
+            results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
+        },
+    })
+end
+
 -- A crafting machine that opts into Factorio 2.0.77+ quality-scaled module slots
 -- (quality_affects_module_slots). No vanilla entity sets this flag, so it is the
 -- only way to exercise acc.get_machine_module_inventory_size's scaling branch.

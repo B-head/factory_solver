@@ -82,6 +82,35 @@ function M.machine_allows_recipe(machine, recipe_name)
     return machine.fixed_recipe == nil or machine.fixed_recipe == recipe_name
 end
 
+---Count of a recipe's *item* ingredients. Fluids are excluded because the engine's
+---`ingredient_count` cap only counts item ingredients (see machine_within_ingredient_count).
+---@param recipe LuaRecipePrototype
+---@return integer
+function M.count_item_ingredients(recipe)
+    local n = 0
+    for _, ingredient in ipairs(recipe.ingredients) do
+        if ingredient.type == "item" then
+            n = n + 1
+        end
+    end
+    return n
+end
+
+---A crafting machine accepts at most `ingredient_count` *item* ingredients; fluids
+---are exempt ("This only counts item ingredients, not fluid ingredients!"), so a
+---2-slot machine still crafts a 2-item + 1-fluid recipe. A nil cap (a non-crafting
+---prototype, never reached here) or the 65535 data-stage default both mean
+---unlimited. Reading `.ingredient_count` is safe for the same reason
+---`machine_allows_recipe` reads `.fixed_recipe`: every caller passes a crafting
+---machine (the `crafting-category` filter / category preset guarantees the subtype).
+---@param machine LuaEntityPrototype
+---@param recipe LuaRecipePrototype
+---@return boolean
+function M.machine_within_ingredient_count(machine, recipe)
+    local cap = machine.ingredient_count
+    return cap == nil or M.count_item_ingredients(recipe) <= cap
+end
+
 ---Machines in a category usable as a *category-wide* default: those without a
 ---`fixed_recipe` lock. A fixed-recipe machine is recipe-specific and is offered
 ---only through `get_machines_for_recipe` for its own recipe, never as a category
@@ -156,11 +185,14 @@ end
 function M.get_machines_for_recipe(recipe)
     ---@diagnostic disable-next-line: param-type-mismatch
     if recipe.object_name then
-        -- Honour each machine's engine-side `fixed_recipe` lock: keep only those
-        -- with no lock (any recipe in the category) or locked to this recipe.
+        -- Honour each machine's engine-side `fixed_recipe` lock (no lock, or locked
+        -- to this recipe) and its `ingredient_count` cap (the recipe's item
+        -- ingredients must fit). Both narrow the category's machine list per recipe.
         local ret = {}
         for _, machine in ipairs(M.get_machines_in_category(recipe.category)) do
-            if M.machine_allows_recipe(machine, recipe.name) then
+            if M.machine_allows_recipe(machine, recipe.name)
+                and M.machine_within_ingredient_count(machine, recipe)
+            then
                 ret[#ret + 1] = machine
             end
         end

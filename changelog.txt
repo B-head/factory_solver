@@ -31,6 +31,14 @@ Date: ????
       fixed-recipe machines. Previously any machine in a crafting category was
       offered for every recipe in it, so the planner could build a recipe on a
       machine that cannot make it in-game.
+    - Honor a crafting machine's ingredient_count, the cap on how many item
+      ingredients it can craft with (fluid ingredients do not count). A machine
+      whose cap is too small no longer appears in such a recipe's machine
+      picker, default, or paste target. When machines in one crafting category
+      disagree on the cap, the machine-preset dialog splits that category into
+      one row per cap tier, so each tier keeps its own default machine -- the
+      same way the fuel presets split by fuel-category set. Categories whose
+      machines all share a cap are unchanged.
     - Pre-round a slot's amount onto the engine's display grid per material
       kind (one decimal), so a slot number reads the same magnitude across
       columns and a constraint set to 60 whose usage solves to 59.9999996 reads

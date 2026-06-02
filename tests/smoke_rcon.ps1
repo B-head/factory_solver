@@ -332,6 +332,19 @@ try {
         $allPass = $false
     }
 
+    # A machine's ingredient_count caps the item ingredients it can craft (fluids
+    # exempt): the capped machine drops out of over-cap recipes' pickers, and the
+    # category splits into per-cap machine-preset tiers.
+    # Solution-independent, driven off data_test.lua, so it runs once up front too.
+    $ingredientCount = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_ingredient_count_machine'))"
+    if ($ingredientCount -eq "OK") {
+        Write-Host "SMOKE PASS: [ingredient_count] capped machine excluded; preset tiers split"
+    } else {
+        Write-Host "SMOKE FAIL: [ingredient_count] $ingredientCount"
+        $allPass = $false
+    }
+
     # A mining drill's required_fluid is consumed once per mining cycle, so the
     # mining virtual recipe must divide it by mining_time like the products (2x
     # over-count regression on vanilla uranium-ore otherwise).

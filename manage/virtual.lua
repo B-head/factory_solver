@@ -161,11 +161,36 @@ function M.create_virtuals()
 
     M.create_source_sink_virtuals(materials, recipes)
 
+    -- Distinct ingredient_count caps among each recipe category's general
+    -- (lock-free) machines, sorted ascending. Drives the per-tier machine presets
+    -- (manage/preset.lua machine_preset_tiers / machine_preset_key): a category
+    -- whose machines disagree on the item-ingredient cap splits into one default
+    -- machine per tier. A category with a single distinct cap yields a one-element
+    -- list and so keeps its single bare-category preset key, unchanged.
+    ---@type table<string, integer[]>
+    local machine_ingredient_tiers = {}
+    for category_name, _ in pairs(prototypes.recipe_category) do
+        local seen = {}
+        for _, machine in ipairs(acc.get_general_machines_in_category(category_name)) do
+            local cap = machine.ingredient_count
+            if cap then
+                seen[cap] = true
+            end
+        end
+        local caps = {}
+        for cap, _ in pairs(seen) do
+            caps[#caps + 1] = cap
+        end
+        table.sort(caps)
+        machine_ingredient_tiers[category_name] = caps
+    end
+
     ---@type Virtuals
     return {
         material = materials,
         recipe = recipes,
         fuel_categories_dictionary = fuel_categories_dictionary,
+        machine_ingredient_tiers = machine_ingredient_tiers,
     }
 end
 

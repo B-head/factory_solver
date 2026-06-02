@@ -155,6 +155,70 @@ function M.create_lab_presets(origin)
     return ret
 end
 
+---A recipe category is split into ingredient_count tiers because a single
+---category-wide default machine cannot serve recipes whose item-ingredient count
+---exceeds a low-`ingredient_count` machine in the same category. Each tier is one
+---preset row keyed like the fuel presets' synthesized keys:
+--- * base tier `category` -- every general (lock-free) machine is eligible (the
+---   recipe fits even the smallest one). Same key the category used before tiers,
+---   so existing presets keep working.
+--- * tier `category|>ci` -- recipes needing more than ci item ingredients; only
+---   machines whose cap exceeds ci are eligible.
+---The number of tiers equals the count of distinct ingredient_count caps among the
+---category's general machines (storage.virtuals.machine_ingredient_tiers), so a
+---category whose machines share one cap (the common case) stays a single base tier.
+---Exceeding the top cap leaves no machine, so it gets no tier (the recipe falls to
+---the unknown-entity sentinel via get_machine_preset's fallback).
+---@param category_name string
+---@return { key: string, threshold: integer?, machines: LuaEntityPrototype[] }[]
+function M.machine_preset_tiers(category_name)
+    local machines = acc.get_general_machines_in_category(category_name)
+    local caps = storage.virtuals.machine_ingredient_tiers[category_name] or {}
+
+    local tiers = {
+        { key = category_name, threshold = nil, machines = machines },
+    }
+    for i = 1, #caps - 1 do
+        local threshold = caps[i]
+        local eligible = {}
+        for _, machine in ipairs(machines) do
+            local cap = machine.ingredient_count
+            if not cap or cap > threshold then
+                eligible[#eligible + 1] = machine
+            end
+        end
+        tiers[#tiers + 1] = {
+            key = category_name .. "|>" .. threshold,
+            threshold = threshold,
+            machines = eligible,
+        }
+    end
+    return tiers
+end
+
+---The machine preset key for a recipe's (category, item-ingredient count): the
+---tier whose eligible set matches the recipe. Mirrors machine_preset_tiers' keys.
+---@param category_name string
+---@param item_count integer
+---@return string
+function M.machine_preset_key(category_name, item_count)
+    local caps = storage.virtuals.machine_ingredient_tiers[category_name]
+    if not caps then
+        return category_name
+    end
+    -- The largest cap the recipe outgrows is the tier threshold; below the
+    -- smallest cap (or no restrictive cap at all) the recipe uses the base key.
+    local threshold
+    for _, cap in ipairs(caps) do
+        if cap < item_count then
+            threshold = cap
+        else
+            break
+        end
+    end
+    return threshold and (category_name .. "|>" .. threshold) or category_name
+end
+
 ---comment
 ---@param origin table<string, TypedName>?
 ---@return table<string, TypedName>
@@ -164,18 +228,19 @@ function M.create_machine_presets(origin)
         ret = flib_table.deep_copy(origin)
     end
 
+    -- One preset per (category, ingredient_count tier). Tier machine lists already
+    -- exclude fixed_recipe machines (those are offered per-recipe by
+    -- get_machines_for_recipe, never as a category default).
     for category_name, _ in pairs(prototypes.recipe_category) do
-        tn.typed_name_migration(ret[category_name])
-        if tn.validate_typed_name(ret[category_name]) then
-            goto continue
-        end
+        for _, tier in ipairs(M.machine_preset_tiers(category_name)) do
+            tn.typed_name_migration(ret[tier.key])
+            if tn.validate_typed_name(ret[tier.key]) then
+                goto continue
+            end
 
-        -- Category-wide default excludes fixed_recipe machines: a machine locked
-        -- to one recipe is offered per-recipe by get_machines_for_recipe, not as
-        -- the default for arbitrary recipes in the category.
-        local machines = acc.get_general_machines_in_category(category_name)
-        ret[category_name] = M.get_default_preset(machines, "machine")
-        ::continue::
+            ret[tier.key] = M.get_default_preset(tier.machines, "machine")
+            ::continue::
+        end
     end
 
     return ret
@@ -229,14 +294,20 @@ function M.get_machine_preset(player_index, recipe_typed_name)
         end
     elseif recipe_typed_name.type == "recipe" then
         local recipe = prototypes.recipe[recipe_typed_name.name]
-        local preset = assert(player_data.presets.machine[recipe.category])
-        -- Honour the category default only if it can actually craft this recipe;
-        -- a machine locked to a different recipe (engine fixed_recipe) cannot.
-        -- Fall back to the first eligible machine for this exact recipe, which
-        -- resolves to the unknown-entity sentinel when none qualifies (a recipe
-        -- no machine can craft becomes a visibly-broken row, not a silent swap).
-        local machine = prototypes.entity[preset.name]
-        if machine and acc.machine_allows_recipe(machine, recipe.name) then
+        -- Machine presets split each category by ingredient_count tier; pick the
+        -- tier key whose eligible machines cover this recipe's item count.
+        local key = M.machine_preset_key(recipe.category, acc.count_item_ingredients(recipe))
+        local preset = player_data.presets.machine[key]
+        -- Honour the tier default only if it can actually craft this recipe: a
+        -- machine locked to a different recipe (engine fixed_recipe) or one whose
+        -- ingredient_count cap is exceeded cannot. Fall back to the first eligible
+        -- machine for this exact recipe, which resolves to the unknown-entity
+        -- sentinel when none qualifies (a recipe no machine can craft becomes a
+        -- visibly-broken row, not a silent swap).
+        local machine = preset and prototypes.entity[preset.name]
+        if machine and acc.machine_allows_recipe(machine, recipe.name)
+            and acc.machine_within_ingredient_count(machine, recipe)
+        then
             return preset
         end
         return M.get_default_preset(acc.get_machines_for_recipe(recipe), "machine")
