@@ -24,6 +24,8 @@ Warning: Multiplayer games have not been tested. Note that solution data may be 
 
 ## How to use
 
+The editor and each dialog guide you through this in-game; the steps below are for reference.
+
 1. Click the blue '+' button to create a new solution.
 2. Choose a target material whose production rate you want to set.
 3. Choose a recipe that produces it as a product or uses it as an ingredient.
@@ -42,14 +44,14 @@ rebuilding them by hand:
 
 1. In Factory Planner or Helmod, export the factory / model to a shared
    string.
-2. In factory_solver, click the import button in the solution list toolbar
+2. In Factory solver, click the import button in the solution list toolbar
    and paste the string. The source format is detected automatically.
 3. Pick which factories to bring in and confirm.
 
 A symmetric export back to Factory Planner or Helmod is also available from
 the export button next to it, in case you want to round-trip a solution.
 
-Note: shared-string import / export between factory_solver, Factory Planner,
+Note: shared-string import / export between Factory solver, Factory Planner,
 and Helmod is best-effort. The three calculators do not share the same
 feature set, so some adjustments may be needed after an import; warnings in
 the chat log point out what was dropped or coerced.
@@ -66,7 +68,7 @@ The solver then expands recipes into the quality cascade, and quality modules sh
 
 ## External source / sink
 
-factory_solver provides a *source* and a *sink* for every item, fluid, and
+Factory solver provides a *source* and a *sink* for every item, fluid, and
 heat. A source supplies its material from outside the factory; a sink
 discharges its material out of the factory. Material drawn from a source is
 added to "Initial ingredients", and material sent to a sink is added to "Final
