@@ -1036,12 +1036,17 @@ function M.create_resource_virtual(resource_prototype, planet_index)
     local ingredients = {}
     if mineable.required_fluid then
         ---@type Ingredient
-        local amount = {
+        local raw_fluid = {
             type = "fluid",
             name = mineable.required_fluid,
             amount = mineable.fluid_amount,
         }
-        flib_table.insert(ingredients, amount)
+        -- The required fluid is consumed once per mining cycle, the same cadence
+        -- at which the products above are produced, so it must be divided by
+        -- mining_time too. Without routing it through modify_product_or_ingredient
+        -- (as the product loop does) the per-second fluid draw was over-counted by
+        -- a factor of mining_time (e.g. 2x on vanilla uranium-ore, mining_time=2).
+        flib_table.insert(ingredients, M.modify_product_or_ingredient(raw_fluid, mineable.mining_time))
     end
 
     ---@type VirtualRecipe

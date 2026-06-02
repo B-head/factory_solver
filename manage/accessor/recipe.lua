@@ -40,9 +40,10 @@ end
 function M.get_maximum_productivity(recipe)
     ---@diagnostic disable-next-line: param-type-mismatch
     if recipe.object_name == "LuaRecipePrototype" then
-        -- maximum_productivity landed in Factorio 2.0.77; the LuaCATS bundle
-        -- shipped with the build hasn't picked it up yet, so the read is real
-        -- but flagged as undefined here.
+        -- maximum_productivity is runtime-readable on every supported base
+        -- (present at least since 2.0.56, the mod's minimum dependency), so the
+        -- read is real and cannot throw. The bundled LuaCATS stub lacks the
+        -- field, hence the suppression of the spurious undefined-field warning.
         ---@diagnostic disable-next-line: undefined-field
         return recipe.maximum_productivity
     else

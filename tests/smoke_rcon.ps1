@@ -331,6 +331,19 @@ try {
         Write-Host "SMOKE FAIL: [fixed_recipe] $fixedRecipe"
         $allPass = $false
     }
+
+    # A mining drill's required_fluid is consumed once per mining cycle, so the
+    # mining virtual recipe must divide it by mining_time like the products (2x
+    # over-count regression on vanilla uranium-ore otherwise).
+    # Solution-independent, driven off vanilla uranium-ore, so it runs once up front.
+    $requiredFluid = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_required_fluid_mining'))"
+    if ($requiredFluid -eq "OK") {
+        Write-Host "SMOKE PASS: [required_fluid] mining fluid normalized by mining_time"
+    } else {
+        Write-Host "SMOKE FAIL: [required_fluid] $requiredFluid"
+        $allPass = $false
+    }
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"

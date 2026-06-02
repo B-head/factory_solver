@@ -969,6 +969,52 @@ function M.check_fixed_recipe_machine()
     return "OK"
 end
 
+---Exercises required_fluid normalization on mining virtual recipes. A drill
+---consumes mineable.fluid_amount of the required fluid once per mining cycle --
+---the same cadence at which products are yielded -- so create_resource_virtual
+---must divide it by mining_time exactly as it does the products. Regression lock
+---for the bug where the fluid skipped that division and was over-counted by a
+---factor of mining_time (2x on vanilla uranium-ore, mining_time=2). Driven off
+---vanilla uranium-ore (required_fluid = sulfuric-acid); guarded on presence so a
+---mod set without it skips instead of failing.
+---@return string
+function M.check_required_fluid_mining()
+    local resource = prototypes.entity["uranium-ore"]
+    local mineable = resource and resource.mineable_properties
+    if not (mineable and mineable.required_fluid) then
+        log.info("check_required_fluid_mining: uranium-ore with required_fluid absent, skipped")
+        return "OK"
+    end
+
+    local ok, err = pcall(function()
+        local recipe = storage.virtuals.recipe["<mine>uranium-ore"]
+        assert(recipe, "no <mine>uranium-ore virtual recipe generated")
+
+        local fluid_ingredient
+        for _, ingredient in ipairs(recipe.ingredients) do
+            if ingredient.type == "fluid" and ingredient.name == mineable.required_fluid then
+                fluid_ingredient = ingredient
+                break
+            end
+        end
+        assert(fluid_ingredient,
+            "required_fluid " .. mineable.required_fluid .. " missing from ingredients")
+
+        -- Consumed once per mining cycle, so the per-craft amount must be the raw
+        -- fluid_amount divided by mining_time (matching the products). Pre-fix this
+        -- was the raw fluid_amount, mining_time times too large.
+        local expected = mineable.fluid_amount / mineable.mining_time
+        assert(math.abs(fluid_ingredient.amount - expected) < 1e-9,
+            string.format("required_fluid per-craft amount %s, expected %s (fluid_amount %s / mining_time %s)",
+                tostring(fluid_ingredient.amount), tostring(expected),
+                tostring(mineable.fluid_amount), tostring(mineable.mining_time)))
+    end)
+    if not ok then
+        return "ERROR: required fluid mining check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -983,6 +1029,7 @@ function M.register()
         check_fuel_reconciliation = M.check_fuel_reconciliation,
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
         check_fixed_recipe_machine = M.check_fixed_recipe_machine,
+        check_required_fluid_mining = M.check_required_fluid_mining,
     })
 end
 
