@@ -938,6 +938,11 @@ return {
         },
     },
     {
+        type = "label",
+        style = "factory_solver_dialog_description_label",
+        caption = { "factory-solver-desc-machine-setup" },
+    },
+    {
         type = "frame",
         style = "inside_shallow_frame",
         {

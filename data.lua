@@ -79,6 +79,14 @@ data:extend({
         border = true,
         border_color = { r = 0, g = 0, b = 0 },
     },
+    {
+        -- Editor next-step guide: a touch larger than the default label so the
+        -- "what to do next" hint reads as a prompt rather than ambient help.
+        type = "font",
+        name = "factory_solver_getting_started_font",
+        from = "default",
+        size = 18,
+    },
 })
 
 -- Tight-cropped variants of __core__ utility sprites, used as the top-right
@@ -357,6 +365,36 @@ styles.factory_solver_build_assistant_table = {
 styles.factory_solver_production_line_header_label = {
     type = "label_style",
     parent = "bold_label",
+}
+
+styles.factory_solver_getting_started_flow = {
+    type = "vertical_flow_style",
+    vertical_spacing = 8,
+    padding = 12,
+    horizontal_align = "left",
+    horizontally_stretchable = "on",
+}
+
+-- One-line description shown under each dialog's title bar. Stretches to the
+-- dialog's content width (single_line=false keeps its min width small, so it
+-- never widens the dialog) and is dimmed so it reads as ambient help.
+styles.factory_solver_dialog_description_label = {
+    type = "label_style",
+    single_line = false,
+    horizontally_stretchable = "on",
+    bottom_margin = 8,
+    font_color = { r = 0.7, g = 0.7, b = 0.7 },
+}
+
+styles.factory_solver_getting_started_label = {
+    type = "label_style",
+    single_line = false,
+    -- Fill the stretched flow so each step wraps at the panel width instead of
+    -- collapsing to its longest-word minimum.
+    horizontally_stretchable = "on",
+    -- White and a touch larger so the next-step hint reads as a prompt.
+    font = "factory_solver_getting_started_font",
+    font_color = { r = 1, g = 1, b = 1 },
 }
 
 -- solution_selector

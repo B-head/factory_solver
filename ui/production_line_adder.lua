@@ -557,6 +557,11 @@ return {
         },
     },
     {
+        type = "label",
+        style = "factory_solver_dialog_description_label",
+        caption = { "factory-solver-desc-production-line-adder" },
+    },
+    {
         type = "frame",
         style = "inside_shallow_frame_with_padding",
         direction = "vertical",

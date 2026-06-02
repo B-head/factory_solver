@@ -109,6 +109,7 @@ return {
             type = "sprite-button",
             style = "tool_button_blue",
             sprite = "utility/add",
+            tooltip = { "factory-solver-create-new-solution" },
             handler = {
                 [defines.events.on_gui_click] = handlers.on_new_solution,
             },
@@ -117,6 +118,7 @@ return {
             type = "sprite-button",
             style = "tool_button",
             sprite = "utility/rename_icon",
+            tooltip = { "factory-solver-rename-selected-solution" },
             handler = {
                 [defines.events.on_gui_click] = handlers.on_rename_solution,
                 on_added = handlers.on_selector_tool_enabled,
@@ -127,6 +129,7 @@ return {
             type = "sprite-button",
             style = "tool_button",
             sprite = "utility/export_slot",
+            tooltip = { "factory-solver-export-to-string" },
             handler = {
                 [defines.events.on_gui_click] = handlers.on_export_solution,
                 on_added = handlers.on_export_tool_enabled,
@@ -141,6 +144,7 @@ return {
             type = "sprite-button",
             style = "tool_button",
             sprite = "utility/import_slot",
+            tooltip = { "factory-solver-import-from-string" },
             handler = {
                 [defines.events.on_gui_click] = handlers.on_import_solution,
             },

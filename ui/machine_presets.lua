@@ -255,6 +255,11 @@ return {
         },
     },
     {
+        type = "label",
+        style = "factory_solver_dialog_description_label",
+        caption = { "factory-solver-desc-machine-presets" },
+    },
+    {
         type = "frame",
         style = "inside_shallow_frame",
         {

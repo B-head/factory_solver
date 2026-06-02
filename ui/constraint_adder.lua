@@ -350,6 +350,11 @@ return {
         },
     },
     {
+        type = "label",
+        style = "factory_solver_dialog_description_label",
+        caption = { "factory-solver-desc-constraint-adder" },
+    },
+    {
         type = "frame",
         style = "deep_frame_in_tabbed_pane",
         direction = "vertical",

@@ -139,6 +139,7 @@ function handlers.make_production_line_table(event)
         do
             local def = {
                 type = "label",
+                tooltip = { "factory-solver-required-tooltip" },
                 tags = {
                     result_typed_name = line.recipe_typed_name,
                 },
@@ -806,6 +807,43 @@ function handlers.on_remove_production_line(event)
     fs_util.dispatch_to_subtree(root, "on_production_line_changed")
 end
 
+---Contextual "next step" hint shown in the editor. It tracks the selected
+---solution's progress and surfaces the single action that moves it forward,
+---then retires once the solution has two or more production lines. Workflow
+---steps that DO have a dialog are explained inside that dialog; this covers the
+---steps between dialogs.
+---@param event EventDataTrait
+function handlers.make_getting_started_guide(event)
+    local elem = event.element
+    local solution = save.get_selected_solution(event.player_index)
+
+    local key
+    if not solution then
+        key = "factory-solver-guide-create-solution"
+    elseif #solution.constraints == 0 then
+        key = "factory-solver-guide-add-constraint"
+    elseif #solution.production_lines == 0 then
+        key = "factory-solver-guide-add-line"
+    elseif #solution.production_lines == 1 then
+        -- A lone line is usually an unfinished chain; nudge toward extending it.
+        -- (Constraint count is deliberately NOT used to nudge -- a single-
+        -- constraint solution is a normal end state, not something to prod.)
+        key = "factory-solver-guide-more-lines"
+    end
+
+    elem.clear()
+    if not key then
+        elem.visible = false
+        return
+    end
+    elem.visible = true
+    fs_util.add_gui(elem, {
+        type = "label",
+        style = "factory_solver_getting_started_label",
+        caption = { key },
+    })
+end
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -825,6 +863,18 @@ return {
                 on_added = handlers.make_production_line_table,
                 on_selected_solution_changed = handlers.make_production_line_table,
                 on_production_line_changed = handlers.make_production_line_table,
+            },
+        },
+        {
+            type = "flow",
+            name = "factory_solver_getting_started",
+            style = "factory_solver_getting_started_flow",
+            direction = "vertical",
+            handler = {
+                on_added = handlers.make_getting_started_guide,
+                on_selected_solution_changed = handlers.make_getting_started_guide,
+                on_constraint_changed = handlers.make_getting_started_guide,
+                on_production_line_changed = handlers.make_getting_started_guide,
             },
         }
     },

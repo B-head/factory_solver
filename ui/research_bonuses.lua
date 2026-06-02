@@ -321,6 +321,11 @@ return {
         },
     },
     {
+        type = "label",
+        style = "factory_solver_dialog_description_label",
+        caption = { "factory-solver-desc-research-bonuses" },
+    },
+    {
         type = "frame",
         style = "inside_shallow_frame",
         direction = "vertical",
