@@ -54,6 +54,7 @@ function handlers.make_final_products_table(event)
                 [defines.events.on_gui_click] = handlers.on_total_inout_click,
             },
         }
+        common.append_tooltip_line(def, common.op_hints.inout())
         fs_util.add_gui(elem, def)
     end
 
@@ -112,6 +113,7 @@ function handlers.make_basic_ingredients_table(event)
                 [defines.events.on_gui_click] = handlers.on_total_inout_click,
             },
         }
+        common.append_tooltip_line(def, common.op_hints.inout())
         fs_util.add_gui(elem, def)
     end
 

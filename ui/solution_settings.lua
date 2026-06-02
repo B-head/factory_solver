@@ -68,6 +68,7 @@ function handlers.on_make_constraints_table(event)
                     type = "sprite-button",
                     style = "mini_button",
                     sprite = "utility/speed_up",
+                    tooltip = common.op_hints.move_row(),
                     tags = { constraint_index = index, direction = "up" },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_move_constraint_click,
@@ -77,6 +78,7 @@ function handlers.on_make_constraints_table(event)
                     type = "sprite-button",
                     style = "mini_button",
                     sprite = "utility/speed_down",
+                    tooltip = common.op_hints.move_row(),
                     tags = { constraint_index = index, direction = "down" },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_move_constraint_click,
@@ -98,6 +100,7 @@ function handlers.on_make_constraints_table(event)
                     [defines.events.on_gui_click] = handlers.on_constraint_button_click,
                 },
             }
+            common.append_tooltip_line(def, common.op_hints.constraint_icon())
             fs_util.add_gui(elem, def)
         end
 
@@ -146,6 +149,7 @@ function handlers.on_make_constraints_table(event)
                 sprite = "utility/close",
                 hovered_sprite = "utility/close_black",
                 clicked_sprite = "utility/close_black",
+                tooltip = { "factory-solver-remove-constraint" },
                 tags = {
                     constraint_index = index,
                 },

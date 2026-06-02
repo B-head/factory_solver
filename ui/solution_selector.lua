@@ -149,6 +149,7 @@ return {
             type = "sprite-button",
             style = "tool_button_red",
             sprite = "utility/trash",
+            tooltip = { "factory-solver-delete-selected-solution" },
             handler = {
                 [defines.events.on_gui_click] = handlers.on_delete_solution,
                 on_added = handlers.on_selector_tool_enabled,

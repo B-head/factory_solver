@@ -316,13 +316,14 @@ local function add_module_slot_button(parent, slot_index, beacon_index, typed_na
             },
         }
         if is_ineffective then
-            def.tooltip = { "", def.tooltip or "", "\n",
-                { "factory-solver-module-no-effect-here" } }
+            common.append_tooltip_line(def, { "factory-solver-module-no-effect-here" })
         end
+        common.append_tooltip_line(def, common.op_hints.module_slot())
     else
         def = {
             type = "sprite-button",
             style = "flib_slot_button_default",
+            tooltip = common.op_hints.module_slot_empty(),
             tags = {
                 slot_index = tostring(slot_index),
                 beacon_index = beacon_index,
@@ -524,10 +525,12 @@ function handlers.on_make_beacons_table(event)
                         [defines.events.on_gui_click] = handlers.on_open_beacon_picker,
                     },
                 }
+                common.append_tooltip_line(def, common.op_hints.beacon_slot())
             else
                 def = {
                     type = "sprite-button",
                     style = "flib_slot_button_default",
+                    tooltip = common.op_hints.beacon_slot_empty(),
                     tags = {
                         beacon_index = beacon_index,
                     },
@@ -582,6 +585,7 @@ function handlers.on_make_beacons_table(event)
                 sprite = "utility/close",
                 hovered_sprite = "utility/close_black",
                 clicked_sprite = "utility/close_black",
+                tooltip = { "factory-solver-remove-beacon" },
                 tags = {
                     beacon_index = beacon_index,
                 },
@@ -719,8 +723,7 @@ function handlers.on_make_total_effectivity(event)
                     number = counts.ineffective,
                     top_right_sprite = "utility/warning_icon",
                 }
-                def.tooltip = { "", def.tooltip or "", "\n",
-                    { "factory-solver-module-no-effect-here" } }
+                common.append_tooltip_line(def, { "factory-solver-module-no-effect-here" })
                 fs_util.add_gui(elem, def)
             end
         end

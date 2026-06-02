@@ -86,6 +86,7 @@ function handlers.make_production_line_table(event)
                     type = "sprite-button",
                     style = "mini_button",
                     sprite = "utility/speed_up",
+                    tooltip = common.op_hints.move_row(),
                     tags = {
                         line_index = line_index,
                         direction = "up",
@@ -98,6 +99,7 @@ function handlers.make_production_line_table(event)
                     type = "sprite-button",
                     style = "mini_button",
                     sprite = "utility/speed_down",
+                    tooltip = common.op_hints.move_row(),
                     tags = {
                         line_index = line_index,
                         direction = "down",
@@ -130,6 +132,7 @@ function handlers.make_production_line_table(event)
                     [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                 },
             }
+            common.append_tooltip_line(def, common.op_hints.recipe_icon())
             fs_util.add_gui(elem, def)
         end
 
@@ -188,6 +191,7 @@ function handlers.make_production_line_table(event)
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                     },
                 }
+                common.append_tooltip_line(def, common.op_hints.machine_icon())
                 flib_table.insert(buttons, def)
             end
 
@@ -203,14 +207,16 @@ function handlers.make_production_line_table(event)
                     -- visible at-a-glance without collapsing into one
                     -- ambiguous total.
                     if counts.effective > 0 then
-                        flib_table.insert(buttons, common.create_decorated_sprite_button {
+                        local def = common.create_decorated_sprite_button {
                             typed_name = module_typed_name,
                             number = counts.effective,
                                         tags = module_tags,
                             handler = {
                                 [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                             },
-                        })
+                        }
+                        common.append_tooltip_line(def, common.op_hints.module_aggregate())
+                        flib_table.insert(buttons, def)
                     end
                     if counts.ineffective > 0 then
                         local def = common.create_decorated_sprite_button {
@@ -222,8 +228,8 @@ function handlers.make_production_line_table(event)
                                 [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                             },
                         }
-                        def.tooltip = { "", def.tooltip or "", "\n",
-                            { "factory-solver-module-no-effect-here" } }
+                        common.append_tooltip_line(def, { "factory-solver-module-no-effect-here" })
+                        common.append_tooltip_line(def, common.op_hints.module_aggregate())
                         flib_table.insert(buttons, def)
                     end
                 end
@@ -240,6 +246,7 @@ function handlers.make_production_line_table(event)
                     style = "flib_slot_button_default",
                     sprite = "tile/" .. line.substrate_tile_name,
                     elem_tooltip = { type = "tile", name = line.substrate_tile_name },
+                    tooltip = common.op_hints.machine_icon(),
                     tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
@@ -259,6 +266,7 @@ function handlers.make_production_line_table(event)
                     type = "sprite-button",
                     style = "flib_slot_button_default",
                     sprite = "utility/clock",
+                    tooltip = common.op_hints.recipe_clock(),
                     tags = recipe_tags,
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
@@ -309,6 +317,7 @@ function handlers.make_production_line_table(event)
                             on_calculation_changed = handlers.update_amount,
                         },
                     }
+                    common.append_tooltip_line(def, common.op_hints.inout())
                     flib_table.insert(buttons, def)
                 end
             end
@@ -343,6 +352,7 @@ function handlers.make_production_line_table(event)
                         on_calculation_changed = handlers.update_amount,
                     },
                 }
+                common.append_tooltip_line(def, common.op_hints.inout())
                 flib_table.insert(buttons, def)
             end
 
@@ -382,6 +392,7 @@ function handlers.make_production_line_table(event)
                         on_calculation_changed = handlers.update_amount,
                     },
                 }
+                common.append_tooltip_line(def, common.op_hints.inout())
                 flib_table.insert(buttons, def)
             end
 
@@ -442,6 +453,7 @@ function handlers.make_production_line_table(event)
                         on_calculation_changed = handlers.update_amount,
                     },
                 }
+                common.append_tooltip_line(def, common.op_hints.inout())
                 flib_table.insert(children, def)
             end
 
@@ -478,6 +490,7 @@ function handlers.make_production_line_table(event)
                 sprite = "utility/close",
                 hovered_sprite = "utility/close_black",
                 clicked_sprite = "utility/close_black",
+                tooltip = { "factory-solver-remove-production-line" },
                 tags = {
                     line_index = line_index,
                 },
@@ -591,13 +604,20 @@ function handlers.on_production_line_recipe_click(event)
 
     local tags = event.element.tags
     if event.button == defines.mouse_button_type.left then
-        if tags.is_recipe_icon and script.feature_flags.quality then
-            local recipe_typed_name = tags.recipe_typed_name --[[@as TypedName]]
-            common.open_gui(event.player_index, true, quality_variants_adder, {
-                line_index = tags.line_index,
-                recipe_typed_name = recipe_typed_name,
-                source_quality = recipe_typed_name.quality,
-            })
+        if tags.is_recipe_icon then
+            -- The recipe icon's left-click is the quality-variants entry point;
+            -- with the quality feature off it has nothing to open, so it stays
+            -- inert. Machine settings remain reachable via the machine /
+            -- substrate / clock buttons in the same cell, so this drops only a
+            -- redundant path rather than removing access.
+            if script.feature_flags.quality then
+                local recipe_typed_name = tags.recipe_typed_name --[[@as TypedName]]
+                common.open_gui(event.player_index, true, quality_variants_adder, {
+                    line_index = tags.line_index,
+                    recipe_typed_name = recipe_typed_name,
+                    source_quality = recipe_typed_name.quality,
+                })
+            end
         else
             common.open_gui(event.player_index, true, machine_setup, tags)
         end

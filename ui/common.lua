@@ -198,6 +198,128 @@ function M.create_decorated_sprite_button(data)
     }
 end
 
+---Appends `line` as a new line below def's existing tooltip. The engine renders
+---elem_tooltip (the Factoriopedia card) above the plain tooltip, so the appended
+---line shows beneath the item / recipe name. When def has no tooltip yet — the
+---common case, since typed_name_to_tooltip returns nil for items / recipes /
+---entities and many buttons carry only elem_tooltip — the line becomes the whole
+---tooltip with no leading blank line (a `{ "", "", "\n", line }` would render an
+---empty first row). Mutates and returns def so it can be inlined at a call site.
+---@param def fs.GuiElemDef
+---@param line LocalisedString
+---@return fs.GuiElemDef
+function M.append_tooltip_line(def, line)
+    if def.tooltip and def.tooltip ~= "" then
+        def.tooltip = { "", def.tooltip, "\n", line }
+    else
+        def.tooltip = line
+    end
+    return def
+end
+
+---Per-role operation-hint builders. Each returns a LocalisedString listing the
+---button's mouse actions (one per line, joined with "\n") in the order the
+---click handlers resolve them: left -> right -> Shift-copy -> Shift-paste. Kept
+---here so the wording and ordering for each role live in one place and can be
+---shared across solution_editor / machine_setup / solution_settings. (A plain
+---data table on M, like root_window_names; add_handlers ignores non-functions.)
+M.op_hints = {}
+
+---Recipe icon in the production-line table. Left-click selects quality variants
+---only when the quality feature is enabled; without it the recipe icon's
+---left-click does nothing (machine settings stay reachable via the machine /
+---substrate / clock buttons), so the hint omits the left line in that case.
+---@return LocalisedString
+function M.op_hints.recipe_icon()
+    if script.feature_flags.quality then
+        return { "", { "factory-solver-hint-select-quality-variants" },
+            "\n", { "factory-solver-hint-add-constraint" } }
+    end
+    return { "", { "factory-solver-hint-add-constraint" } }
+end
+
+---Machine icon / substrate tile button: open settings, add a constraint, and
+---copy/paste the machine and fuel.
+---@return LocalisedString
+function M.op_hints.machine_icon()
+    return { "", { "factory-solver-hint-open-machine-settings" },
+        "\n", { "factory-solver-hint-add-constraint" },
+        "\n", { "factory-solver-hint-copy-machine-fuel" },
+        "\n", { "factory-solver-hint-paste-here" } }
+end
+
+---Aggregated module icon in the machine cell: like the machine icon, but the
+---copy/paste mode pinned to this button covers modules and beacons.
+---@return LocalisedString
+function M.op_hints.module_aggregate()
+    return { "", { "factory-solver-hint-open-machine-settings" },
+        "\n", { "factory-solver-hint-add-constraint" },
+        "\n", { "factory-solver-hint-copy-module-beacon" },
+        "\n", { "factory-solver-hint-paste-here" } }
+end
+
+---Spoilage clock button: opens machine settings or adds a constraint. No
+---copy/paste (no paste_target) and no Factoriopedia (no elem_tooltip).
+---@return LocalisedString
+function M.op_hints.recipe_clock()
+    return { "", { "factory-solver-hint-open-machine-settings" },
+        "\n", { "factory-solver-hint-add-constraint" } }
+end
+
+---Product / ingredient / spent-fuel icon: opens the recipe picker for that
+---material, or adds a constraint.
+---@return LocalisedString
+function M.op_hints.inout()
+    return { "", { "factory-solver-hint-open-recipe-picker" },
+        "\n", { "factory-solver-hint-add-constraint" } }
+end
+
+---Filled module slot in machine_setup: pick / clear / copy / paste a module.
+---@return LocalisedString
+function M.op_hints.module_slot()
+    return { "", { "factory-solver-hint-open-module-picker" },
+        "\n", { "factory-solver-hint-clear-module" },
+        "\n", { "factory-solver-hint-copy-module" },
+        "\n", { "factory-solver-hint-paste-module" } }
+end
+
+---Empty module slot: only choosing or pasting a module is meaningful.
+---@return LocalisedString
+function M.op_hints.module_slot_empty()
+    return { "", { "factory-solver-hint-open-module-picker" },
+        "\n", { "factory-solver-hint-paste-module" } }
+end
+
+---Filled beacon slot: choose or clear the beacon. The beacon entity slot has no
+---copy/paste (on_open_beacon_picker has no Shift branch).
+---@return LocalisedString
+function M.op_hints.beacon_slot()
+    return { "", { "factory-solver-hint-open-beacon-picker" },
+        "\n", { "factory-solver-hint-clear-beacon" } }
+end
+
+---Empty beacon slot: only choosing a beacon is meaningful.
+---@return LocalisedString
+function M.op_hints.beacon_slot_empty()
+    return { "factory-solver-hint-open-beacon-picker" }
+end
+
+---Constraint icon in the constraints panel: left-click adds a production line
+---for the target; there is no right-click action.
+---@return LocalisedString
+function M.op_hints.constraint_icon()
+    return { "factory-solver-hint-constraint-add-lines" }
+end
+
+---Row move buttons (production line / constraint): one action per line, like
+---the other hints — plain click / Shift (to the end) / Control (five steps).
+---@return LocalisedString
+function M.op_hints.move_row()
+    return { "", { "factory-solver-hint-move-one" },
+        "\n", { "factory-solver-hint-move-to-end" },
+        "\n", { "factory-solver-hint-move-five" } }
+end
+
 ---Resolve an ElemID to the prototype that LuaPlayer.open_factoriopedia_gui
 ---accepts and open Factoriopedia. Quality is intentionally dropped: the
 ---Factoriopedia surface is per-prototype, not per-quality variant. Returns

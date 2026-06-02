@@ -91,8 +91,7 @@ function handlers.on_make_module_grid(event)
                     },
                 }
                 if not is_effective then
-                    def.tooltip = { "", def.tooltip or "", "\n",
-                        { "factory-solver-module-no-effect-here" } }
+                    common.append_tooltip_line(def, { "factory-solver-module-no-effect-here" })
                 end
                 fs_util.add_gui(elem, def)
                 emitted_in_subgroup = true
