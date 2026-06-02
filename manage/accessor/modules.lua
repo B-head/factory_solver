@@ -124,6 +124,41 @@ function M.get_beacon_profile_multiplier(beacon, beacon_count)
     return profile[index]
 end
 
+---Module-inventory `defines.inventory` index per machine type, used to read the
+---quality-scaled module slot count via get_inventory_size. A type absent here (or
+---a nil define on an older engine) falls back to the static module_inventory_size.
+local MODULE_INVENTORY_BY_TYPE = {
+    ["assembling-machine"] = defines.inventory.assembling_machine_modules,
+    ["furnace"] = defines.inventory.furnace_modules,
+    ["rocket-silo"] = defines.inventory.rocket_silo_modules,
+    ["lab"] = defines.inventory.lab_modules,
+    ["mining-drill"] = defines.inventory.mining_drill_modules,
+    ["beacon"] = defines.inventory.beacon_modules,
+}
+
+---Module slot count of a machine at the given quality. Factorio 2.0.77+ lets an
+---entity grant extra module slots per quality tier (quality_affects_module_slots
+---+ <class>_module_slots_bonus). Rather than read the 2.0.77-only gate flag --
+---which throws on older builds -- this reads the engine's already-resolved count
+---through get_inventory_size(<module inventory>, quality): the same flag-free,
+---all-versions-safe pattern get_max_energy_usage(quality) uses for energy. Falls
+---back to the static module_inventory_size when the type has no known module
+---inventory or get_inventory_size yields nothing; that fallback is correct, since
+---builds without the feature don't scale module slots at all. Vanilla opts in
+---nowhere (no entity sets the gate), so this only adds slots for modded entities.
+---@param machine LuaEntityPrototype
+---@param quality QualityID
+---@return integer
+function M.get_machine_module_inventory_size(machine, quality)
+    local base = machine.module_inventory_size or 0
+    if base == 0 then return 0 end
+    local index = MODULE_INVENTORY_BY_TYPE[machine.type]
+    if not index then return base end
+    local ok, size = pcall(function() return machine.get_inventory_size(index, quality) end)
+    if ok and type(size) == "number" and size > 0 then return size end
+    return base
+end
+
 ---comment
 ---@param module_typed_names table<string, TypedName>
 ---@param module_inventory_size integer
@@ -142,11 +177,12 @@ end
 ---independently. The pre-allowed_effects layout collapsed both into a single
 ---table, which made it impossible to apply per-entity effect restrictions.
 ---@param machine LuaEntityPrototype
+---@param machine_quality QualityID
 ---@param module_typed_names table<string, TypedName>
 ---@param affected_by_beacons AffectedByBeacon[]
 ---@param bonuses ResearchBonuses?
 ---@return TotalModules
-function M.get_total_modules(machine, module_typed_names, affected_by_beacons, bonuses)
+function M.get_total_modules(machine, machine_quality, module_typed_names, affected_by_beacons, bonuses)
     ---@param dest table<string, table<string, number>>
     ---@param typed_name TypedName
     ---@param effectivity number
@@ -161,7 +197,8 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
     end
 
     local machine_modules = {}
-    module_typed_names = M.trim_modules(module_typed_names, machine.module_inventory_size)
+    module_typed_names = M.trim_modules(module_typed_names,
+        M.get_machine_module_inventory_size(machine, machine_quality))
     for _, typed_name in pairs(module_typed_names) do
         count(machine_modules, typed_name, 1)
     end
@@ -211,7 +248,7 @@ function M.get_total_modules(machine, module_typed_names, affected_by_beacons, b
                     * profile_multiplier
                     * beacon_multiplier
                 local beacon_module_names = M.trim_modules(affected_by_beacon.module_typed_names,
-                    beacon.module_inventory_size)
+                    M.get_machine_module_inventory_size(beacon, beacon_typed_name.quality))
 
                 local modules = {}
                 for _, typed_name in pairs(beacon_module_names) do

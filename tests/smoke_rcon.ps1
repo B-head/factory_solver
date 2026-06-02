@@ -344,6 +344,19 @@ try {
         Write-Host "SMOKE FAIL: [required_fluid] $requiredFluid"
         $allPass = $false
     }
+
+    # Quality-scaled module slots (2.0.77+): get_machine_module_inventory_size
+    # reports base + per-quality bonus flag-free. Skips when the quality mod is
+    # absent (the fs-test fixture machine still loads, but legendary quality won't
+    # exist), so run with -Mods ...,space-age,quality to actually exercise it.
+    $qualSlots = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_quality_module_slots'))"
+    if ($qualSlots -eq "OK") {
+        Write-Host "SMOKE PASS: [quality_module_slots] module slots scale by quality (flag-free)"
+    } else {
+        Write-Host "SMOKE FAIL: [quality_module_slots] $qualSlots"
+        $allPass = $false
+    }
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"

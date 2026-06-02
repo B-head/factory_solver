@@ -1015,6 +1015,54 @@ function M.check_required_fluid_mining()
     return "OK"
 end
 
+---Exercises quality-scaled module slots (Factorio 2.0.77+). Driven off the
+---data_test fs-test-quality-module-slots machine, which opts into
+---quality_affects_module_slots; no vanilla entity does, so this is the only way
+---to hit get_machine_module_inventory_size's scaling branch. Confirms the
+---accessor reports base + the per-quality bonus at legendary and base at normal
+---(read flag-free via get_inventory_size), and that a vanilla (non-opted-in)
+---machine stays unscaled. Guarded on the fixture and the legendary quality so a
+---base-only / quality-less run skips instead of failing.
+---@return string
+function M.check_quality_module_slots()
+    local machine = prototypes.entity["fs-test-quality-module-slots"]
+    local legendary = prototypes.quality["legendary"]
+    if not (machine and legendary) then
+        log.info("check_quality_module_slots: fixture or quality absent, skipped")
+        return "OK"
+    end
+
+    local ok, err = pcall(function()
+        local base = machine.module_inventory_size
+        local bonus = legendary.crafting_machine_module_slots_bonus
+        assert(base and base > 0, "fixture has no module slots")
+        assert(bonus and bonus > 0, "legendary quality has no crafting_machine_module_slots_bonus")
+
+        local scaled = acc.get_machine_module_inventory_size(machine, "legendary")
+        assert(scaled == base + bonus,
+            string.format("scaled slots %s, expected %s (base %s + bonus %s)",
+                tostring(scaled), tostring(base + bonus), tostring(base), tostring(bonus)))
+
+        local at_normal = acc.get_machine_module_inventory_size(machine, "normal")
+        assert(at_normal == base,
+            string.format("normal slots %s, expected base %s", tostring(at_normal), tostring(base)))
+
+        -- A vanilla machine does not opt in, so quality must not change its slots.
+        local vanilla = prototypes.entity["assembling-machine-3"]
+        if vanilla then
+            local vbase = vanilla.module_inventory_size
+            local vleg = acc.get_machine_module_inventory_size(vanilla, "legendary")
+            assert(vleg == vbase,
+                string.format("vanilla machine scaled to %s, expected unchanged %s",
+                    tostring(vleg), tostring(vbase)))
+        end
+    end)
+    if not ok then
+        return "ERROR: quality module slots check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -1030,6 +1078,7 @@ function M.register()
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
         check_fixed_recipe_machine = M.check_fixed_recipe_machine,
         check_required_fluid_mining = M.check_required_fluid_mining,
+        check_quality_module_slots = M.check_quality_module_slots,
     })
 end
 

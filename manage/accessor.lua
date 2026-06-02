@@ -109,6 +109,7 @@ M.is_use_beacon = modules_acc.is_use_beacon
 M.get_beacon_distribution_effectivity = modules_acc.get_beacon_distribution_effectivity
 M.get_beacon_profile_multiplier = modules_acc.get_beacon_profile_multiplier
 M.trim_modules = modules_acc.trim_modules
+M.get_machine_module_inventory_size = modules_acc.get_machine_module_inventory_size
 M.get_total_modules = modules_acc.get_total_modules
 M.split_total_modules_by_effectiveness = modules_acc.split_total_modules_by_effectiveness
 M.get_total_effectivity = modules_acc.get_total_effectivity

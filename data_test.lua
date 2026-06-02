@@ -786,3 +786,23 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         },
     })
 end
+
+-- A crafting machine that opts into Factorio 2.0.77+ quality-scaled module slots
+-- (quality_affects_module_slots). No vanilla entity sets this flag, so it is the
+-- only way to exercise acc.get_machine_module_inventory_size's scaling branch.
+-- assembling-machine-3 has 4 base module slots; at legendary the engine adds
+-- crafting_machine_module_slots_bonus (+5 in vanilla quality) for 9. The accessor
+-- reads this flag-free via get_inventory_size(<module inventory>, quality), so it
+-- works on every supported build; this fixture pins the scaled value. Guarded so a
+-- base-only / quality-less install skips it instead of erroring.
+if raw["assembling-machine"]["assembling-machine-3"] then
+    local qms = table.deepcopy(raw["assembling-machine"]["assembling-machine-3"])
+    qms.name = "fs-test-quality-module-slots"
+    qms.localised_name = "fs-test-quality-module-slots"
+    qms.minable = nil
+    qms.next_upgrade = nil
+    qms.placeable_by = nil
+    qms.crafting_categories = { "fs-test-machine" }
+    qms.quality_affects_module_slots = true
+    extend_test({ qms })
+end

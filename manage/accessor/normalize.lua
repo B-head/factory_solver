@@ -31,7 +31,7 @@ function M.normalize_production_line(line, bonuses)
     local recipe_quality = line.recipe_typed_name.quality
     local machine = tn.typed_name_to_machine(line.machine_typed_name)
     local machine_quality = line.machine_typed_name.quality
-    local total_modules = modules_acc.get_total_modules(machine, line.module_typed_names,
+    local total_modules = modules_acc.get_total_modules(machine, machine_quality, line.module_typed_names,
         line.affected_by_beacons, bonuses)
     local maximum_productivity = recipe_acc.get_maximum_productivity(recipe)
     local effectivity = modules_acc.get_total_effectivity(recipe, total_modules, machine.effect_receiver,

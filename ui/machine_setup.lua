@@ -96,6 +96,11 @@ function handlers.on_machine_quality_clicked(event)
     local dialog_tags = dialog.tags
     dialog_tags.machine_typed_name.quality = quality_name
     dialog.tags = dialog_tags
+
+    -- Module slot count can depend on machine quality (2.0.77+
+    -- quality_affects_module_slots), so a quality change must rebuild the same
+    -- machine-dependent subtree the machine-button change handler does.
+    fs_util.dispatch_to_subtree(dialog, "on_machine_setup_changed")
 end
 
 ---@param event EventDataTrait
@@ -344,7 +349,7 @@ function handlers.on_make_machine_modules(event)
     local allowed_categories = acc.get_allowed_module_categories(recipe, machine)
 
     elem.clear()
-    for index = 1, machine.module_inventory_size do
+    for index = 1, acc.get_machine_module_inventory_size(machine, machine_typed_name.quality) do
         local typed_name = module_typed_names[tostring(index)]
         add_module_slot_button(elem, index, nil, typed_name, allowed_effects, allowed_categories)
     end
@@ -608,7 +613,7 @@ function handlers.on_make_beacon_modules(event)
     local allowed_categories = acc.get_allowed_module_categories(recipe, beacon)
 
     local module_typed_names = affected_by_beacon.module_typed_names
-    for slot_index = 1, beacon.module_inventory_size do
+    for slot_index = 1, acc.get_machine_module_inventory_size(beacon, beacon_typed_name.quality) do
         add_module_slot_button(elem, slot_index, beacon_index,
             module_typed_names[tostring(slot_index)], allowed_effects, allowed_categories)
     end
@@ -692,7 +697,7 @@ function handlers.on_make_total_effectivity(event)
     local recipe = tn.typed_name_to_recipe(recipe_typed_name)
     local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
-    local total_modules = acc.get_total_modules(machine, module_typed_names, affected_by_beacons)
+    local total_modules = acc.get_total_modules(machine, machine_typed_name.quality, module_typed_names, affected_by_beacons)
     local split = acc.split_total_modules_by_effectiveness(recipe, machine, total_modules)
 
     elem.clear()

@@ -2,6 +2,13 @@
 Version: 0.5.3
 Date: ????
   Gui:
+    - Honor quality-scaled module slots: when an entity grants extra module slots
+      at higher quality (Factorio 2.0.77+ quality_affects_module_slots), the
+      machine and beacon dialogs now show the extra slots and the solver counts
+      the modules placed in them. The scaled count is read flag-free through the
+      engine's quality-aware inventory size, so it works on every supported build
+      and stays inert where no entity opts in -- which is all of vanilla today, so
+      it surfaces only for mods that use the feature.
     - Let the Fuel section pick a temperature for a heat-extraction machine's
       fluid fuel: the machine's full acceptance range (the default) plus a
       button for each distinct temperature other recipes produce that fluid

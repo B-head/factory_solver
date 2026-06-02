@@ -191,7 +191,7 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(buttons, def)
             end
 
-            local total_modules = acc.get_total_modules(machine, line.module_typed_names, line.affected_by_beacons)
+            local total_modules = acc.get_total_modules(machine, line.machine_typed_name.quality, line.module_typed_names, line.affected_by_beacons)
             local split = acc.split_total_modules_by_effectiveness(recipe, machine, total_modules)
 
             for name, qualities in pairs(split) do
