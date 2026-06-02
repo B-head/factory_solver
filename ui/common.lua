@@ -62,16 +62,21 @@ function M.group_visible(group_infos, group_name, player_data)
     end
 end
 
----comment
+---Format a power / energy value with an SI prefix. Negative values are treated
+---as generation and shown with a leading "+". The unit suffix defaults to "J"
+---(energy per the selected time unit, as shown in the UI); pass "W" for the
+---time-scale-independent wattage.
 ---@param power number
+---@param unit string?
 ---@return string
-function M.format_power(power)
+function M.format_power(power, unit)
+    unit = unit or "J"
     if power < 0 then
         local temp = flib_format.number(-power, true, 5)
-        return string.format("+%sJ", temp)
+        return string.format("+%s%s", temp, unit)
     else
         local temp = flib_format.number(power, true, 5)
-        return string.format("%sJ", temp)
+        return string.format("%s%s", temp, unit)
     end
 end
 

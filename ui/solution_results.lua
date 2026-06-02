@@ -160,11 +160,15 @@ function handlers.update_total_power_label(event)
 
     if not solution then
         elem.caption = common.format_power(0)
+        elem.tooltip = common.format_power(0, "W")
         return
     end
 
-    local total_power = fs_util.to_scale(report.get_total_power(save.get_research_bonuses(event.player_index), solution), player_data.time_scale)
-    elem.caption = common.format_power(total_power)
+    local watts = report.get_total_power(save.get_research_bonuses(event.player_index), solution)
+    elem.caption = common.format_power(fs_util.to_scale(watts, player_data.time_scale))
+    -- Tooltip shows the scale-independent total in watts (the caption is energy
+    -- per the selected time unit).
+    elem.tooltip = common.format_power(watts, "W")
 end
 
 ---@param event EventDataTrait

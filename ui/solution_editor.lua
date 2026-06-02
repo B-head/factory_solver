@@ -411,15 +411,14 @@ function handlers.make_production_line_table(event)
             if not n.fuel_ingredient or acc.is_generator(machine) then
                 local def = {
                     type = "label",
-                    -- Rocket silos report a full-power figure: the launch
-                    -- animation toggles full / no draw in phases we can't time
-                    -- at runtime, so the real average is lower. Flag it right
-                    -- on the power cell where the inflated number is shown.
-                    tooltip = machine.type == "rocket-silo"
-                        and { "factory-solver-rocket-silo-power-note" } or nil,
                     tags = {
                         result_typed_name = line.recipe_typed_name,
                         raw_amount = n.power_per_second,
+                        -- Rocket silos report a full-power figure (the launch
+                        -- animation toggles full / no draw in phases we can't
+                        -- time at runtime, so the real average is lower);
+                        -- update_power appends a caveat note to the tooltip.
+                        is_rocket_silo = machine.type == "rocket-silo",
                     },
                     handler = {
                         on_added = handlers.update_power,
@@ -547,8 +546,16 @@ function handlers.update_power(event)
     local result_typed_name = tags.result_typed_name --[[@as TypedName]]
     local raw_amount = tags.raw_amount --[[@as number]]
     local quantity_of_machines_required = save.get_quantity_of_machines_required(solution, result_typed_name)
-    local amount = fs_util.to_scale(raw_amount, player_data.time_scale) * quantity_of_machines_required
-    elem.caption = common.format_power(amount)
+    local total = raw_amount * quantity_of_machines_required
+    elem.caption = common.format_power(fs_util.to_scale(total, player_data.time_scale))
+    -- The caption is energy per the selected time unit; the tooltip carries the
+    -- time-scale-independent figure in watts, plus the rocket-silo caveat.
+    local watts = common.format_power(total, "W")
+    if tags.is_rocket_silo then
+        elem.tooltip = { "", watts, "\n", { "factory-solver-rocket-silo-power-note" } }
+    else
+        elem.tooltip = watts
+    end
     elem.style.font_color = is_line_inactive(solution, result_typed_name)
         and inactive_font_color or active_font_color
 end
