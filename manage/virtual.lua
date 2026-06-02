@@ -1075,13 +1075,19 @@ end
 ---is emitted per plant; modded plants may have several seeds, in which case
 ---each gets its own recipe with that seed as the sole ingredient.
 ---
----The plant entity itself is the fixed_crafting_machine: 1 craft = 1 plant
----growing through one full cycle = 1 occupied slot in some agricultural
----tower's radius. quantity_of_machines_required at the LP layer therefore
----represents the number of concurrent plant slots, not the number of towers.
----The tower's crane action time is not surfaced at runtime (only
----crane_energy_usage is) so it is intentionally not modeled; growth_ticks is
----the sole rate-limiting factor.
+---The plant entity (not the agricultural tower) is the fixed_crafting_machine,
+---on purpose: 1 craft = 1 plant growing through one full cycle = 1 occupied slot
+---in some tower's radius, and that slot count IS proportional to throughput
+---(concurrent slots = rate * growth time), so quantity_of_machines_required is
+---the number of concurrent plant slots. The tower cannot be the machine because
+---its count is NOT proportional to production -- a tower harvests every plant in
+---a fixed radius, so the number of towers is a spatial-packing step function of
+---the layout, with no honest towers-per-output ratio. Consequently the tower's
+---electric draw (tower power * tower count) has no proportional basis and is
+---deliberately omitted from the power total -- this is by design, not an
+---oversight. (The crane action time is likewise not surfaced at runtime; only
+---crane_energy_usage is, and that is a per-action peak, not a steady load.)
+---growth_ticks is the sole rate-limiting factor.
 ---
 ---Substrate (soil tile) selection is purely user metadata stored on the
 ---ProductionLine as substrate_tile_name; it does not flow through here.
