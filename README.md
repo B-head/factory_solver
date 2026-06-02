@@ -17,6 +17,9 @@ A powerful solver based on interior-point methods for linear programming allows 
   ingredients.
 - Supports Factorio 2.0 / Space Age (quality tiers).
 - Splits per-fluid recipes by temperature and bridges them automatically.
+- Includes a Build assistant that works as a build to-do list: every machine
+  and beacon to place, with a pipette to grab each one and a Done/TODO column
+  to check off as you go.
 - Lets you declare external sources and sinks for any material to steer or
   unstick loop solutions.
 

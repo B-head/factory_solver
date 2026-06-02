@@ -1,66 +1,68 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.5.3
+Version: 0.6.0
 Date: ????
+  Features:
+    - Add a Build assistant panel that lists every machine and beacon the
+      solution needs, each with a pipette button to grab it for placement and
+      a Done/TODO column to track progress. A Blueprint mode puts a temporary
+      blueprint on the cursor for robot placement, while a Manual mode hands
+      you the actual item for the early game before construction robots. It
+      opens by default for new players.
+    - Add user-placeable external source and sink recipes, in the External
+      tab, that supply or consume an item, fluid, or heat without limit -- a
+      manual lever for setting factory boundaries and for steering the solver
+      away from a degenerate loop solution.
+    - Add translations for the top 10 Steam languages.
+  Changes:
+    - Filter the recipe and fuel pickers by fluid temperature, and let the
+      Fuel section pick a fluid fuel's temperature so the fuel and power
+      figures use the exact heat instead of assuming the best case.
+    - Emit a fuel's spent result (e.g. used-up uranium fuel cells) as a
+      machine output, so a nuclear reprocessing loop now closes.
   Gui:
-    - Honor quality-scaled module slots: when an entity grants extra module slots
-      at higher quality (Factorio 2.0.77+ quality_affects_module_slots), the
-      machine and beacon dialogs now show the extra slots and the solver counts
-      the modules placed in them. The scaled count is read flag-free through the
-      engine's quality-aware inventory size, so it works on every supported build
-      and stays inert where no entity opts in -- which is all of vanilla today, so
-      it surfaces only for mods that use the feature.
-    - Let the Fuel section pick a temperature for a heat-extraction machine's
-      fluid fuel: the machine's full acceptance range (the default) plus a
-      button for each distinct temperature other recipes produce that fluid
-      at, within the accepted range. Picking a single temperature feeds the
-      exact heat into the fuel-amount and power math instead of assuming the
-      best case. Temperatures above the machine's energy-conversion cap are
-      still offered (the excess heat is wasted, as in-game).
+    - Add contextual in-game help: a next-step hint below the editor's
+      production table and a one-line description under each dialog's title.
+    - Add click-action tooltips to the GUI sprite-buttons.
+    - Let the constraint list be reordered by hand with per-row up/down
+      buttons.
+    - Show the instantaneous power draw in watts in power tooltips, alongside
+      the existing per-time-unit energy caption.
   Bugfixes:
-    - Skip parameter prototypes when generating boiler virtual recipes. A
-      boiler with no input-fluid filter enumerated every fluid as a candidate,
-      including the placeholder "parameter" fluids used by blueprint
-      parameterization, so spurious <run>boiler:<parameter-fluid> recipes
-      leaked into the picker. Parameter fluids (and parameter source entities)
-      are now excluded, matching the existing filtering on the recipe/item/
-      fluid paths.
-    - Honor a crafting machine's fixed_recipe lock for every machine, not just
-      the rocket-silo. A machine the engine locks to one recipe is now offered
-      only for that recipe, and a recipe is offered only the machines that can
-      actually craft it; the category-wide machine preset likewise skips
-      fixed-recipe machines. Previously any machine in a crafting category was
-      offered for every recipe in it, so the planner could build a recipe on a
-      machine that cannot make it in-game.
-    - Honor a crafting machine's ingredient_count, the cap on how many item
-      ingredients it can craft with (fluid ingredients do not count). A machine
-      whose cap is too small no longer appears in such a recipe's machine
-      picker, default, or paste target. When machines in one crafting category
-      disagree on the cap, the machine-preset dialog splits that category into
-      one row per cap tier, so each tier keeps its own default machine -- the
-      same way the fuel presets split by fuel-category set. Categories whose
-      machines all share a cap are unchanged.
-    - Persist the machine choice for a recipe craftable only by several machines
-      that all lock to it via fixed_recipe. Such a recipe has no general machine
-      to anchor a category preset, so its choice now lives in a recipe-keyed
-      machine preset -- a new "Fixed-recipe machines" section in the preset
-      dialog -- instead of resetting to the first candidate every time the recipe
-      is added. The section is hidden when no recipe needs it (all of vanilla).
-    - Pre-round a slot's amount onto the engine's display grid per material
-      kind (one decimal), so a slot number reads the same magnitude across
-      columns and a constraint set to 60 whose usage solves to 59.9999996 reads
-      "60" instead of the engine flooring it to "59.9". Slot amount labels keep
-      their previous significant-figure formatting.
-    - Hide a totals entry only when its net flow is negligible RELATIVE to its
-      gross throughput, instead of against a fixed absolute pad. A recycling
-      loop's residual noise no longer surfaces as a phantom ingredient, and a
-      genuine trace demand is no longer hidden.
-    - Honor an offshore-pump's fluid_box filter when deciding what it pumps. The
-      engine locks a filtered pump's output to its filter fluid regardless of the
-      tile it sits on, so a pump filtered to a fluid no tile produces (only
-      reachable with mods) was previously invisible to the solver. Such a pump
-      now gets its own virtual recipe producing that fluid, and an unfiltered
-      pump is no longer offered for a fluid no tile carries. Vanilla water
-      pumping is unchanged.
+    - Solve a self-sustaining loop instead of misreading it as short on
+      material and bypassing its recipe chain (a Gleba seed/plant cycle), and
+      bootstrap an asteroid-reprocessing upcycle that previously sat idle
+      because a starved base material went undetected.
+    - Converge on a closed loop that has no external outlet (e.g. a
+      self-contained fusion loop) instead of failing to find a solution.
+    - Honor the extra module slots a machine or beacon gains at higher quality,
+      showing them in the dialog and counting the modules placed in them.
+    - Offer a machine for a recipe only when the engine actually lets it craft
+      it: honor fixed_recipe locks on every machine (not just the rocket-silo)
+      and a machine's item-ingredient count limit. Machines that disagree on
+      the count limit split into per-tier rows in the preset dialog.
+    - Persist the machine choice for a recipe craftable only by several
+      machines that all lock to it via fixed_recipe, through a new
+      "Fixed-recipe machines" preset section (hidden when no recipe needs it).
+    - Honor an offshore-pump's fluid_box filter so a filtered pump produces its
+      filter fluid regardless of the tile it sits on (reachable only with
+      mods); vanilla water pumping is unchanged.
+    - Skip placeholder "parameter" fluids when generating boiler virtual
+      recipes, and drop parameter and duplicate entries from the recipe picker.
+    - Follow the machine's fuel when a production line's machine changes.
+    - Read a fluid fuel's accepted temperature range from the machine's fuel
+      input, not its energy-conversion cap, so a machine that accepts fuel
+      hotter than it can fully use (some modded reactors) no longer shows a
+      truncated range or filters that hotter fuel out of the recipe picker.
+    - Carry a fluid's temperature through a Helmod import, so a
+      temperature-specific fluid no longer loses it on the way in.
+    - Fix the constraint picker breaking on a very high fluid temperature
+      (e.g. fusion plasma).
+    - Divide a mining recipe's required fluid by its mining time, fixing the
+      reported fluid amount.
+    - Round slot amounts onto the engine's display grid, and hide a totals
+      entry only when its net flow is negligible relative to its throughput,
+      so a constraint of 60 reads "60" and recycling-loop noise no longer
+      surfaces as a phantom ingredient.
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.2
 Date: 2026-05-31
