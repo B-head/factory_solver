@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.0
-Date: ????
+Date: 2026-06-03
   Features:
     - Add a Build assistant panel that lists every machine and beacon the
       solution needs, each with a pipette button to grab it for placement and
