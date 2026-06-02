@@ -1331,8 +1331,11 @@ function M.encode(solutions)
     -- the encode/decode round-trip mangles the bytes. Catch both here so the
     -- failure surfaces on the factory_solver side with a clear message,
     -- instead of looking like a Helmod-internal crash later.
-    local load_ok = pcall(load, serialised)
-    if not load_ok then
+    -- load() returns nil + an error message on invalid source (it does not
+    -- raise), so check the returned chunk directly; a pcall would report
+    -- success even for a syntax error and never flag it.
+    local chunk = load(serialised)
+    if not chunk then
         warnings[#warnings + 1] = {
             "factory-solver-helmod-export-warning-self-test-loadstring",
         }
