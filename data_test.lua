@@ -859,6 +859,44 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     })
 end
 
+-- 8g. Two machines locked to the SAME real recipe via fixed_recipe, in a category
+--     with no general (lock-free) machine. The recipe is craftable only by those two,
+--     so no category machine preset can hold the choice between them; it qualifies for
+--     a recipe-keyed fixed_recipe preset (storage.virtuals.shared_fixed_recipes).
+--     Expected: get_machines_for_recipe(fs-test-shared-recipe) returns both machines,
+--     the recipe is in shared_fixed_recipes, and create_fixed_recipe_presets gives it a
+--     real default. The §8e single-fixed-machine recipe must NOT qualify (no choice).
+--     Asserted by smoke check_shared_fixed_recipe_machine.
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"] then
+    local function shared_machine(name)
+        local e = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+        e.name = name
+        e.localised_name = name
+        e.minable = nil
+        e.next_upgrade = nil
+        e.placeable_by = nil
+        e.crafting_categories = { "fs-test-shared-fixed-cat" }
+        e.fixed_recipe = "fs-test-shared-recipe"
+        return e
+    end
+
+    extend_test({
+        { type = "recipe-category", name = "fs-test-shared-fixed-cat" },
+        shared_machine("fs-test-shared-machine-a"),
+        shared_machine("fs-test-shared-machine-b"),
+        {
+            type = "recipe",
+            name = "fs-test-shared-recipe",
+            localised_name = "fs-test-shared-recipe",
+            category = "fs-test-shared-fixed-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
+            results = { { type = "item", name = "copper-plate", amount = 1 } },
+        },
+    })
+end
+
 -- A crafting machine that opts into Factorio 2.0.77+ quality-scaled module slots
 -- (quality_affects_module_slots). No vanilla entity sets this flag, so it is the
 -- only way to exercise acc.get_machine_module_inventory_size's scaling branch.

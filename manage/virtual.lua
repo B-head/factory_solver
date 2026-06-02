@@ -185,12 +185,44 @@ function M.create_virtuals()
         machine_ingredient_tiers[category_name] = caps
     end
 
+    -- Real recipes craftable ONLY by >=2 fixed_recipe machines (their category has
+    -- no general lock-free machine). A category machine preset excludes fixed_recipe
+    -- machines, so these recipes have nothing to anchor a default on; they get a
+    -- recipe-keyed preset instead (manage/preset.lua create_fixed_recipe_presets).
+    -- Built from the same per-category machine lists get_machines_for_recipe uses, so
+    -- the trigger matches the picker. Reading `.fixed_recipe` is safe for every
+    -- crafting machine (furnaces read back nil and count as general), the same
+    -- contract machine_allows_recipe relies on.
+    ---@type table<string, true>
+    local shared_fixed_recipes = {}
+    local category_machines = {}
+    for category_name, _ in pairs(prototypes.recipe_category) do
+        category_machines[category_name] = acc.get_machines_in_category(category_name)
+    end
+    for _, recipe in pairs(prototypes.recipe) do
+        local machines = category_machines[recipe.category]
+        if machines then
+            local fixed_count, has_general = 0, false
+            for _, machine in ipairs(machines) do
+                if machine.fixed_recipe == nil then
+                    has_general = true
+                elseif machine.fixed_recipe == recipe.name then
+                    fixed_count = fixed_count + 1
+                end
+            end
+            if not has_general and fixed_count >= 2 then
+                shared_fixed_recipes[recipe.name] = true
+            end
+        end
+    end
+
     ---@type Virtuals
     return {
         material = materials,
         recipe = recipes,
         fuel_categories_dictionary = fuel_categories_dictionary,
         machine_ingredient_tiers = machine_ingredient_tiers,
+        shared_fixed_recipes = shared_fixed_recipes,
     }
 end
 

@@ -155,6 +155,35 @@ function M.create_lab_presets(origin)
     return ret
 end
 
+---Preset machine per real recipe that is craftable only by >=2 fixed_recipe
+---machines (its category has no general machine -- storage.virtuals.shared_fixed_-
+---recipes). Keyed by recipe name because the candidate set is recipe-specific (each
+---fixed machine is locked to one recipe), exactly as the pump/lab presets key by the
+---fluid/pack that determines their candidate set. Such recipes cannot be anchored by
+---a category machine preset (which excludes fixed_recipe machines), so without this
+---the chosen machine never persists across new lines.
+---@param origin table<string, TypedName>?
+---@return table<string, TypedName>
+function M.create_fixed_recipe_presets(origin)
+    local ret = {}
+    if origin then
+        ret = flib_table.deep_copy(origin)
+    end
+
+    for recipe_name, _ in pairs(storage.virtuals.shared_fixed_recipes) do
+        tn.typed_name_migration(ret[recipe_name])
+        if tn.validate_typed_name(ret[recipe_name]) then
+            goto continue
+        end
+
+        local recipe = prototypes.recipe[recipe_name]
+        ret[recipe_name] = M.get_default_preset(acc.get_machines_for_recipe(recipe), "machine")
+        ::continue::
+    end
+
+    return ret
+end
+
 ---A recipe category is split into ingredient_count tiers because a single
 ---category-wide default machine cannot serve recipes whose item-ingredient count
 ---exceeds a low-`ingredient_count` machine in the same category. Each tier is one
@@ -294,11 +323,18 @@ function M.get_machine_preset(player_index, recipe_typed_name)
         end
     elseif recipe_typed_name.type == "recipe" then
         local recipe = prototypes.recipe[recipe_typed_name.name]
-        -- Machine presets split each category by ingredient_count tier; pick the
-        -- tier key whose eligible machines cover this recipe's item count.
-        local key = M.machine_preset_key(recipe.category, acc.count_item_ingredients(recipe))
-        local preset = player_data.presets.machine[key]
-        -- Honour the tier default only if it can actually craft this recipe: a
+        local preset
+        if storage.virtuals.shared_fixed_recipes[recipe.name] then
+            -- Only fixed_recipe machines craft this recipe, so a category preset is
+            -- vacuous; its default lives in the recipe-keyed fixed_recipe preset.
+            preset = player_data.presets.fixed_recipe[recipe.name]
+        else
+            -- Machine presets split each category by ingredient_count tier; pick the
+            -- tier key whose eligible machines cover this recipe's item count.
+            local key = M.machine_preset_key(recipe.category, acc.count_item_ingredients(recipe))
+            preset = player_data.presets.machine[key]
+        end
+        -- Honour the stored default only if it can actually craft this recipe: a
         -- machine locked to a different recipe (engine fixed_recipe) or one whose
         -- ingredient_count cap is exceeded cannot. Fall back to the first eligible
         -- machine for this exact recipe, which resolves to the unknown-entity

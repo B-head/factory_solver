@@ -345,6 +345,19 @@ try {
         $allPass = $false
     }
 
+    # A recipe craftable only by >=2 fixed_recipe machines has no general machine to
+    # anchor a category preset, so it gets a recipe-keyed fixed_recipe preset that
+    # persists the machine choice across new lines.
+    # Solution-independent, driven off data_test.lua, so it runs once up front too.
+    $sharedFixed = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_shared_fixed_recipe_machine'))"
+    if ($sharedFixed -eq "OK") {
+        Write-Host "SMOKE PASS: [shared_fixed_recipe] recipe-keyed preset persists machine choice"
+    } else {
+        Write-Host "SMOKE FAIL: [shared_fixed_recipe] $sharedFixed"
+        $allPass = $false
+    }
+
     # A mining drill's required_fluid is consumed once per mining cycle, so the
     # mining virtual recipe must divide it by mining_time like the products (2x
     # over-count regression on vanilla uranium-ore otherwise).

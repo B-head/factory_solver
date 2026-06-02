@@ -74,6 +74,7 @@ __factory_solver__storage = {}
 ---@field machine table<string, TypedName>
 ---@field pump table<string, TypedName>
 ---@field lab table<string, TypedName>
+---@field fixed_recipe table<string, TypedName>
 
 ---@class ForceLocalData
 ---@field relation_to_recipes RelationToRecipes
@@ -193,6 +194,7 @@ __factory_solver__storage = {}
 ---@field recipe table<string, VirtualRecipe>
 ---@field fuel_categories_dictionary table<string, { [string]: true }>
 ---@field machine_ingredient_tiers table<string, integer[]>
+---@field shared_fixed_recipes table<string, true>
 
 ---@class VirtualMaterial
 ---@field type "virtual_material"

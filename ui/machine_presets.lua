@@ -33,10 +33,13 @@ function handlers.on_make_preset_tables(event)
         categories = prototypes.resource_category
     elseif preset_type == "machine" then
         categories = prototypes.recipe_category
+    elseif preset_type == "fixed_recipe" then
+        categories = storage.virtuals.shared_fixed_recipes
     else
         assert()
     end
 
+    local rows_emitted = 0
     for category_name, value in pairs(categories) do
         -- The engine auto-adds the core "parameters" crafting category to every
         -- crafting machine so parametrised blueprints can target any of them. It
@@ -71,6 +74,12 @@ function handlers.on_make_preset_tables(event)
                     or category_name
                 flib_table.insert(rows, { key = tier.key, caption = caption, crafts = tier.machines })
             end
+        elseif preset_type == "fixed_recipe" then
+            -- One row per recipe craftable only by >=2 fixed_recipe machines; key is
+            -- the recipe name and the choices are exactly those fixed machines.
+            local recipe = prototypes.recipe[category_name]
+            rows = { { key = category_name, caption = recipe.localised_name,
+                crafts = acc.get_machines_for_recipe(recipe) } }
         else
             assert()
         end
@@ -79,6 +88,7 @@ function handlers.on_make_preset_tables(event)
             if #row.crafts <= 1 then
                 goto continue_row
             end
+            rows_emitted = rows_emitted + 1
 
             do
                 local def = {
@@ -134,6 +144,15 @@ function handlers.on_make_preset_tables(event)
         ::continue::
     end
 
+    -- The Fixed-recipe machines section is empty for vanilla and most mods (no
+    -- recipe has >=2 fixed_recipe machines), so hide its whole frame rather than
+    -- leave a bare heading. Its table is the only child of its section frame, so
+    -- hiding the parent is safe; the fuel section shares one frame across two
+    -- tables and is never empty, so it is not affected.
+    if preset_type == "fixed_recipe" and rows_emitted == 0 then
+        elem.parent.visible = false
+    end
+
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
     fs_util.dispatch_to_subtree(dialog, "on_preset_changed")
 end
@@ -156,6 +175,8 @@ function handlers.on_preset_button_click(event)
         dialog_tags.presets.resource[category_name] = typed_name
     elseif preset_type == "machine" then
         dialog_tags.presets.machine[category_name] = typed_name
+    elseif preset_type == "fixed_recipe" then
+        dialog_tags.presets.fixed_recipe[category_name] = typed_name
     else
         assert()
     end
@@ -182,6 +203,8 @@ function handlers.on_preset_change_toggle(event)
         selected = dialog_tags.presets.resource[category_name]
     elseif preset_type == "machine" then
         selected = dialog_tags.presets.machine[category_name]
+    elseif preset_type == "fixed_recipe" then
+        selected = dialog_tags.presets.fixed_recipe[category_name]
     end
     assert(selected)
 
@@ -308,6 +331,27 @@ return {
                     column_count = 2,
                     tags = {
                         preset_type = "machine",
+                    },
+                    handler = {
+                        on_added = handlers.on_make_preset_tables,
+                    },
+                },
+            },
+            {
+                type = "frame",
+                style = "factory_solver_shallow_frame_in_shallow_frame",
+                direction = "vertical",
+                {
+                    type = "label",
+                    style = "caption_label",
+                    caption = { "factory-solver-fixed-recipe-machines" },
+                },
+                {
+                    type = "table",
+                    style = "factory_solver_preset_layout_table",
+                    column_count = 2,
+                    tags = {
+                        preset_type = "fixed_recipe",
                     },
                     handler = {
                         on_added = handlers.on_make_preset_tables,

@@ -1054,6 +1054,61 @@ function M.check_ingredient_count_machine()
     return "OK"
 end
 
+---Two machines locked to the same real recipe via fixed_recipe, in a category with no
+---general machine (data_test 8g). The recipe is craftable only by those two, so it
+---qualifies for a recipe-keyed fixed_recipe preset that persists the machine choice --
+---which a category preset (excluding fixed_recipe machines) cannot. Asserts the trigger
+---set, the single-fixed boundary (8e must not qualify), and that the preset is populated
+---with a real default. Guarded on presence so a stripped build skips instead of failing.
+---@return string
+function M.check_shared_fixed_recipe_machine()
+    local machine_a = prototypes.entity["fs-test-shared-machine-a"]
+    local machine_b = prototypes.entity["fs-test-shared-machine-b"]
+    local recipe = prototypes.recipe["fs-test-shared-recipe"]
+    if not (machine_a and machine_b and recipe) then
+        log.info("check_shared_fixed_recipe_machine: data_test fixtures absent, skipped")
+        return "OK"
+    end
+
+    local function has_machine(list, name)
+        for _, m in ipairs(list) do
+            if m.name == name then return true end
+        end
+        return false
+    end
+
+    local ok, err = pcall(function()
+        assert(machine_a.fixed_recipe == "fs-test-shared-recipe"
+            and machine_b.fixed_recipe == "fs-test-shared-recipe",
+            "fixture machines are not both locked to the shared recipe")
+
+        -- Trigger set: a recipe craftable only by >=2 fixed machines qualifies; a
+        -- recipe with a single fixed machine (8e) does not (no choice to persist).
+        assert(storage.virtuals.shared_fixed_recipes["fs-test-shared-recipe"],
+            "shared fixed recipe missing from shared_fixed_recipes")
+        assert(not storage.virtuals.shared_fixed_recipes["fs-test-fixed-recipe-a"],
+            "single-fixed-machine recipe wrongly treated as shared")
+
+        local machines = acc.get_machines_for_recipe(recipe)
+        assert(#machines == 2
+            and has_machine(machines, "fs-test-shared-machine-a")
+            and has_machine(machines, "fs-test-shared-machine-b"),
+            "shared recipe did not offer exactly its two fixed machines")
+
+        -- The recipe-keyed preset is created with a real default (not the
+        -- unknown-entity sentinel), so the machine choice has somewhere to persist.
+        local presets = preset.create_fixed_recipe_presets()
+        local stored = presets["fs-test-shared-recipe"]
+        assert(stored and (stored.name == "fs-test-shared-machine-a"
+            or stored.name == "fs-test-shared-machine-b"),
+            "fixed_recipe preset did not default to one of the shared machines")
+    end)
+    if not ok then
+        return "ERROR: shared fixed recipe machine check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Exercises required_fluid normalization on mining virtual recipes. A drill
 ---consumes mineable.fluid_amount of the required fluid once per mining cycle --
 ---the same cadence at which products are yielded -- so create_resource_virtual
@@ -1163,6 +1218,7 @@ function M.register()
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
         check_fixed_recipe_machine = M.check_fixed_recipe_machine,
         check_ingredient_count_machine = M.check_ingredient_count_machine,
+        check_shared_fixed_recipe_machine = M.check_shared_fixed_recipe_machine,
         check_required_fluid_mining = M.check_required_fluid_mining,
         check_quality_module_slots = M.check_quality_module_slots,
     })

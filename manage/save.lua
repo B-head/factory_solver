@@ -38,6 +38,7 @@ function M.init_player_data(player_index)
                 machine = preset.create_machine_presets(),
                 pump = preset.create_pump_presets(),
                 lab = preset.create_lab_presets(),
+                fixed_recipe = preset.create_fixed_recipe_presets(),
             },
             opened_gui = {},
         }
@@ -71,6 +72,7 @@ function M.reinit_player_data(player_index)
             presets.machine = preset.create_machine_presets(presets.machine)
             presets.pump = preset.create_pump_presets(presets.pump)
             presets.lab = preset.create_lab_presets(presets.lab)
+            presets.fixed_recipe = preset.create_fixed_recipe_presets(presets.fixed_recipe)
         else
             player_data.presets = {
                 fuel = preset.create_fuel_presets(player_data.fuel_presets),
@@ -79,6 +81,7 @@ function M.reinit_player_data(player_index)
                 machine = preset.create_machine_presets(player_data.machine_presets),
                 pump = preset.create_pump_presets(),
                 lab = preset.create_lab_presets(),
+                fixed_recipe = preset.create_fixed_recipe_presets(),
             }
             player_data.fuel_presets = nil
             player_data.resource_presets = nil
