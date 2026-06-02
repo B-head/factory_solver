@@ -159,6 +159,10 @@ local function helmod_to_factory_recipe_name(lua_type, name)
                 if pool[candidate] then return candidate end
             end
         end
+        -- No tile produces this fluid: it may still be pumped by a filter-pinned
+        -- offshore-pump, which factory_solver keys `<pump-fluid>{fluid}`.
+        local filter_candidate = "<pump-fluid>" .. name
+        if pool[filter_candidate] then return filter_candidate end
         return nil, "factory-solver-helmod-import-warning-virtual-recipe-unmappable"
     elseif lua_type == "agricultural" then
         -- Helmod names this recipe by the seed item; the plant is the seed's
@@ -251,6 +255,14 @@ local function factory_to_helmod_recipe_name(recipe_name)
     local _, grow_seed = string.match(recipe_name, "^<grow>([^:]+):(.+)$")
     if grow_seed then
         return "agricultural", grow_seed
+    end
+
+    -- `<pump-fluid>{fluid}` (filter-pinned pump, no backing tile) → Helmod
+    -- (fluid, fluid): the output fluid name is carried directly in the key.
+    -- Checked before `<pump>` since `^<pump>(.+)$` does not match the hyphen.
+    local pump_fluid_body = string.match(recipe_name, "^<pump%-fluid>(.+)$")
+    if pump_fluid_body then
+        return "fluid", pump_fluid_body
     end
 
     -- `<pump>{tile}` → Helmod (fluid, fluid_name_from_tile)

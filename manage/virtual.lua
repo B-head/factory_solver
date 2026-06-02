@@ -113,6 +113,18 @@ function M.create_virtuals()
         end
     end
 
+    for _, fluid in ipairs(acc.get_offshore_filter_only_fluids()) do
+        for _, craft in ipairs(M.create_offshore_filter_virtual(fluid)) do
+            if craft.type == "virtual_material" then
+                materials[craft.name] = craft
+            elseif craft.type == "virtual_recipe" then
+                recipes[craft.name] = craft
+            else
+                assert()
+            end
+        end
+    end
+
     ---@type table<string, LuaEntityPrototype[]>
     local pack_to_labs = {}
     for _, entity in pairs(prototypes.entity) do
@@ -1273,6 +1285,56 @@ function M.create_offshore_tile_virtual(tile_prototype, planet_index)
         source_planet_names = M.collect_planets_for_prototype(tile_prototype.name,
             tile_prototype.autoplace_specification,
             planet_index.tile_planets, planet_index.control_planets),
+    }
+    return { recipe }
+end
+
+---One virtual recipe per offshore-pump *filter* fluid that no tile produces.
+---The engine locks a filtered pump's output to its fluid_box filter regardless
+---of the tile it sits on (verified live: a lubricant-filtered pump on a water
+---tile pumps lubricant), so such a pump is invisible to the tile-keyed
+---`<pump>` recipes above and needs its own fluid-keyed recipe. Keyed
+---`<pump-fluid>{fluid}` to stay disjoint from the tile-keyed `<pump>{tile}`
+---namespace. `pumped_fluid_name` drives the same machine dispatch
+---(get_offshore_pumps_for_fluid) and per-second rate (get_pumping_speed) as the
+---tile recipes. `source_planet_names` is intentionally left unset: there is no
+---backing tile to derive planet availability from, and a nil keeps the recipe
+---unconditionally researched (see relation.lua compute_researched).
+---
+---Sprite / tooltip / order / group / hidden follow a representative pump, the
+---way every other machine-backed virtual recipe (boiler/generator/...) brands
+---itself with its machine. The recipe is fluid-keyed but several pumps may
+---serve it, so the representative is the sorted-first candidate -- deterministic
+---is required, since these strings land in `storage` and must stay bit-identical
+---across clients. The fluid is one of this pump's own filters, so the candidate
+---list is never empty.
+---@param fluid_prototype LuaFluidPrototype
+---@return (VirtualRecipe|VirtualMaterial)[]
+function M.create_offshore_filter_virtual(fluid_prototype)
+    local machine = acc.get_offshore_pumps_for_fluid(fluid_prototype.name)[1]
+    assert(machine, "no offshore-pump backs filter-only fluid " .. fluid_prototype.name)
+
+    ---@type VirtualRecipe
+    local recipe = {
+        type = "virtual_recipe",
+        name = "<pump-fluid>" .. fluid_prototype.name,
+        sprite_path = "entity/" .. machine.name,
+        elem_tooltip = { type = "entity", name = machine.name },
+        order = machine.order .. ":" .. fluid_prototype.order,
+        group_name = machine.group.name,
+        subgroup_name = machine.subgroup.name,
+        products = {
+            {
+                type = "fluid",
+                name = fluid_prototype.name,
+                amount = 1,
+                probability = 1,
+                temperature = fluid_prototype.default_temperature,
+            }
+        },
+        ingredients = {},
+        pumped_fluid_name = fluid_prototype.name,
+        hidden = machine.hidden,
     }
     return { recipe }
 end

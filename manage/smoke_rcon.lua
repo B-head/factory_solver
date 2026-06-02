@@ -1203,6 +1203,83 @@ function M.check_quality_module_slots()
     return "OK"
 end
 
+---Offshore-pump fluid_box filter: a pump's output is its filter fluid when one
+---is set, else the placed tile's fluid. Driven off the data_test 5b fixtures
+---(fs-test-offshore-pump-water filtered to water; fs-test-offshore-pump-lubricant
+---filtered to lubricant, which NO tile produces). Asserts the lubricant pump
+---surfaces via a fluid-keyed `<pump-fluid>lubricant` recipe with only itself as a
+---candidate, that the unfiltered vanilla pump is excluded from lubricant yet
+---offered for water, and that the preset layer covers the tile-less fluid (which
+---used to crash get_machine_preset's assert). Guarded on presence so a stripped
+---build skips instead of failing.
+---@return string
+function M.check_offshore_pump_filter()
+    local plain = prototypes.entity["offshore-pump"]
+    local pump_water = prototypes.entity["fs-test-offshore-pump-water"]
+    local pump_lubricant = prototypes.entity["fs-test-offshore-pump-lubricant"]
+    if not (plain and pump_water and pump_lubricant) then
+        log.info("check_offshore_pump_filter: data_test fixtures absent, skipped")
+        return "OK"
+    end
+
+    local function has_machine(list, name)
+        for _, m in ipairs(list) do
+            if m.name == name then return true end
+        end
+        return false
+    end
+
+    local ok, err = pcall(function()
+        -- The filter-pinned, tile-less fluid gets its own fluid-keyed recipe.
+        local recipe = storage.virtuals.recipe["<pump-fluid>lubricant"]
+        assert(recipe, "no <pump-fluid>lubricant recipe was generated")
+        assert(recipe.pumped_fluid_name == "lubricant",
+            "<pump-fluid>lubricant has the wrong pumped_fluid_name")
+        assert(recipe.source_planet_names == nil,
+            "<pump-fluid>lubricant must carry no planet restriction")
+
+        -- Its machine list is exactly the lubricant-filtered pump.
+        local for_lub = acc.get_machines_for_recipe(recipe)
+        assert(has_machine(for_lub, "fs-test-offshore-pump-lubricant"),
+            "lubricant pump not offered for its own <pump-fluid> recipe")
+        assert(not has_machine(for_lub, "offshore-pump"),
+            "unfiltered pump wrongly offered for lubricant")
+        assert(not has_machine(for_lub, "fs-test-offshore-pump-water"),
+            "water-filtered pump wrongly offered for lubricant")
+
+        -- Candidate rule directly: lubricant excludes the unfiltered pump (it can
+        -- only pump tile-borne fluids); water includes it plus the water-filtered
+        -- pump and excludes the lubricant pump.
+        local lub_pumps = acc.get_offshore_pumps_for_fluid("lubricant")
+        assert(has_machine(lub_pumps, "fs-test-offshore-pump-lubricant")
+            and not has_machine(lub_pumps, "offshore-pump")
+            and not has_machine(lub_pumps, "fs-test-offshore-pump-water"),
+            "get_offshore_pumps_for_fluid('lubricant') candidate set is wrong")
+
+        local water_pumps = acc.get_offshore_pumps_for_fluid("water")
+        assert(has_machine(water_pumps, "offshore-pump")
+            and has_machine(water_pumps, "fs-test-offshore-pump-water")
+            and not has_machine(water_pumps, "fs-test-offshore-pump-lubricant"),
+            "get_offshore_pumps_for_fluid('water') candidate set is wrong")
+
+        -- The tile-fluid predicate the candidate rule and enumeration share.
+        assert(acc.fluid_has_offshore_tile("water"),
+            "water should be a tile-borne fluid")
+        assert(not acc.fluid_has_offshore_tile("lubricant"),
+            "lubricant should not be a tile-borne fluid")
+
+        -- Preset layer must cover the tile-less fluid, or get_machine_preset's
+        -- assert trips on this recipe (the pre-fix crash).
+        local lub_preset = preset.create_pump_presets()["lubricant"]
+        assert(lub_preset and lub_preset.name == "fs-test-offshore-pump-lubricant",
+            "pump preset for lubricant missing or wrong")
+    end)
+    if not ok then
+        return "ERROR: offshore pump filter check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -1221,6 +1298,7 @@ function M.register()
         check_shared_fixed_recipe_machine = M.check_shared_fixed_recipe_machine,
         check_required_fluid_mining = M.check_required_fluid_mining,
         check_quality_module_slots = M.check_quality_module_slots,
+        check_offshore_pump_filter = M.check_offshore_pump_filter,
     })
 end
 

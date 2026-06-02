@@ -242,6 +242,13 @@ local function fs_virtual_to_fp_name(fs_name, machine_name)
     s = fs_name:match("^<grow>([^:]+):")
     if s then return "impostor-" .. s end
 
+    s = fs_name:match("^<pump%-fluid>(.+)$")
+    if s then
+        -- filter-pinned pump with no backing tile: a distinct token so the
+        -- reverse parser (and FP's `-fluid-` boiler probe) won't misread it.
+        return "impostor-pump-fluid-" .. s
+    end
+
     s = fs_name:match("^<pump>(.+)$")
     if s then
         local tile = prototypes.tile[s]
@@ -299,6 +306,12 @@ local function fp_name_to_fs_virtual(fp_name, machine_name)
     -- impostor-spoiling-X → <spoil>X
     local s = body:match("^spoiling%-(.+)$")
     if s then return "<spoil>" .. s end
+
+    -- impostor-pump-fluid-{fluid} → <pump-fluid>{fluid} (filter-pinned pump).
+    -- Checked before the boiler "-fluid-" probe below, which would otherwise
+    -- swallow this token.
+    local pump_fluid = body:match("^pump%-fluid%-(.+)$")
+    if pump_fluid then return "<pump-fluid>" .. pump_fluid end
 
     -- impostor-launch-{I}-from-{S} → <run>S:R:I
     local item, silo = body:match("^launch%-(.+)%-from%-(.+)$")

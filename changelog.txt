@@ -54,6 +54,13 @@ Date: ????
       gross throughput, instead of against a fixed absolute pad. A recycling
       loop's residual noise no longer surfaces as a phantom ingredient, and a
       genuine trace demand is no longer hidden.
+    - Honor an offshore-pump's fluid_box filter when deciding what it pumps. The
+      engine locks a filtered pump's output to its filter fluid regardless of the
+      tile it sits on, so a pump filtered to a fluid no tile produces (only
+      reachable with mods) was previously invisible to the solver. Such a pump
+      now gets its own virtual recipe producing that fluid, and an unfiltered
+      pump is no longer offered for a fluid no tile carries. Vanilla water
+      pumping is unchanged.
 ---------------------------------------------------------------------------------------------------
 Version: 0.5.2
 Date: 2026-05-31

@@ -383,6 +383,20 @@ try {
         Write-Host "SMOKE FAIL: [quality_module_slots] $qualSlots"
         $allPass = $false
     }
+
+    # An offshore-pump's output is its fluid_box filter when set, else the tile's
+    # fluid. A filter-pinned, tile-less fluid (lubricant) must surface via a
+    # <pump-fluid> recipe served only by that pump, the unfiltered pump must be
+    # excluded from it yet offered for water, and the preset layer must cover it.
+    # Solution-independent, driven off data_test.lua, so it runs once up front too.
+    $pumpFilter = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_offshore_pump_filter'))"
+    if ($pumpFilter -eq "OK") {
+        Write-Host "SMOKE PASS: [offshore_pump_filter] filter fluid surfaces; unfiltered pump excluded"
+    } else {
+        Write-Host "SMOKE FAIL: [offshore_pump_filter] $pumpFilter"
+        $allPass = $false
+    }
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"

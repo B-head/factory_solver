@@ -142,17 +142,63 @@ function M.get_machines_in_resource_category(category_name)
     return machines
 end
 
----Offshore pumps compatible with a tile-bound fluid. An empty fluid_box
----filter on the pump means "any fluid"; a set filter must match by name.
+---True when some tile's `tile.fluid` produces this fluid -- i.e. an unfiltered
+---offshore-pump placed on that tile would pump it. Drives both the candidate
+---rule below (an unfiltered pump is only valid for tile-borne fluids) and the
+---filter-only enumeration.
+---@param fluid_name string
+---@return boolean
+function M.fluid_has_offshore_tile(fluid_name)
+    for _, tile in pairs(prototypes.tile) do
+        if tile.fluid and tile.fluid.name == fluid_name then
+            return true
+        end
+    end
+    return false
+end
+
+---Fluids that an offshore-pump's fluid_box filter pins as its output but that
+---NO tile produces (e.g. a modded pump filtered to lubricant). The engine
+---locks the pump's output to the filter fluid regardless of the underlying
+---tile, so these need a `<pump-fluid>` virtual recipe of their own -- a
+---tile-keyed `<pump>` recipe never covers them. Deduped by fluid name.
+---@return LuaFluidPrototype[]
+function M.get_offshore_filter_only_fluids()
+    local pumps = prototypes.get_entity_filtered {
+        { filter = "type", type = "offshore-pump" },
+    }
+    local seen = {}
+    local ret = {}
+    for _, pump in pairs(pumps) do
+        local filter = M.get_fluidbox_filter_prototype(pump, 1)
+        if filter and not seen[filter.name]
+            and not M.fluid_has_offshore_tile(filter.name)
+        then
+            seen[filter.name] = true
+            flib_table.insert(ret, filter)
+        end
+    end
+    return fs_util.sort_prototypes(ret)
+end
+
+---Offshore pumps that can produce a given fluid. The engine sets a pump's
+---output to its fluid_box filter when one is present, otherwise to the placed
+---tile's `tile.fluid`. So a filtered pump qualifies iff its filter names this
+---fluid; an unfiltered pump qualifies only when some tile actually carries it
+---(it cannot pump a fluid out of thin air).
 ---@param fluid_name string
 ---@return LuaEntityPrototype[]
 function M.get_offshore_pumps_for_fluid(fluid_name)
+    local has_tile = M.fluid_has_offshore_tile(fluid_name)
     local pumps = prototypes.get_entity_filtered {
         { filter = "type", type = "offshore-pump" },
     }
     pumps = flib_table.filter(pumps, function(value)
         local filter = M.get_fluidbox_filter_prototype(value, 1)
-        return filter == nil or filter.name == fluid_name
+        if filter then
+            return filter.name == fluid_name
+        end
+        return has_tile
     end)
     pumps = fs_util.sort_prototypes(fs_util.to_list(pumps))
     return pumps

@@ -118,6 +118,22 @@ function M.create_pump_presets(origin)
         ::continue::
     end
 
+    -- Filter-pinned fluids that no tile produces (e.g. a lubricant-filtered
+    -- pump) are keyed `<pump-fluid>{fluid}` but still dispatch through
+    -- pumped_fluid_name, so they need a preset under the fluid name too --
+    -- otherwise get_machine_preset's assert trips for those recipes.
+    for _, fluid in ipairs(acc.get_offshore_filter_only_fluids()) do
+        local fluid_name = fluid.name
+        tn.typed_name_migration(ret[fluid_name])
+        if tn.validate_typed_name(ret[fluid_name]) then
+            goto continue
+        end
+
+        local pumps = acc.get_offshore_pumps_for_fluid(fluid_name)
+        ret[fluid_name] = M.get_default_preset(pumps, "machine")
+        ::continue::
+    end
+
     return ret
 end
 

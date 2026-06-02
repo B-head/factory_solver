@@ -545,11 +545,13 @@ if raw.boiler and raw.boiler["boiler"] then
 end
 
 -- ============================================================================
--- 5b. Offshore-pump with a fluid_box filter. The vanilla offshore-pump has an
---     UNFILTERED fluid_box (it pumps whatever the tile holds), so
---     get_offshore_pumps_for_fluid's `filter.name == fluid_name` match branch
---     and its exclusion-on-mismatch are otherwise untested. A filtered pump must
---     appear as a machine option for the matching fluid's tile only.
+-- 5b. Offshore-pump with a fluid_box filter. The engine locks a pump's output
+--     to its fluid_box filter when one is set, otherwise to the tile's fluid
+--     (the vanilla offshore-pump is UNFILTERED, so it pumps whatever the tile
+--     holds). These fixtures exercise all of it: get_offshore_pumps_for_fluid's
+--     `filter.name == fluid_name` match branch, the exclusion of unfiltered
+--     pumps from fluids no tile carries, and the `<pump-fluid>` virtual recipe
+--     that a filter-pinned, tile-less fluid needs.
 --     Note: get_fluidbox_filter_prototype reads fluidbox_prototypes[1].filter;
 --     an offshore-pump has no fluid_energy_source, so its output box is index 1.
 -- ============================================================================
@@ -566,12 +568,12 @@ if raw["offshore-pump"] and raw["offshore-pump"]["offshore-pump"] then
     pump_water.fluid_box.filter = "water"
     extend_test({ pump_water })
 
-    -- Negative control: filtered to a REAL fluid that no tile produces
-    -- (lubricant is crafted from heavy-oil, never pumped). The pump references a
-    -- genuine fluid prototype yet should still match no offshore tile and never
-    -- surface in any <pump> recipe's machine list — confirming the exclusion is
-    -- driven purely by the tile-fluid <-> filter name match, not by whether the
-    -- filtered fluid happens to exist.
+    -- Positive control: filtered to a REAL fluid that NO tile produces
+    -- (lubricant is normally crafted from heavy-oil). The engine still locks
+    -- this pump's output to lubricant regardless of the tile it sits on, so it
+    -- must surface via a fluid-keyed `<pump-fluid>lubricant` virtual recipe with
+    -- only this pump as a candidate -- and the unfiltered vanilla offshore-pump
+    -- must NOT be offered for lubricant (it can only pump tile-borne fluids).
     if raw.fluid and raw.fluid["lubricant"] then
         local pump_lubricant = table.deepcopy(raw["offshore-pump"]["offshore-pump"])
         pump_lubricant.name = "fs-test-offshore-pump-lubricant"
