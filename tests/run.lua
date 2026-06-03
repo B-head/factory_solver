@@ -132,7 +132,7 @@ local case_files = {
     "material_cycles",
     "problem_dump",
     "lp_fuel_burnt_result",
-    "lp_net_negative_target",
+    "lp_masslosing_cycle_import",
 }
 
 local total, passed, failed = 0, 0, 0
