@@ -1,7 +1,19 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.6.1
+Version: 0.6.2
 Date: ????
   Changes:
+---------------------------------------------------------------------------------------------------
+Version: 0.6.1
+Date: 2026-06-03
+  Gui:
+    - Give burnt-fuel residues (spent cells, ash) their own "Recipes for spent
+      fuel" picker section, so a common combustion residue no longer floods the
+      product list with hundreds of unrelated recipes.
+  Bugfixes:
+    - Flag a material in deficit even when its cycle is fed from outside, as long
+      as every producer of that material sits inside the cycle, so the solver
+      runs the real recipes instead of fabricating the target and building
+      nothing (a pyanodon ash loop).
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.0
 Date: 2026-06-03
