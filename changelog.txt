@@ -2,6 +2,12 @@
 Version: 0.6.2
 Date: ????
   Changes:
+  Bugfixes:
+    - Stop trace IPM-residual recipes (left at ~1e-9 instead of exact zero by
+      the interior-point solver) from surfacing their materials as phantom
+      "0.0" entries in Final products and Initial ingredients, by hiding any
+      material whose entire throughput is negligible against its column's real
+      scale.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.1
 Date: 2026-06-03

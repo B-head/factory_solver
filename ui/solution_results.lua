@@ -11,6 +11,29 @@ local production_line_adder = require "ui/production_line_adder"
 
 local handlers = {}
 
+---Run `add` over every entry of each total bucket, passing that bucket's
+---largest gross_per_second so the callback can floor out IPM-residual materials
+---(acc.is_residual_gross). max_gross is computed PER bucket rather than across
+---all three because item / fluid / virtual throughputs live on unrelated scales
+---(heat at thousands/s vs an item at 0.1/s); a cross-bucket max would let the
+---largest bucket silently raise the floor on a smaller one and eat a genuine
+---small flow.
+---@param add fun(entry: { amount_per_second: number, gross_per_second: number, typed_name: TypedName }, max_gross: number)
+---@param ... table<string, { amount_per_second: number, gross_per_second: number, typed_name: TypedName }>
+local function add_each_bucket(add, ...)
+    for _, bucket in ipairs({ ... }) do
+        local max_gross = 0
+        for _, entry in pairs(bucket) do
+            if entry.gross_per_second > max_gross then
+                max_gross = entry.gross_per_second
+            end
+        end
+        for _, entry in pairs(bucket) do
+            add(entry, max_gross)
+        end
+    end
+end
+
 ---@param event EventDataTrait
 function handlers.make_final_products_table(event)
     local elem = event.element
@@ -24,14 +47,18 @@ function handlers.make_final_products_table(event)
     end
     local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(save.get_research_bonuses(event.player_index), solution)
 
-    local function add(entry)
+    local function add(entry, max_gross)
         local typed_name = entry.typed_name
         -- Final Products are net > 0. Hide a net that is negligible RELATIVE to
         -- the material's gross throughput (acc.is_negligible), so a recycling
         -- loop's residual noise doesn't surface as a phantom product while a
-        -- genuine small surplus still shows.
+        -- genuine small surplus still shows. is_residual_gross adds the second
+        -- floor for a material whose ENTIRE throughput is IPM noise (gross tiny
+        -- against the bucket's real scale) -- is_negligible can't catch that
+        -- because net/gross is then O(1).
         local number = entry.amount_per_second
-        if number <= 0 or acc.is_negligible(number, entry.gross_per_second) then
+        if number <= 0 or acc.is_negligible(number, entry.gross_per_second)
+            or acc.is_residual_gross(entry.gross_per_second, max_gross) then
             return
         end
         number = fs_util.to_scale(number, player_data.time_scale)
@@ -58,17 +85,7 @@ function handlers.make_final_products_table(event)
         fs_util.add_gui(elem, def)
     end
 
-    for _, entry in pairs(item_totals) do
-        add(entry)
-    end
-
-    for _, entry in pairs(fluid_totals) do
-        add(entry)
-    end
-
-    for _, entry in pairs(virtual_totals) do
-        add(entry)
-    end
+    add_each_bucket(add, item_totals, fluid_totals, virtual_totals)
 end
 
 ---@param event EventDataTrait
@@ -84,13 +101,16 @@ function handlers.make_basic_ingredients_table(event)
     end
     local item_totals, fluid_totals, virtual_totals = report.get_total_amounts(save.get_research_bonuses(event.player_index), solution)
 
-    local function add(entry)
+    local function add(entry, max_gross)
         local typed_name = entry.typed_name
         -- Basic Ingredients are net < 0 (consumed from outside). Hide a net
         -- that is negligible RELATIVE to gross throughput so a recycling loop's
         -- residual noise doesn't surface as a phantom ingredient.
+        -- is_residual_gross adds the second floor for a material whose ENTIRE
+        -- throughput is IPM noise (gross tiny against the bucket's real scale).
         local number = entry.amount_per_second
-        if 0 <= number or acc.is_negligible(number, entry.gross_per_second) then
+        if 0 <= number or acc.is_negligible(number, entry.gross_per_second)
+            or acc.is_residual_gross(entry.gross_per_second, max_gross) then
             return
         end
         number = fs_util.to_scale(-number, player_data.time_scale)
@@ -117,17 +137,7 @@ function handlers.make_basic_ingredients_table(event)
         fs_util.add_gui(elem, def)
     end
 
-    for _, entry in pairs(item_totals) do
-        add(entry)
-    end
-
-    for _, entry in pairs(fluid_totals) do
-        add(entry)
-    end
-
-    for _, entry in pairs(virtual_totals) do
-        add(entry)
-    end
+    add_each_bucket(add, item_totals, fluid_totals, virtual_totals)
 end
 
 ---@param event EventData.on_gui_click

@@ -43,6 +43,19 @@ function M.is_negligible(net, gross)
     return nf.is_negligible(net, gross, M.tolerance)
 end
 
+---True when a material's gross throughput is residual-scale against the bucket's
+---largest gross -- the material only moved because an IPM-residual recipe (a
+---variable the interior-point solver left at ~1e-9 instead of exact zero)
+---touched it. Complements is_negligible, which cannot catch a material whose
+---entire throughput is noise. Thin pass-through to nf.is_residual_gross bound to
+---this module's tolerance.
+---@param gross number
+---@param max_gross number
+---@return boolean
+function M.is_residual_gross(gross, max_gross)
+    return nf.is_residual_gross(gross, max_gross, M.tolerance)
+end
+
 -- Prototype catalog queries -- manage/accessor/prototype.lua
 M.join_categories = prototype_acc.join_categories
 M.get_module = prototype_acc.get_module
