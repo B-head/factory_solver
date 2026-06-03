@@ -243,18 +243,29 @@ try {
             @{mode = 'cycle'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = ($Hops * 2) }, # loops WITH source/sink
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 3; qual = 'off'; hops = ($Hops * 2) }, # loops + multi-pin
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 4) }, # deeper loops
+            # net-negative target: aim the constraint at a TRAPPED (produced-but-
+            # unreachable) item, provoking the degenerate shortage solution (target
+            # fabricated, nothing built -- lines tagged DEGEN). closure=off keeps
+            # the chain's natural traps. nosrc=ex forces a CLOSED transformation
+            # chain (no source/sink short-circuit), which leaves fewer reachable
+            # seeds and so is the most likely to strand a produced item inside a
+            # mass-losing loop -- the only shape that yields a trapped target.
+            @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'netneg'; closure = 'off' },
+            @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 4); target = 'netneg'; closure = 'off' },
             @{mode = 'both'; void = 'ex'; nosrc = 'ex'; pins = 3; qual = 'off'; hops = ($Hops * 2) },  # multi-pin DAG
             @{mode = 'both'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = $Hops }         # control
         )
     }
     foreach ($cfg in $configs) {
-        $banner = "config mode=$($cfg.mode) void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) hops=$($cfg.hops)"
+        $tgt = if ($cfg.target) { $cfg.target } else { 'recipe' }
+        $cls = if ($cfg.closure) { $cfg.closure } else { 'on' }
+        $banner = "config mode=$($cfg.mode) void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) target=$tgt closure=$cls hops=$($cfg.hops)"
         Write-Host "`n--- $banner ---"
         "## $banner" | Out-File -FilePath $HitLog -Append -Encoding utf8
         for ($i = 0; $i -lt $Seeds; $i++) {
             $s = $StartSeed + $i
             if ($proc.HasExited) { throw "factorio exited mid-run" }
-            $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual)"
+            $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual);target=$tgt;closure=$cls"
             $cmd = "/silent-command rcon.print(remote.call('$iface','explore','$exploreArgs'))"
             $r = Invoke-RconCommand -Stream $stream -Command $cmd
             if ($r -match '<<HIT') {

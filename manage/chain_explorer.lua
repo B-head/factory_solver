@@ -141,11 +141,12 @@ end
 ---@param mode string "both" (default) | "up" (upstream only) | "down" (downstream only) | "cycle" (both, preferring loop-closing candidates).
 ---@param exclude_void boolean Drop pyanodon *-pyvoid (waste/disposal) recipes from seeds and growth.
 ---@param exclude_source_sink boolean Drop recipes with no ingredients (source-like) or no products (sink-like).
+---@param do_close boolean? Run ingredient closure (default true). Pass false to keep the chain's natural traps -- mass-losing-loop materials stay unreachable, which is what the netneg target mode wants to provoke a degenerate shortage solution.
 ---@return string? seed_recipe nil on failure.
 ---@return string[]? order Selected recipe names in insertion order (nil on failure).
 ---@return string? err Error message, set when seed_recipe is nil.
----@return { added: integer, closed: boolean, unresolved: string[] }? closure Ingredient-closure stats (nil on failure).
-function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink)
+---@return { added: integer, closed: boolean, unresolved: string[], trapped_items: string[] }? closure Ingredient-closure stats plus trapped_items = produced-but-unreachable items (the degenerate-shortage targets). nil on failure.
+function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close)
     -- Factorio's create_random_generator maps small seed differences to an
     -- IDENTICAL first draw (verified live: seeds 1/2/3/7/99 all yield 10580),
     -- and warming the generator does not help -- the raw seed barely reaches the
@@ -346,9 +347,11 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink)
     -- leaving only genuine solver findings. Materials whose only producers are
     -- virtual (mining / pumping) yield no eligible candidate and stay raw seeds
     -- (already reachable) -- correct, the LP initial_sources them.
+    -- do_close=false keeps the chain's natural traps (the netneg target mode
+    -- relies on produced-but-unreachable materials surviving). Default closes.
     local closure_added = 0
     local closure_closed = false
-    for _ = 1, 200 do
+    for _ = 1, (do_close == false and 0 or 200) do
         local reachable = compute_reachable()
 
         -- Consumed materials not reachable from base. Raw resources never appear
@@ -420,40 +423,57 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink)
         end
     end
 
-    -- Surface what closure could not bottom out, so a resulting cheat>0 can be
-    -- read as a generator dead end (this list non-empty) versus a true solver
-    -- finding (closed, yet the LP still leaned on the escape hatch). No silent
-    -- cap: if closure stopped short, the leftover materials are named.
-    local unresolved = {}
-    if not closure_closed then
-        local reachable = compute_reachable()
-        local seen = {}
-        for rn in pairs(selected) do
-            local rp2 = prototypes.recipe[rn]
-            if rp2 then
-                for _, ing in ipairs(rp2.ingredients) do
-                    local key = ing.type .. "/" .. ing.name
-                    if not reachable[key] and not seen[key] then
-                        seen[key] = true
-                        unresolved[#unresolved + 1] = key
-                    end
+    -- Final reachability snapshot, used two ways:
+    --   unresolved   = consumed-but-unreachable materials. Closure could not
+    --                  bottom these out; a resulting cheat>0 next to a non-empty
+    --                  list is a generator dead end, not a solver finding (no
+    --                  silent cap -- the leftovers are named).
+    --   trapped_items = produced-but-unreachable ITEMS. These are the exact
+    --                  degenerate-shortage targets: an item some recipe makes yet
+    --                  no non-negative recipe scaling can produce net of (its
+    --                  producers are all inside a mass-losing loop). The netneg
+    --                  target mode aims the constraint at one of these.
+    local reachable = compute_reachable()
+    local unresolved, seen_u = {}, {}
+    local trapped_items, seen_t = {}, {}
+    for rn in pairs(selected) do
+        local rp2 = prototypes.recipe[rn]
+        if rp2 then
+            for _, ing in ipairs(rp2.ingredients) do
+                local key = ing.type .. "/" .. ing.name
+                if not reachable[key] and not seen_u[key] then
+                    seen_u[key] = true
+                    unresolved[#unresolved + 1] = key
+                end
+            end
+            for _, p in ipairs(rp2.products) do
+                if p.type == "item" and not reachable["item/" .. p.name] and not seen_t[p.name] then
+                    seen_t[p.name] = true
+                    trapped_items[#trapped_items + 1] = p.name
                 end
             end
         end
-        table.sort(unresolved)
     end
+    table.sort(unresolved)
+    table.sort(trapped_items)
 
-    return seed_recipe, order, nil, { added = closure_added, closed = closure_closed, unresolved = unresolved }
+    return seed_recipe, order, nil,
+        { added = closure_added, closed = closure_closed, unresolved = unresolved, trapped_items = trapped_items }
 end
 
 ---Inspect a solved variable set. Reports the TRUE-signal cheat mass plus the
 ---(secondary) park fractions: all recipes, and excluding pyvoid waste recipes.
+---`active` is how many real recipes carry flow; `degenerate` flags the sharpest
+---impractical case -- cheat>0 with ZERO active recipes, i.e. the target is met
+---purely by |shortage_source| while no factory runs (the net-negative-target /
+---mass-losing-loop solution). A regular cheat>0 with active>0 is a partial
+---shortage; degenerate is the "built nothing, conjured the target" extreme.
 ---@param vars PackedVariables?
----@return { recipes: integer, near_zero: integer, frac: number, recipes_nv: integer, near_zero_nv: integer, frac_nv: number, cheat: number, zeros: string[] }
+---@return { recipes: integer, near_zero: integer, frac: number, recipes_nv: integer, near_zero_nv: integer, frac_nv: number, cheat: number, active: integer, degenerate: boolean, zeros: string[] }
 function M.detect(vars)
     if not vars or not vars.x then
         return { recipes = 0, near_zero = 0, frac = 0, recipes_nv = 0,
-            near_zero_nv = 0, frac_nv = 0, cheat = 0, zeros = {} }
+            near_zero_nv = 0, frac_nv = 0, cheat = 0, active = 0, degenerate = false, zeros = {} }
     end
 
     -- Count only real production recipes. |bridge| temperature-conversion
@@ -506,6 +526,11 @@ function M.detect(vars)
         end
     end
 
+    -- Real recipes carrying flow. Zero active + cheat>0 == the degenerate
+    -- "target fabricated, nothing built" solution (mass-losing loop / net-
+    -- negative target).
+    local active = recipes - near_zero
+
     return {
         recipes = recipes,
         near_zero = near_zero,
@@ -514,8 +539,77 @@ function M.detect(vars)
         near_zero_nv = near_zero_nv,
         frac_nv = recipes_nv > 0 and near_zero_nv / recipes_nv or 0,
         cheat = cheat,
+        active = active,
+        degenerate = cheat > CHEAT_EPS and active == 0,
         zeros = zeros,
     }
+end
+
+---Build a lookup set ({name = true}) from a list of names.
+---@param list string[]
+---@return table<string, true>
+local function to_set(list)
+    local set = {}
+    for _, n in ipairs(list) do set[n] = true end
+    return set
+end
+
+---Pick the "worst" (most net-NEGATIVE by prototype per-craft amounts) produced
+---item across a recipe set. Used to choose the netneg constraint target.
+---
+---`only` restricts candidates to a name set -- the netneg mode passes the chain's
+---`trapped_items` (produced-but-unreachable items), which are the materials that
+---actually force a degenerate shortage solution: the LP cannot make net of them
+---with any non-negative recipe scaling, so it fabricates the target via
+---|shortage_source| and runs nothing (see tests/cases/lp_net_negative_target).
+---When restricted, the net<0 gate is dropped -- being trapped (unreachable) is
+---the real degeneracy condition; net sign only orders the pick. With no `only`,
+---the legacy behaviour applies: most net-negative produced item, or nil when none
+---is net-negative.
+---
+---Net is summed from per-craft amounts (production - consumption), ignoring
+---machine speed/time -- a SIGN/ordering heuristic, not the true unit-rate balance.
+---Fluids are skipped: the constraint UI targets items.
+---@param recipe_names string[]
+---@param only table<string, true>? Restrict candidates to these item names.
+---@return string? item_name
+local function pick_net_negative_item(recipe_names, only)
+    local function product_amount(p)
+        local a = p.amount or (((p.amount_min or 0) + (p.amount_max or 0)) / 2)
+        return a * (p.probability or 1)
+    end
+    local net = {} ---@type table<string, number>
+    local produced = {} ---@type table<string, true>
+    for _, rn in ipairs(recipe_names) do
+        local rp = prototypes.recipe[rn]
+        if rp then
+            for _, p in ipairs(rp.products) do
+                if p.type == "item" then
+                    net[p.name] = (net[p.name] or 0) + product_amount(p)
+                    produced[p.name] = true
+                end
+            end
+            for _, ing in ipairs(rp.ingredients) do
+                if ing.type == "item" then
+                    net[ing.name] = (net[ing.name] or 0) - (ing.amount or 0)
+                end
+            end
+        end
+    end
+    -- Candidate set: the restriction if given, else every produced item.
+    local names = {}
+    for name in pairs(only or produced) do names[#names + 1] = name end
+    table.sort(names)
+    -- Most-negative candidate; name tie-break (via the sort) for reproducibility.
+    local best, best_net
+    for _, name in ipairs(names) do
+        local n = net[name] or 0
+        local eligible = only and produced[name] or (not only and n < -1e-9)
+        if eligible and (not best or n < best_net) then
+            best, best_net = name, n
+        end
+    end
+    return best
 end
 
 ---RCON entry point. Args string: "seed=N;hops=M;mode=both;void=ex". Builds one
@@ -537,6 +631,15 @@ function M.explore(args_str)
     local pins = math.max(1, math.floor(tonumber(params.pins) or 1))
     local use_quality = params.qual == "on"
     local target_quality = params.tq or "rare"
+    -- target=recipe (default): pin the seed (+pins-1) recipes at 1/s.
+    -- target=netneg: instead target a trapped (produced-but-unreachable) ITEM, to
+    -- provoke the mass-losing-loop / degenerate-shortage solution. Ignored in
+    -- quality mode, which has its own high-quality-item target.
+    local target_mode = params.target or "recipe"
+    -- closure=off skips ingredient closure so the chain keeps its natural traps.
+    -- netneg needs trapped materials; with closure on they are mostly bootstrapped
+    -- away (closure's whole job), so closure=off yields far more degenerate cases.
+    local do_close = params.closure ~= "off"
 
     save.init_force_data(FORCE_INDEX)
     save.init_player_data(PLAYER_INDEX)
@@ -556,7 +659,7 @@ function M.explore(args_str)
     end
 
     local ok_build, seed_recipe, order, err, closure =
-        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink)
+        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close)
     if not ok_build then
         return string.format("ERROR seed=%d build raised: %s", seed, tostring(seed_recipe))
     end
@@ -585,6 +688,7 @@ function M.explore(args_str)
         return string.format("ERROR seed=%d no buildable lines (seed_recipe=%s)", seed, seed_recipe)
     end
 
+    local target_label = ""
     if use_quality then
         -- Target the seed recipe's main ITEM product at a high quality (fluids
         -- carry no quality). With quality modules on every line, the only way to
@@ -604,6 +708,7 @@ function M.explore(args_str)
                 limit_type = "equal",
                 limit_amount_per_second = 1,
             })
+            target_label = item_product.name .. "@" .. target_quality
         else
             flib_table.insert(solution.constraints, {
                 type = "recipe",
@@ -612,7 +717,28 @@ function M.explore(args_str)
                 limit_type = "equal",
                 limit_amount_per_second = 1,
             })
+            target_label = "pin:" .. seed_recipe
         end
+    elseif target_mode == "netneg" and closure and #closure.trapped_items > 0
+        and pick_net_negative_item(built_names, to_set(closure.trapped_items)) then
+        -- Target a trapped (produced-but-unreachable) item: the LP cannot make net
+        -- of it with any non-negative recipe scaling, so it fabricates the whole
+        -- target via |shortage_source| and parks every recipe -- the degenerate
+        -- solution this mode hunts for (detect().degenerate flags it). Picking
+        -- from trapped_items (not just per-craft-net-negative items) is what makes
+        -- this actually fire: a merely net-negative item that closure reached is
+        -- still feasible. With closure on, trapped_items is usually empty (closure
+        -- bootstraps the traps away), so this mode pairs with closure=off.
+        local neg_item = pick_net_negative_item(built_names, to_set(closure.trapped_items))
+        ---@type Constraint
+        flib_table.insert(solution.constraints, {
+            type = "item",
+            name = neg_item,
+            quality = "normal",
+            limit_type = "equal",
+            limit_amount_per_second = 1,
+        })
+        target_label = "neg:" .. neg_item
     else
         -- Pin the seed recipe plus (pins-1) more built recipes. Multiple
         -- equal-pins impose simultaneous fixed throughputs that can fight over
@@ -649,6 +775,7 @@ function M.explore(args_str)
                 limit_amount_per_second = 1,
             })
         end
+        target_label = "pin:" .. table.concat(pin_names, "+")
     end
 
     -- Solve to a terminal state synchronously (forwerd_solve advances one IPM
@@ -675,9 +802,14 @@ function M.explore(args_str)
     log.info("explore seed=%d mode=%s void=%s hops=%d state=%s cheat=%.4g frac_nv=%.2f",
         seed, mode, exclude_void and "ex" or "in", hops, solution.solver_state, d.cheat, d.frac_nv)
 
+    -- A degenerate solution (cheat>0, zero active recipes) is the sharpest
+    -- impractical case -- target fabricated, nothing built. It is a subclass of
+    -- HIT, so the launcher's <<HIT match still fires; the DEGEN word tells the
+    -- human it is the net-negative-target / mass-losing-loop shape, not a partial
+    -- shortage.
     local tag = ""
     if true_hit then
-        tag = "  <<HIT"
+        tag = d.degenerate and "  <<HIT DEGEN" or "  <<HIT"
     elseif park_note then
         tag = "  ~park"
     end
@@ -694,7 +826,15 @@ function M.explore(args_str)
     -- the reachability rework exists to provide.
     local closure_note = ""
     if closure then
-        if not closure.closed and #closure.unresolved > 0 then
+        if not do_close then
+            -- closure=off: report the surviving traps (what the netneg target is
+            -- drawn from) rather than a bootstrap-add count.
+            if #closure.trapped_items > 0 then
+                closure_note = " closure=off,trapped={" .. table.concat(closure.trapped_items, ",") .. "}"
+            else
+                closure_note = " closure=off"
+            end
+        elseif not closure.closed and #closure.unresolved > 0 then
             closure_note = string.format(" closure=add%d,unclosed={%s}",
                 closure.added, table.concat(closure.unresolved, ","))
         elseif closure.added > 0 then
@@ -703,13 +843,13 @@ function M.explore(args_str)
     end
 
     return string.format(
-        "seed=%d mode=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g steps=%d sr=%s%s%s%s",
+        "seed=%d mode=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g steps=%d sr=%s tgt=%s%s%s%s",
         seed, mode, exclude_void and "ex" or "in", exclude_source_sink and "ex" or "in", pins,
         use_quality and target_quality or "off", hops,
         tostring(solution.solver_state), built,
-        d.recipes, d.near_zero, d.frac * 100,
+        d.recipes, d.active, d.near_zero, d.frac * 100,
         d.recipes_nv, d.frac_nv * 100,
-        d.cheat, steps, seed_recipe, closure_note, tag, parked)
+        d.cheat, steps, seed_recipe, target_label, closure_note, tag, parked)
 end
 
 ---Diagnostic: normalize a single quality-module line and report the slot count,
@@ -802,6 +942,92 @@ function M.detail()
     return table.concat(out, "\n")
 end
 
+---Solve an EXPLICIT, user-supplied chain (recipe names + a target) instead of a
+---random one, and report the full solved breakdown. The reachability study
+---(2026-06-03) established that random growth never strands a produced material
+---in a mass-losing loop, so the degenerate-shortage class can only be reproduced
+---from a hand-built topology like the pyanodon `ash` chain. This is that
+---injection point: pass the recipes and the target you observed, get back the
+---solve so you can see WHICH slack absorbed the target and whether any recipe ran.
+---
+---Machines are auto-picked per recipe (deterministic, by name); override any with
+---`machines = { ["recipe"] = "machine" }` to match a specific setup. Quality is
+---unlocked so quality targets are at least researched. Returns a multi-line
+---report (headline + the same body as M.detail).
+---
+---Call from the console, e.g. via tests/console.ps1:
+---  pwsh tests/console.ps1 -Run "=remote.call('factory_solver_explore','solve_explicit',
+---    {recipes={'coal-gas-from-coke','residual-mixture-distillation','residual-mixture'},
+---     target={type='item',name='ash',amount=0.5}})"
+---@param spec { recipes: string[], machines: table<string, string>?, target: { type: string?, name: string, quality: string?, limit_type: string?, amount: number? } }
+---@return string
+function M.solve_explicit(spec)
+    if type(spec) ~= "table" or type(spec.recipes) ~= "table" or not spec.target or not spec.target.name then
+        return "ERROR solve_explicit: expected { recipes = {names...}, target = { name=, type?, amount?, limit_type?, quality? } }"
+    end
+
+    save.init_force_data(FORCE_INDEX)
+    save.init_player_data(PLAYER_INDEX)
+    -- Unlock every quality so a quality target is researched (no-op for normal
+    -- targets / module-less lines).
+    local uq = {}
+    for qname in pairs(prototypes.quality) do
+        if qname ~= "quality-unknown" then uq[qname] = true end
+    end
+    storage.forces[FORCE_INDEX].research_bonuses.unlocked_qualities = uq
+
+    local solutions = storage.forces[FORCE_INDEX].solutions
+    for name in pairs(solutions) do solutions[name] = nil end
+    local sol_name = save.new_solution(solutions, "explicit")
+    local solution = assert(solutions[sol_name])
+
+    local built, skipped = {}, {}
+    for _, rn in ipairs(spec.recipes) do
+        local ok, line = pcall(make_line, rn, false)
+        if ok and line then
+            if spec.machines and spec.machines[rn] then
+                line.machine_typed_name = tn.create_typed_name("machine", spec.machines[rn])
+            end
+            flib_table.insert(solution.production_lines, line)
+            built[#built + 1] = rn
+        else
+            skipped[#skipped + 1] = rn
+        end
+    end
+    if #built == 0 then
+        return "ERROR solve_explicit: no buildable recipes from {" .. table.concat(spec.recipes, ",") .. "}"
+    end
+
+    local t = spec.target
+    ---@type Constraint
+    flib_table.insert(solution.constraints, {
+        type = t.type or "item",
+        name = t.name,
+        quality = t.quality or "normal",
+        limit_type = t.limit_type or "equal",
+        limit_amount_per_second = t.amount or 1,
+    })
+
+    solution.solver_state = "ready"
+    local force_data = storage.forces[FORCE_INDEX]
+    local steps = 0
+    while solution.solver_state == "ready" or solution.solver_state == "calculating" do
+        local ok, solve_err = pcall(pre_solve.forwerd_solve, force_data, solution)
+        if not ok then
+            return "ERROR solve_explicit: solve raised: " .. tostring(solve_err)
+        end
+        steps = steps + 1
+        if steps > 1200 then break end
+    end
+
+    local d = M.detect(solution.raw_variables)
+    local headline = string.format(
+        "explicit: state=%s built=%d skipped={%s} R=%d(act=%d) cheat=%.4g degenerate=%s steps=%d",
+        tostring(solution.solver_state), #built, table.concat(skipped, ","),
+        d.recipes, d.active, d.cheat, tostring(d.degenerate), steps)
+    return headline .. "\n" .. M.detail()
+end
+
 ---Register the RCON interface (flat namespace -> factory_solver_ prefix). Not
 ---persisted across save/load, so control.lua calls it on every load in the
 ---smoke_rcon scenario.
@@ -810,6 +1036,7 @@ function M.register()
         explore = M.explore,
         diag = M.diag,
         detail = M.detail,
+        solve_explicit = M.solve_explicit,
     })
 end
 
