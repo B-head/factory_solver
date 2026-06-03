@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.1
-Date: ????
+Date: 2026-06-03
   Gui:
     - Give burnt-fuel residues (spent cells, ash) their own "Recipes for spent
       fuel" picker section, so a common combustion residue no longer floods the
