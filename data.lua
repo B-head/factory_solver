@@ -404,6 +404,30 @@ styles.factory_solver_solution_list = {
     vertically_stretchable = "on",
 }
 
+-- right panel shared --
+
+-- Both right-panel sections (constraints + results) use this one frame style, so
+-- they end up the same fixed height and read as two equal halves of the column.
+-- Parent is inside_shallow_frame (no padding): the padding lives on the scroll-
+-- pane inside, not the frame, so the scrollbar tracks the frame edge instead of
+-- floating in an outer padding gap.
+styles.factory_solver_right_panel_half_frame = {
+    type = "frame_style",
+    parent = "inside_shallow_frame",
+    height = 334,
+}
+
+-- Borderless, backgroundless scroll-pane: naked_scroll_pane draws no graphical_set
+-- at all (base "scroll_pane" draws outer_frame_light, which would read as a second
+-- nested frame), so the parent half-frame's background shows through unchanged.
+-- The padding sits here (inside the scroll area) rather than on the frame so the
+-- scrollbar gutter stays flush with the frame edge.
+styles.factory_solver_right_panel_scroll_pane = {
+    type = "scroll_pane_style",
+    parent = "naked_scroll_pane",
+    padding = 12,
+}
+
 -- solution_settings
 
 styles.factory_solver_constraints_table = {
@@ -411,7 +435,6 @@ styles.factory_solver_constraints_table = {
     bottom_margin = 4,
     horizontal_spacing = 8,
     vertical_spacing = 10,
-    vertically_stretchable = "on",
 }
 
 styles.factory_solver_limit_amount_textfield = {

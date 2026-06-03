@@ -93,7 +93,7 @@ function handlers.on_make_constraints_table(event)
                 data.type, data.name, data.quality,
                 data.minimum_temperature, data.maximum_temperature)
 
-            local def = common.create_decorated_sprite_button{
+            local def = common.create_decorated_sprite_button {
                 typed_name = typed_name,
                 tags = data,
                 handler = {
@@ -296,32 +296,38 @@ fs_util.add_handlers(handlers)
 return {
     type = "frame",
     name = "solution_settings",
-    style = "inside_shallow_frame_with_padding",
+    style = "factory_solver_right_panel_half_frame",
     direction = "vertical",
     {
-        type = "label",
-        style = "caption_label",
-        caption = { "factory-solver-constraints" },
-    },
-    {
-        type = "table",
-        style = "factory_solver_constraints_table",
-        column_count = 5,
-        draw_horizontal_lines = true,
-        handler = {
-            on_added = handlers.on_make_constraints_table,
-            on_selected_solution_changed = handlers.on_make_constraints_table,
-            on_constraint_changed = handlers.on_make_constraints_table,
-            on_amount_unit_changed = handlers.on_make_constraints_table,
+        type = "scroll-pane",
+        style = "factory_solver_right_panel_scroll_pane",
+        horizontal_scroll_policy = "never",
+        vertical_scroll_policy = "auto",
+        {
+            type = "label",
+            style = "caption_label",
+            caption = { "factory-solver-constraints" },
         },
-    },
-    {
-        type = "button",
-        caption = { "factory-solver-add-constraint" },
-        handler = {
-            [defines.events.on_gui_click] = handlers.on_add_constraint_click,
-            on_added = handlers.on_add_constraint_button_enabled,
-            on_selected_solution_changed = handlers.on_add_constraint_button_enabled,
+        {
+            type = "table",
+            style = "factory_solver_constraints_table",
+            column_count = 5,
+            draw_horizontal_lines = true,
+            handler = {
+                on_added = handlers.on_make_constraints_table,
+                on_selected_solution_changed = handlers.on_make_constraints_table,
+                on_constraint_changed = handlers.on_make_constraints_table,
+                on_amount_unit_changed = handlers.on_make_constraints_table,
+            },
+        },
+        {
+            type = "button",
+            caption = { "factory-solver-add-constraint" },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_add_constraint_click,
+                on_added = handlers.on_add_constraint_button_enabled,
+                on_selected_solution_changed = handlers.on_add_constraint_button_enabled,
+            },
         },
     },
 }
