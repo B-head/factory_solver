@@ -1,8 +1,14 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.2
 Date: ????
-  Changes:
+  Gui:
+    - Wrap the right-panel Constraints list and results section (final products,
+      initial ingredients, build totals) each in its own fixed-height
+      scroll-pane, so they no longer overflow the main window as they grow.
   Bugfixes:
+    - Keep an over-produced bridged fluid on its exact point temperature, so a
+      temperature-range variant that exists only as a bridge target no longer
+      absorbs surplus and leaks a range (e.g. steam 15-100) into Final products.
     - Stop trace IPM-residual recipes (left at ~1e-9 instead of exact zero by
       the interior-point solver) from surfacing their materials as phantom
       "0.0" entries in Final products and Initial ingredients, by hiding any
