@@ -90,6 +90,58 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
+    name = "overproduced bridged fluid surfaces on the point, not the range",
+    -- Physically fluid leaves the factory at a definite temperature, never "a
+    -- range" -- the range variable (steam@[15,1000]) is a pure consumer-side
+    -- acceptance abstraction that only ever exists as a bridge target. So it
+    -- must NOT get a |surplus_sink|, while the physical point (steam@[165,165])
+    -- keeps its own. Without this the LP is indifferent between leaving surplus
+    -- on the point or the range (both at elastic_cost) and the interior-point
+    -- solver centers it across both, leaking a range temperature into Final
+    -- Products. Here the boiler is forced to run at 2 while the generator only
+    -- draws 1 steam: the 1 unit of surplus must land entirely on the point.
+    run = function()
+        local lines = {
+            recipe("boiler",
+                { fluid_single("steam", 165, 1) },
+                { item("water", 1) }),
+            recipe("generator",
+                { item("power", 1) },
+                { fluid_range("steam", 15, 1000, 1) }),
+        }
+        local constraints = {
+            { type = "recipe", name = "boiler", quality = "normal",
+              limit_type = "lower", limit_amount_per_second = 2 },
+            { type = "item", name = "power", quality = "normal",
+              limit_type = "equal", limit_amount_per_second = 1 },
+        }
+
+        local problem = cp.create_problem("bridge-surplus", constraints, lines)
+
+        -- Structural: the consumer-range variable has no surplus_sink; the
+        -- physical point variable keeps its own.
+        harness.assert_true(
+            problem.primals["|surplus_sink|fluid/steam@[15,1000]"] == nil,
+            "range variable must have no surplus_sink")
+        harness.assert_true(
+            problem.primals["|surplus_sink|fluid/steam@[165,165]"] ~= nil,
+            "point variable keeps its surplus_sink")
+
+        local state, vars = harness.solve_to_completion(lp, problem,
+            { tolerance = 1e-6, iterate_limit = 400 })
+        harness.assert_eq(state, "finished", "solver_state")
+        assert(vars, "expected packed variables on finished state")
+
+        -- Behavioral: the surplus steam lands on the point, and the bridge
+        -- carries exactly the generator's draw (the range never overproduces).
+        harness.assert_near(vars.x["|surplus_sink|fluid/steam@[165,165]"], 1, 0.05,
+            "surplus on the point variable")
+        harness.assert_near(vars.x[bridge_primal_key("steam", 165, 15, 1000)], 1, 0.05,
+            "bridge carries only the consumed amount")
+    end,
+})
+
+table.insert(cases, {
     name = "single out of range -> no bridge primal is created",
     -- boiler produces steam@500, generator requires steam@[15,200]. 500 is
     -- not in [15,200]; the bridge primal must not exist. (The LP itself is
