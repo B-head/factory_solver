@@ -134,4 +134,28 @@ function M.is_negligible(net, gross, rel_tol)
     return math.abs(net) <= rel_tol * gross
 end
 
+---True when a material's gross throughput is itself residual-scale relative to
+---the largest gross in its bucket -- i.e. the material only ever moved because
+---an IPM-residual recipe touched it. The interior-point solver keeps every
+---variable strictly positive, so a recipe that is zero at the true optimum
+---settles at ~1e-9 instead of exact zero and sprays trace flows across every
+---material it references. `is_negligible` above compares net against THIS
+---material's own gross, so it cannot catch a material whose ENTIRE throughput
+---is that noise (net/gross is then O(1) and the entry survives, rendering as a
+---phantom "0.0" product/ingredient). This second floor instead compares the
+---gross against the bucket's real scale (`max_gross`). Judged RELATIVE to
+---max_gross, not against a fixed absolute pad, so a uniformly scaled-down
+---factory is not silently emptied (`lp_scale_invariance`). max_gross <= 0 means
+---nothing flowed at all, so only an exact zero gross is residual.
+---@param gross number
+---@param max_gross number
+---@param rel_tol number
+---@return boolean
+function M.is_residual_gross(gross, max_gross, rel_tol)
+    if max_gross <= 0 then
+        return gross == 0
+    end
+    return gross <= rel_tol * max_gross
+end
+
 return M

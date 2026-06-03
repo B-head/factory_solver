@@ -534,6 +534,20 @@ function M.create_problem(solution_name, constraints, production_lines)
     -- Attach the structured bridge lines so report.get_total_amounts can fold
     -- the LP-solved flows back in without parsing variable-name strings.
     problem.bridges = bridges
+    -- Consumer-side acceptance-range fluid variables exist only as bridge
+    -- targets: a real recipe product always carries a point temperature
+    -- (raw_product_to_amount / resolve_bare_fluid_product give min == max), so
+    -- the only thing that ever credits a range variable (min ~= max) is a
+    -- temperature bridge. Physically the factory emits fluid at a definite
+    -- temperature, never "a range", so a range variable must never carry a
+    -- surplus. Collect these so the surplus_sink loop below can deny them an
+    -- elastic over-production sink (see the comment there).
+    local bridge_target_variables = {} ---@type table<string, true>
+    for _, bridge in ipairs(bridges) do
+        for _, product in ipairs(bridge.products) do
+            bridge_target_variables[tn.typed_name_to_variable_name(product)] = true
+        end
+    end
     local all_lines = {}
     for _, line in ipairs(production_lines) do all_lines[#all_lines + 1] = line end
     for _, line in ipairs(bridges) do all_lines[#all_lines + 1] = line end
@@ -614,7 +628,18 @@ function M.create_problem(solution_name, constraints, production_lines)
 
         problem:add_equivalence_constraint(constraint_name, 0)
 
-        do
+        -- A bridge-target range variable gets no surplus_sink. Otherwise the LP
+        -- is indifferent between leaving over-production on the producer's point
+        -- variable or on the consumer's range variable (both priced at
+        -- elastic_cost), and the interior-point solver centers the surplus
+        -- across both -- leaking a range temperature ("15-100") into Final
+        -- Products even though fluid physically leaves at a single temperature.
+        -- Denying the range an over-production sink forces the bridge flow to
+        -- equal consumption exactly, so every surplus stays on the physical
+        -- point variable (which keeps its own surplus_sink as a category-1
+        -- producer/consumer). Underproduction is still relaxed by the
+        -- shortage_source / initial_source escape hatches added below.
+        if not bridge_target_variables[constraint_name] then
             local elastic_name = "|surplus_sink|" .. constraint_name
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, -1)

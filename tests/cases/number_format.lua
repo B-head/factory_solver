@@ -144,4 +144,44 @@ table.insert(cases, {
     end,
 })
 
+-- is_residual_gross: floors out a material whose ENTIRE throughput is IPM noise,
+-- which is_negligible (net vs own gross) cannot catch.
+table.insert(cases, {
+    name = "is_residual_gross hides a ghost material whose gross is residual-scale",
+    run = function()
+        -- An IPM-residual recipe sprays ~1e-9 flow; the bucket's real scale is
+        -- thousands. net/gross is O(1) so is_negligible keeps it, but the gross
+        -- itself is negligible against max_gross -- must hide.
+        local gross, max_gross, rel = 1e-9, 2689, 5e-7
+        harness.assert_true(nf.is_residual_gross(gross, max_gross, rel), "1e-9 gross against 2689 is residual")
+        harness.assert_true(not nf.is_negligible(1e-9, gross, rel), "is_negligible alone cannot catch it (net == gross)")
+    end,
+})
+
+table.insert(cases, {
+    name = "is_residual_gross keeps a genuine small flow above the bucket floor",
+    run = function()
+        -- A real but small product: 0.1/s in a bucket topping out at 60/s. The
+        -- floor is 5e-7*60 = 3e-5, well below 0.1 -- must be kept.
+        harness.assert_true(not nf.is_residual_gross(0.1, 60, 5e-7), "0.1 gross against 60 is real")
+    end,
+})
+
+table.insert(cases, {
+    name = "is_residual_gross is scale-invariant",
+    run = function()
+        -- Uniformly scaling the whole bucket down by 1e6 must not start hiding
+        -- the smallest real flow: the ratio gross/max_gross is unchanged.
+        harness.assert_true(not nf.is_residual_gross(0.1e-6, 60e-6, 5e-7), "ratio preserved under uniform scale-down")
+    end,
+})
+
+table.insert(cases, {
+    name = "is_residual_gross with no flow is residual only at exact zero",
+    run = function()
+        harness.assert_true(nf.is_residual_gross(0, 0, 5e-7), "exact zero gross")
+        harness.assert_true(not nf.is_residual_gross(5, 0, 5e-7), "nonzero gross with empty bucket is not residual")
+    end,
+})
+
 return cases
