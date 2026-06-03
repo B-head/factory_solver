@@ -212,6 +212,29 @@ function M.is_source_scc(scc_set, adj)
     return true
 end
 
+---True when some material OUTSIDE the SCC produces `material` (an inbound edge
+---u -> material with u not in the SCC). This is the per-material refinement of
+---is_source_scc: a whole non-source SCC is not uniformly "supplied from upstream"
+---just because *some* external edge enters it. The external edge may feed an
+---unrelated SCC material (vacuum/steam feeding coke production in the coal-gas
+---loop) while the actual deficit (ash) has every producer inside the SCC and so
+---genuinely needs external supply. A material WITH an external producer (e.g.
+---cu/uncommon fed by the normal-quality recycling cascade) is supplied
+---indirectly and must NOT be flagged, or the LP gets free copies; a material
+---WITHOUT one must be reachable through |initial_source|, not |shortage_source|.
+---@param material string
+---@param scc_set table<string, true>
+---@param adj table<string, table<string, true>>
+---@return boolean
+function M.has_external_producer(material, scc_set, adj)
+    for u, neighbors in pairs(adj) do
+        if not scc_set[u] and neighbors[material] then
+            return true
+        end
+    end
+    return false
+end
+
 ---For every material in `scc_set`, sum the per-second flow contribution
 ---of every recipe that touches the SCC (consumes or produces at least one
 ---SCC material) when each such recipe runs at unit rate (rate = 1). Returns
@@ -482,8 +505,13 @@ function M.find_deficit_materials(production_lines, threshold_ratio)
             cyclic_sccs[#cyclic_sccs + 1] = scc
             local scc_set = {}
             for _, m in ipairs(scc) do scc_set[m] = true end
-            if M.is_source_scc(scc_set, adj)
-                and not M.is_self_sustaining(production_lines, scc) then
+            -- The whole-SCC is_source_scc gate is replaced by a per-material
+            -- has_external_producer check below: a non-source SCC is no longer
+            -- skipped wholesale (which left genuine deficits like ash to
+            -- |shortage_source|), only its materials that ARE fed from outside
+            -- are spared. self-sustaining cycles (kovarex / <grow>) still need
+            -- no external supply at all, so they are skipped entirely.
+            if not M.is_self_sustaining(production_lines, scc) then
                 local net, consumption = M.compute_net_flow(production_lines, scc_set)
                 for _, m in ipairs(scc) do
                     -- Measure the deficit against the material's internal
@@ -497,7 +525,12 @@ function M.find_deficit_materials(production_lines, threshold_ratio)
                     -- this material more than (1 + threshold)x faster than it
                     -- can produce it internally.
                     local production = net[m] + consumption[m]
-                    if production > 0 and net[m] < -threshold_ratio * production then
+                    if production > 0 and net[m] < -threshold_ratio * production
+                        -- Skip materials supplied from outside the SCC (quality
+                        -- cascades feed cu/uncommon in from normal recycling);
+                        -- flag only those whose every producer is inside the
+                        -- cycle, which genuinely need an external |initial_source|.
+                        and not M.has_external_producer(m, scc_set, adj) then
                         deficits[m] = true
                     end
                 end
