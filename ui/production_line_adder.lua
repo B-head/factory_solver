@@ -222,6 +222,10 @@ function handlers.on_init_choose_visiblity(event)
     local allowed, recipe_names
     if kind == "product" then
         allowed, recipe_names = dialog_tags.is_choose_product, relation_to_recipe.recipe_for_product
+    elseif kind == "spent" then
+        -- Burnt fuel residue (spent cell / ash) is a way the material is produced,
+        -- so it shares the product-choosing mode.
+        allowed, recipe_names = dialog_tags.is_choose_product, relation_to_recipe.recipe_for_burnt_result
     elseif kind == "ingredient" then
         allowed, recipe_names = dialog_tags.is_choose_ingredient, relation_to_recipe.recipe_for_ingredient
     elseif kind == "fuel" then
@@ -258,6 +262,8 @@ function handlers.on_make_choose_table(event)
     local recipe_names
     if kind == "product" then
         recipe_names = relation_to_recipe.recipe_for_product
+    elseif kind == "spent" then
+        recipe_names = relation_to_recipe.recipe_for_burnt_result
     elseif kind == "ingredient" then
         recipe_names = relation_to_recipe.recipe_for_ingredient
     elseif kind == "fuel" then
@@ -596,6 +602,43 @@ return {
                         draw_horizontal_lines = true,
                         tags = {
                             kind = "product",
+                        },
+                        handler = {
+                            on_added = handlers.on_make_choose_table,
+                            on_craft_visible_changed = handlers.on_make_choose_table,
+                        },
+                    },
+                },
+            },
+            {
+                type = "frame",
+                name = "recipe_for_spent",
+                style = "flib_shallow_frame_in_shallow_frame",
+                direction = "vertical",
+                visible = false,
+                tags = {
+                    kind = "spent",
+                },
+                handler = {
+                    on_added = handlers.on_init_choose_visiblity,
+                },
+                {
+                    type = "scroll-pane",
+                    style = "factory_solver_scroll_pane",
+                    horizontal_scroll_policy = "never",
+                    vertical_scroll_policy = "auto-and-reserve-space",
+                    {
+                        type = "label",
+                        style = "caption_label",
+                        caption = { "factory-solver-recipe-for-spent" },
+                    },
+                    {
+                        type = "table",
+                        style = "factory_solver_choose_table",
+                        column_count = 2,
+                        draw_horizontal_lines = true,
+                        tags = {
+                            kind = "spent",
                         },
                         handler = {
                             on_added = handlers.on_make_choose_table,

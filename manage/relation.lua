@@ -110,7 +110,7 @@ function M.create_relation_to_recipes(force_index)
     ---@return RelationToRecipe
     local function create_relation_table()
         ---@type RelationToRecipe
-        return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_fuel = {} }
+        return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_burnt_result = {}, recipe_for_fuel = {} }
     end
 
     ---@param filter_type FilterType
@@ -129,10 +129,14 @@ function M.create_relation_to_recipes(force_index)
     end
 
     -- A machine burning an item fuel emits that fuel's burnt_result (spent
-    -- cell), so a recipe consuming the fuel is also a *producer* of the spent
-    -- cell. Register it under recipe_for_product so the picker / Recipe Explorer
-    -- can navigate "what produces used-up-uranium-fuel-cell" back to the
-    -- reactor. Fluid fuels have no burnt_result and never reach here.
+    -- cell / ash), so a recipe consuming the fuel is also a *producer* of the
+    -- residue. Register it under recipe_for_burnt_result -- NOT recipe_for_product
+    -- -- so the picker can list it in a dedicated "spent fuel" section. Mixing it
+    -- into recipe_for_product buries the real producers: for a common combustion
+    -- residue (ash), every recipe runnable in a fuel-burning machine would flood
+    -- the product list. craftable_count still counts it so a residue with no real
+    -- recipe (depleted-uranium-fuel-cell) is not flagged unresearched.
+    -- Fluid fuels have no burnt_result and never reach here.
     ---@param fuel_item_name string
     ---@param recipe_name string
     ---@param is_visible boolean
@@ -140,7 +144,7 @@ function M.create_relation_to_recipes(force_index)
         local burnt = acc.try_get_burnt_result(prototypes.item[fuel_item_name])
         if burnt then
             local info = get_info("item", burnt.name)
-            flib_table.insert(info.recipe_for_product, recipe_name)
+            flib_table.insert(info.recipe_for_burnt_result, recipe_name)
             if is_visible then
                 info.craftable_count = info.craftable_count + 1
             end
