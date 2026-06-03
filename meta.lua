@@ -107,6 +107,7 @@ __factory_solver__storage = {}
 ---@class RelationToRecipe
 ---@field craftable_count integer
 ---@field recipe_for_product string[]
+---@field recipe_for_burnt_result string[] Recipes that emit this material only as a burnt fuel residue (spent cell / ash), kept apart from recipe_for_product so the picker lists them in their own section instead of burying the real producers.
 ---@field recipe_for_ingredient string[]
 ---@field recipe_for_fuel string[]
 
