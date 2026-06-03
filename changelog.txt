@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.2
-Date: ????
+Date: 2026-06-04
   Gui:
     - Wrap the right-panel Constraints list and results section (final products,
       initial ingredients, build totals) each in its own fixed-height
