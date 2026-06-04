@@ -264,6 +264,12 @@ try {
             # the generation half of the catalyst-loop probe.
             @{mode = 'cycle'; init = 'scc'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'trapdown'; closure = 'off' },
             @{mode = 'cycle'; init = 'scc'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'netneg'; closure = 'off' },
+            # Downstream-first catalyst probe: seed a known end product and grow
+            # UP, pulling its whole producer chain (incl. a net-zero catalyst loop
+            # like antimony purex) in behind it; closure=off keeps the catalyst
+            # trapped, trapdown re-targets the end product so the run demands the
+            # trapped downstream material. seedrecipe is mod-specific.
+            @{mode = 'up'; seedrecipe = 'nuclear-sample'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 8); target = 'trapdown'; closure = 'off' },
             @{mode = 'both'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = $Hops }         # control
         )
     }
@@ -271,13 +277,15 @@ try {
         $tgt = if ($cfg.target) { $cfg.target } else { 'recipe' }
         $cls = if ($cfg.closure) { $cfg.closure } else { 'on' }
         $ini = if ($cfg.init) { $cfg.init } else { 'recipe' }
-        $banner = "config mode=$($cfg.mode) init=$ini void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) target=$tgt closure=$cls hops=$($cfg.hops)"
+        $sr = if ($cfg.seedrecipe) { $cfg.seedrecipe } else { '' }
+        $banner = "config mode=$($cfg.mode) init=$ini seedrecipe=$sr void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) target=$tgt closure=$cls hops=$($cfg.hops)"
         Write-Host "`n--- $banner ---"
         "## $banner" | Out-File -FilePath $HitLog -Append -Encoding utf8
         for ($i = 0; $i -lt $Seeds; $i++) {
             $s = $StartSeed + $i
             if ($proc.HasExited) { throw "factorio exited mid-run" }
             $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);init=$ini;void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual);target=$tgt;closure=$cls"
+            if ($sr) { $exploreArgs += ";seedrecipe=$sr" }
             $cmd = "/silent-command rcon.print(remote.call('$iface','explore','$exploreArgs'))"
             $r = Invoke-RconCommand -Stream $stream -Command $cmd
             if ($r -match '<<HIT') {

@@ -40,6 +40,17 @@ local log = fs_log.for_module("chain_explorer")
 
 local M = {}
 
+-- Per-session caches for the O(full-graph) generation inputs. explore() researches
+-- all technologies, after which the enabled recipe set is constant -- so the
+-- relation index, the cyclic SCCs, and universe reachability are identical across
+-- every seed. Recomputing them per seed is what made all-technologies sweeps crawl
+-- (~30s/solve); cached, the first seed of a config pays the cost and the rest
+-- reuse it. SCC / universe are keyed by the candidate-filter combo (void/nosrc),
+-- the relation by force. Cleared automatically on module reload (per session).
+local rel_cache = nil
+local sccs_cache = {}
+local universe_cache = {}
+
 local FORCE_INDEX = 1
 local PLAYER_INDEX = 1
 
@@ -250,12 +261,13 @@ end
 ---@param exclude_void boolean Drop pyanodon *-pyvoid (waste/disposal) recipes from seeds and growth.
 ---@param exclude_source_sink boolean Drop recipes with no ingredients (source-like) or no products (sink-like).
 ---@param do_close boolean? Run ingredient closure (default true). Pass false to keep the chain's natural traps -- mass-losing-loop materials stay unreachable, which is what the netneg target mode wants to provoke a degenerate shortage solution.
----@param init string? Seeding strategy: "recipe" (default, random seed recipe) or "scc" (seed with all cycle recipes of a random cyclic material SCC, so a catalyst loop is present from the start; falls back to a random seed when the recipe set has no cyclic SCC).
+---@param init string? Seeding strategy: "recipe" (default, random seed recipe) or "scc" (seed with all cycle recipes of a random catalyst-bearing cyclic material SCC; falls back to a random seed when none exists).
+---@param seed_override string? Force the seed recipe to this name (must be a valid candidate), bypassing the random / SCC pick. Lets a specific finding be reproduced or a known chain be grown deterministically (e.g. nuclear-sample + mode=up to assemble the antimony catalyst chain downstream-first).
 ---@return string? seed_recipe nil on failure.
 ---@return string[]? order Selected recipe names in insertion order (nil on failure).
 ---@return string? err Error message, set when seed_recipe is nil.
 ---@return { added: integer, closed: boolean, unresolved: string[], trapped_items: string[], catalysts: string[] }? closure Ingredient-closure stats; trapped_items = produced-but-unreachable items (the degenerate-shortage targets); catalysts = unresolved materials also unreachable universe-wide (the solver must import these, so a cheat beside one is a real finding, not a generator dead end). nil on failure.
-function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close, init)
+function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close, init, seed_override)
     -- Factorio's create_random_generator maps small seed differences to an
     -- IDENTICAL first draw (verified live: seeds 1/2/3/7/99 all yield 10580),
     -- and warming the generator does not help -- the raw seed barely reaches the
@@ -263,7 +275,10 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     -- with a Knuth multiplicative hash (+offset so seed 0 isn't a fixed point)
     -- so consecutive seeds diverge from the very first draw.
     local rng = game.create_random_generator((seed * 2654435761 + 12345) % 4294967296)
-    local rel = relation.create_relation_to_recipes(FORCE_INDEX)
+    -- The relation index is force-wide and constant after research_all; build it
+    -- once per session, not per seed (it walks every enabled recipe).
+    local rel = rel_cache or relation.create_relation_to_recipes(FORCE_INDEX)
+    rel_cache = rel
     local force = game.forces[FORCE_INDEX]
 
     -- fs-test-* are factory_solver's own data_test debug recipes (not real game
@@ -355,14 +370,18 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     -- SCCs and to classify unresolved materials as catalysts vs generator dead
     -- ends. A material universe-unreachable here is one no chain can craft from
     -- raws -- a genuine import (a net-zero catalyst), not a closure omission.
-    local _universe_reach
+    -- Candidate set is fully determined by the void/nosrc filters (enabled set is
+    -- constant after research_all), so SCC and universe caches key on that combo.
+    local filter_key = (exclude_void and "v" or "_") .. (exclude_source_sink and "s" or "_")
     local function get_universe_reach()
-        if not _universe_reach then
+        local u = universe_cache[filter_key]
+        if not u then
             local cand_set = {}
             for _, rn in ipairs(candidates) do cand_set[rn] = true end
-            _universe_reach = reach_for(cand_set)
+            u = reach_for(cand_set)
+            universe_cache[filter_key] = u
         end
-        return _universe_reach
+        return u
     end
 
     local selected = {}
@@ -403,8 +422,17 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     -- uniformly from ALL cyclic SCCs lands on those and never on the antimony-loop
     -- shape. Restricting to catalyst-bearing SCCs is what makes the probe fire.
     local seed_recipe
-    if init == "scc" then
-        local all_cyclic = find_cyclic_sccs(candidates)
+    -- Forced seed: reproduce a finding or grow a known chain deterministically.
+    if seed_override and prototypes.recipe[seed_override] then
+        add_recipe(seed_override)
+        seed_recipe = seed_override
+    end
+    if not seed_recipe and init == "scc" then
+        local all_cyclic = sccs_cache[filter_key]
+        if not all_cyclic then
+            all_cyclic = find_cyclic_sccs(candidates)
+            sccs_cache[filter_key] = all_cyclic
+        end
         local universe = get_universe_reach()
         local cyclic = {}
         for _, scc in ipairs(all_cyclic) do
@@ -959,9 +987,20 @@ function M.explore(args_str)
     -- catalytic loop is present from the start (random growth almost never closes
     -- one). init=recipe (default) seeds from a single random recipe.
     local init = params.init or "recipe"
+    -- seedrecipe=<name> forces the seed recipe (reproduce a finding; or grow a
+    -- known chain, e.g. seedrecipe=nuclear-sample;mode=up to pull the antimony
+    -- catalyst chain in downstream-first).
+    local seed_override = params.seedrecipe
 
     save.init_force_data(FORCE_INDEX)
     save.init_player_data(PLAYER_INDEX)
+
+    -- Research everything so the WHOLE recipe set is enabled. The smoke force
+    -- starts with no technologies, so build_chain's `recipe.enabled` filter (and
+    -- the relation index) would otherwise see only default-unlocked early-game
+    -- recipes -- the deep chains where catalysts live (antimony purex, nuclear)
+    -- stay locked and invisible. This is why the explorer never reached them.
+    game.forces[FORCE_INDEX].research_all_technologies()
 
     if use_quality then
         -- The smoke force defaults to unlocked_qualities = { normal }, so
@@ -978,7 +1017,7 @@ function M.explore(args_str)
     end
 
     local ok_build, seed_recipe, order, err, closure =
-        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close, init)
+        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close, init, seed_override)
     if not ok_build then
         return string.format("ERROR seed=%d build raised: %s", seed, tostring(seed_recipe))
     end
