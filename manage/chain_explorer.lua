@@ -468,12 +468,24 @@ end
 ---purely by |shortage_source| while no factory runs (the net-negative-target /
 ---mass-losing-loop solution). A regular cheat>0 with active>0 is a partial
 ---shortage; degenerate is the "built nothing, conjured the target" extreme.
+---
+---`noship` is a second, cheat-free impracticality signal (the maintainer's
+---criterion): a buildable solution draws on at least one |initial_source| (a
+---declared external import) AND empties at least one |final_sink| (a product that
+---leaves the factory). A solution that imports yet ships NOTHING -- every product
+---is consumed internally or dumped back as penalized |surplus_sink| -- is a
+---factory built to void its own output. cheat=0 hides it from the shortage/elastic
+---gate (nothing is fabricated; the books balance), so it is flagged separately.
+---Observed when a producer/consumer intermediate is pinned: create_problem routes
+---the pinned amount to |surplus_sink| and never opens a |final_sink|, so the LP
+---makes the material only to throw it away.
 ---@param vars PackedVariables?
----@return { recipes: integer, near_zero: integer, frac: number, recipes_nv: integer, near_zero_nv: integer, frac_nv: number, cheat: number, active: integer, degenerate: boolean, zeros: string[] }
+---@return { recipes: integer, near_zero: integer, frac: number, recipes_nv: integer, near_zero_nv: integer, frac_nv: number, cheat: number, active: integer, degenerate: boolean, has_initial: boolean, has_final: boolean, noship: boolean, zeros: string[] }
 function M.detect(vars)
     if not vars or not vars.x then
         return { recipes = 0, near_zero = 0, frac = 0, recipes_nv = 0,
-            near_zero_nv = 0, frac_nv = 0, cheat = 0, active = 0, degenerate = false, zeros = {} }
+            near_zero_nv = 0, frac_nv = 0, cheat = 0, active = 0, degenerate = false,
+            has_initial = false, has_final = false, noship = false, zeros = {} }
     end
 
     -- Count only real production recipes. |bridge| temperature-conversion
@@ -517,12 +529,22 @@ function M.detect(vars)
 
     -- Total mass carried by the penalty escapes (shortage_source / elastic): a
     -- non-trivial value means the solution leaned on the cheat instead of real
-    -- flow -- the TRUE undesirable signal.
+    -- flow -- the TRUE undesirable signal. The same pass records whether any
+    -- declared external input (|initial_source|) is drawn and whether any product
+    -- leaves the factory (|final_sink|) -- the two halves of the practicality
+    -- criterion. |surplus_sink| deliberately does NOT count as shipping: it is
+    -- penalized over-production (waste), not a delivered product.
     local cheat = 0
+    local has_initial, has_final = false, false
     for k, v in pairs(vars.x) do
-        if math.abs(v) > thresh
-            and (k:find("|shortage_source|", 1, true) or k:find("|elastic|", 1, true)) then
-            cheat = cheat + math.abs(v)
+        if math.abs(v) > thresh then
+            if k:find("|shortage_source|", 1, true) or k:find("|elastic|", 1, true) then
+                cheat = cheat + math.abs(v)
+            elseif k:find("|initial_source|", 1, true) then
+                has_initial = true
+            elseif k:find("|final_sink|", 1, true) then
+                has_final = true
+            end
         end
     end
 
@@ -530,6 +552,11 @@ function M.detect(vars)
     -- "target fabricated, nothing built" solution (mass-losing loop / net-
     -- negative target).
     local active = recipes - near_zero
+
+    -- Imports something, fabricates nothing, yet ships nothing out: the factory
+    -- produces only to dump it back as surplus. A cheat-free impracticality the
+    -- shortage/elastic gate cannot see.
+    local noship = has_initial and not has_final and cheat <= CHEAT_EPS
 
     return {
         recipes = recipes,
@@ -541,6 +568,9 @@ function M.detect(vars)
         cheat = cheat,
         active = active,
         degenerate = cheat > CHEAT_EPS and active == 0,
+        has_initial = has_initial,
+        has_final = has_final,
+        noship = noship,
         zeros = zeros,
     }
 end
@@ -797,19 +827,28 @@ function M.explore(args_str)
 
     local d = M.detect(solution.raw_variables)
     local converged = solution.solver_state == "finished"
-    local true_hit = (not converged) or d.cheat > CHEAT_EPS
+    -- HIT covers both impracticality families: the cheat gate (shortage/elastic
+    -- fabricated or relaxed the target) and the noship gate (imports but ships
+    -- nothing -- a cheat-free degeneracy the old gate could not see).
+    local true_hit = (not converged) or d.cheat > CHEAT_EPS or d.noship
     local park_note = d.frac_nv >= PARK_NOTE_FRACTION
-    log.info("explore seed=%d mode=%s void=%s hops=%d state=%s cheat=%.4g frac_nv=%.2f",
-        seed, mode, exclude_void and "ex" or "in", hops, solution.solver_state, d.cheat, d.frac_nv)
+    log.info("explore seed=%d mode=%s void=%s hops=%d state=%s cheat=%.4g noship=%s frac_nv=%.2f",
+        seed, mode, exclude_void and "ex" or "in", hops, solution.solver_state, d.cheat,
+        tostring(d.noship), d.frac_nv)
 
-    -- A degenerate solution (cheat>0, zero active recipes) is the sharpest
-    -- impractical case -- target fabricated, nothing built. It is a subclass of
-    -- HIT, so the launcher's <<HIT match still fires; the DEGEN word tells the
-    -- human it is the net-negative-target / mass-losing-loop shape, not a partial
-    -- shortage.
+    -- HIT subclasses, in order of sharpness: DEGEN (cheat>0, zero recipes run --
+    -- target conjured, nothing built); NOSHIP (cheat=0 but no |final_sink| -- a
+    -- factory that imports and runs yet voids all output); plain HIT (a partial
+    -- shortage with some real flow). All carry "<<HIT" so the launcher matches.
     local tag = ""
     if true_hit then
-        tag = d.degenerate and "  <<HIT DEGEN" or "  <<HIT"
+        if d.degenerate then
+            tag = "  <<HIT DEGEN"
+        elseif d.cheat <= CHEAT_EPS and d.noship then
+            tag = "  <<HIT NOSHIP"
+        else
+            tag = "  <<HIT"
+        end
     elseif park_note then
         tag = "  ~park"
     end
@@ -843,13 +882,14 @@ function M.explore(args_str)
     end
 
     return string.format(
-        "seed=%d mode=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g steps=%d sr=%s tgt=%s%s%s%s",
+        "seed=%d mode=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g ship=%s/%s steps=%d sr=%s tgt=%s%s%s%s",
         seed, mode, exclude_void and "ex" or "in", exclude_source_sink and "ex" or "in", pins,
         use_quality and target_quality or "off", hops,
         tostring(solution.solver_state), built,
         d.recipes, d.active, d.near_zero, d.frac * 100,
         d.recipes_nv, d.frac_nv * 100,
-        d.cheat, steps, seed_recipe, target_label, closure_note, tag, parked)
+        d.cheat, d.has_initial and "i" or "-", d.has_final and "f" or "-",
+        steps, seed_recipe, target_label, closure_note, tag, parked)
 end
 
 ---Diagnostic: normalize a single quality-module line and report the slot count,
