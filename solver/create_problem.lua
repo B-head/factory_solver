@@ -555,6 +555,17 @@ function M.create_problem(solution_name, constraints, production_lines)
     local active_line_indices, inactive_recipe_variables = M.compute_active_lines(all_lines, constraints)
     problem.inactive_recipe_variables = inactive_recipe_variables
 
+    -- Materials the user pinned with a Constraint. A pinned material is a
+    -- genuine requested output even when an in-set recipe also consumes it, so
+    -- the produced+consumed branch below grants it a |final_sink| it would
+    -- otherwise only get as a terminal product -- otherwise the LP produces the
+    -- pinned amount only to dump it all back through the penalised
+    -- |surplus_sink|, and nothing actually leaves the factory.
+    local constrained_materials = {} ---@type table<string, true>
+    for _, c in ipairs(constraints) do
+        constrained_materials[tn.typed_name_to_variable_name(c)] = true
+    end
+
     -- Identify cycle materials that need external supply and seed reachability
     -- with them, so the |initial_source| we add downstream behaves like a raw
     -- input. Filter to materials not already reachable through the open
@@ -669,6 +680,22 @@ function M.create_problem(solution_name, constraints, production_lines)
             local elastic_name = "|surplus_sink|" .. constraint_name
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, -1)
+        end
+        -- A user-pinned material ships through a free |final_sink| even though
+        -- it is also consumed in-set: it is a requested output, not waste. The
+        -- terminal-product loop below only reaches materials that are never an
+        -- ingredient, so without this a pinned intermediate would have nowhere
+        -- to leave except the penalised |surplus_sink| and the solution would
+        -- make the pinned amount only to dump all of it back. A bridge-target
+        -- range variable is excluded for the same reason it gets no surplus_sink
+        -- above: it is a synthetic temperature relabelling, not a fluid that
+        -- physically leaves the factory, so letting it final_sink would drain a
+        -- range-constrained chain straight out instead of through its consumer.
+        if constrained_materials[constraint_name]
+            and not bridge_target_variables[constraint_name] then
+            local final_name = "|final_sink|" .. constraint_name
+            problem:add_objective(final_name, slack_cost)
+            problem:add_subject_term(final_name, constraint_name, -1)
         end
         -- Cycle entry points identified by find_deficit_materials get a
         -- |initial_source| at source_cost: they are the natural external

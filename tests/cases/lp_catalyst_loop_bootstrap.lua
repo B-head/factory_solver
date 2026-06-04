@@ -1,5 +1,6 @@
--- Two non-practical solutions on the pyanodon 'Nuc Sample' purex / plutonium
--- subset. Both are pinned against the practicality criterion the maintainer uses:
+-- Two formerly non-practical solutions on the pyanodon 'Nuc Sample' purex /
+-- plutonium subset, both now fixed. They pin the practicality criterion the
+-- maintainer uses:
 --
 --   A solution is very likely practical when it draws on at least one
 --   |initial_source| (a declared external import) AND empties at least one
@@ -13,8 +14,8 @@
 -- and not in the display. These recipes are verbatim from the in-game
 -- create_problem dump (power/pollution dropped -- the LP ignores them).
 --
--- The two cases fail for DIFFERENT reasons and are fixed by different changes;
--- NS2 is fixed today, NS1 is still xfail:
+-- The two cases failed for DIFFERENT reasons and are fixed by different changes;
+-- both pass today:
 --
 --   NS2 used to fabricate pu-238 via |shortage_source| because the antimony
 --   recycling loop never became reachable. The loop turns on a catalyst,
@@ -33,11 +34,14 @@
 --   (cf. lp_masslosing_cycle_import.lua).
 --
 --   NS1 pins an intermediate (sb-phosphate-1) that already has a consumer recipe
---   in the set, so create_problem routes the pinned output to |surplus_sink|
---   (penalized waste) and never gives it a |final_sink|. The solution makes
---   exactly 0.5/s and dumps all of it -- no product leaves. The catalyst fix
---   does NOT touch this (verified: still zero final_sink after it); a
---   user-pinned material needs to be final-sinkable in its own right.
+--   in the set, so create_problem used to route the pinned output to
+--   |surplus_sink| (penalized waste) and never give it a |final_sink|. The
+--   solution made exactly 0.5/s and dumped all of it -- no product left. FIXED
+--   separately from the catalyst seeding: create_problem now grants any material
+--   named in a Constraint its own |final_sink| even when an in-set recipe also
+--   consumes it (a user-pinned material is a requested output, not waste), with
+--   bridge-target range variables excluded since they are synthetic temperature
+--   relabellings, not fluids that physically leave.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
@@ -169,14 +173,13 @@ table.insert(cases, {
     end,
 })
 
--- NS1: pin an intermediate (sb-phosphate-1 upper 0.5). Today the solver makes
--- exactly 0.5/s and dumps all of it to |surplus_sink| -- no |final_sink|, so by
--- the criterion the solution is not practical. A user-pinned material should be
--- shippable as a genuine output. xfail until create_problem grants the pinned
--- material a final_sink (the catalyst fix does not address this).
+-- NS1: pin an intermediate (sb-phosphate-1 upper 0.5). The solver used to make
+-- exactly 0.5/s and dump all of it to |surplus_sink| -- no |final_sink|, so by
+-- the criterion the solution was not practical. A user-pinned material should be
+-- shippable as a genuine output, and now is: create_problem grants any
+-- Constraint-named material its own final_sink even when it is also consumed.
 table.insert(cases, {
     name = "pinned intermediate ships via final_sink instead of dumping as surplus (Nuc Sample 1)",
-    xfail = true,
     run = function()
         local lines = make_lines()
         local constraints = {
