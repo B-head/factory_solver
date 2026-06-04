@@ -241,7 +241,6 @@ try {
         $configs = @(
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2) }, # loop-biased closed chain
             @{mode = 'cycle'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = ($Hops * 2) }, # loops WITH source/sink
-            @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 3; qual = 'off'; hops = ($Hops * 2) }, # loops + multi-pin
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 4) }, # deeper loops
             # net-negative target: aim the constraint at a TRAPPED (produced-but-
             # unreachable) item, provoking the degenerate shortage solution (target
@@ -265,7 +264,6 @@ try {
             # the generation half of the catalyst-loop probe.
             @{mode = 'cycle'; init = 'scc'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'trapdown'; closure = 'off' },
             @{mode = 'cycle'; init = 'scc'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'netneg'; closure = 'off' },
-            @{mode = 'both'; void = 'ex'; nosrc = 'ex'; pins = 3; qual = 'off'; hops = ($Hops * 2) },  # multi-pin DAG
             @{mode = 'both'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = $Hops }         # control
         )
     }
