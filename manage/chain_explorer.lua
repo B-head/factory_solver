@@ -1045,6 +1045,17 @@ function M.explore(args_str)
     if built == 0 then
         return string.format("ERROR seed=%d no buildable lines (seed_recipe=%s)", seed, seed_recipe)
     end
+    -- With every technology researched a seeded SCC can be a huge biological /
+    -- recycling loop, and the IPM on a several-hundred-recipe sparse system costs
+    -- seconds per step over many steps -- a single solve can run 10+ minutes. Cap
+    -- the chain size and SKIP (reported, not silent) past it; the probe still
+    -- covers the small/medium loops where the interesting catalysts live.
+    local MAX_BUILT = 80
+    if built > MAX_BUILT then
+        return string.format(
+            "seed=%d mode=%s init=%s built=%d SKIPPED(chain too large > %d) sr=%s",
+            seed, mode, init, built, MAX_BUILT, seed_recipe)
+    end
 
     local target_label = ""
     if use_quality then
@@ -1167,7 +1178,10 @@ function M.explore(args_str)
                 seed, tostring(solve_err), seed_recipe, built)
         end
         steps = steps + 1
-        if steps > 1200 then
+        -- Bounded by MAX_BUILT above, so a step is cheap; this just caps a
+        -- non-converging case (reported as not-finished, a HIT) rather than
+        -- spinning. 600 leaves ample headroom over typical convergence (<200).
+        if steps > 600 then
             break
         end
     end
