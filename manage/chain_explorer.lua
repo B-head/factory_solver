@@ -642,6 +642,55 @@ local function pick_net_negative_item(recipe_names, only)
     return best
 end
 
+---Pick a target that DEMANDS a trapped material from downstream, rather than
+---targeting the trapped material itself (the netneg shape). Returns a pure-final
+---item product (no in-chain consumer) of some built recipe that consumes a
+---trapped item -- e.g. nuclear-sample, which consumes the trapped catalyst-loop
+---product pu-238. Targeting such a product forces its recipe to run (a pure-final
+---product gets a |final_sink|, never a |shortage_source|, so the LP cannot just
+---fabricate the target away), and running it demands the trapped ingredient,
+---which DOES get a |shortage_source| -- the partial-shortage HIT a user hits when
+---they pin a real end product over a catalyst loop. Distinct from netneg, which
+---targets the trap directly and so degenerates to "fabricate it, build nothing"
+---(DEGEN). Excludes products that are themselves consumed in-chain: those carry a
+---shortage hatch, letting the LP fabricate the target instead of running the
+---chain.
+---@param recipe_names string[] Built (line-backed) recipe names.
+---@param trapped table<string, true> Trapped item names (closure.trapped_items as a set).
+---@return string? item_name
+local function pick_trap_consumer_target(recipe_names, trapped)
+    local consumed = {} ---@type table<string, true>
+    for _, rn in ipairs(recipe_names) do
+        local rp = prototypes.recipe[rn]
+        if rp then
+            for _, ing in ipairs(rp.ingredients) do
+                if ing.type == "item" then consumed[ing.name] = true end
+            end
+        end
+    end
+    local sorted = {}
+    for _, rn in ipairs(recipe_names) do sorted[#sorted + 1] = rn end
+    table.sort(sorted)
+    for _, rn in ipairs(sorted) do
+        local rp = prototypes.recipe[rn]
+        if rp then
+            local consumes_trap = false
+            for _, ing in ipairs(rp.ingredients) do
+                if ing.type == "item" and trapped[ing.name] then consumes_trap = true; break end
+            end
+            if consumes_trap then
+                local finals = {}
+                for _, p in ipairs(rp.products) do
+                    if p.type == "item" and not consumed[p.name] then finals[#finals + 1] = p.name end
+                end
+                table.sort(finals)
+                if finals[1] then return finals[1] end
+            end
+        end
+    end
+    return nil
+end
+
 ---RCON entry point. Args string: "seed=N;hops=M;mode=both;void=ex". Builds one
 ---random chain, solves it, returns a single status line the launcher logs.
 ---  <<HIT  -> TRUE undesirable solution (non-convergence or cheat>0); investigate.
@@ -663,8 +712,15 @@ function M.explore(args_str)
     local target_quality = params.tq or "rare"
     -- target=recipe (default): pin the seed (+pins-1) recipes at 1/s.
     -- target=netneg: instead target a trapped (produced-but-unreachable) ITEM, to
-    -- provoke the mass-losing-loop / degenerate-shortage solution. Ignored in
-    -- quality mode, which has its own high-quality-item target.
+    -- provoke the mass-losing-loop / degenerate-shortage solution (DEGEN: target
+    -- fabricated, nothing built).
+    -- target=trapdown: target a pure-final item DOWNSTREAM of a trapped material
+    -- (a product whose recipe consumes the trap), forcing that recipe to run and
+    -- demand the trapped ingredient -- the partial-shortage HIT a user hits when
+    -- they pin a real end product over a catalyst loop (e.g. nuclear-sample over
+    -- the antimony loop). Both target modes are ignored in quality mode, which has
+    -- its own high-quality-item target, and both want a trapped material to exist
+    -- (pair with closure=off).
     local target_mode = params.target or "recipe"
     -- closure=off skips ingredient closure so the chain keeps its natural traps.
     -- netneg needs trapped materials; with closure on they are mostly bootstrapped
@@ -769,6 +825,25 @@ function M.explore(args_str)
             limit_amount_per_second = 1,
         })
         target_label = "neg:" .. neg_item
+    elseif target_mode == "trapdown" and closure and #closure.trapped_items > 0
+        and pick_trap_consumer_target(built_names, to_set(closure.trapped_items)) then
+        -- Target a pure-final item downstream of a trapped material, forcing the
+        -- recipe that consumes the trap to run (it cannot be fabricated away -- a
+        -- pure-final product gets a |final_sink|, not a shortage hatch), which then
+        -- demands the trapped ingredient and lands it on |shortage_source|. This is
+        -- the partial-shortage HIT (active recipes + cheat>0), the shape a user
+        -- sees pinning nuclear-sample over the antimony catalyst loop -- as opposed
+        -- to netneg's DEGEN (fabricate the trap directly, build nothing).
+        local down_item = pick_trap_consumer_target(built_names, to_set(closure.trapped_items))
+        ---@type Constraint
+        flib_table.insert(solution.constraints, {
+            type = "item",
+            name = down_item,
+            quality = "normal",
+            limit_type = "equal",
+            limit_amount_per_second = 1,
+        })
+        target_label = "trapdown:" .. down_item
     else
         -- Pin the seed recipe plus (pins-1) more built recipes. Multiple
         -- equal-pins impose simultaneous fixed throughputs that can fight over

@@ -252,6 +252,12 @@ try {
             # mass-losing loop -- the only shape that yields a trapped target.
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'netneg'; closure = 'off' },
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 4); target = 'netneg'; closure = 'off' },
+            # trap-downstream target: aim at a pure-final item whose recipe consumes
+            # a trapped material, so the chain RUNS and demands the trap (partial-
+            # shortage HIT), as opposed to netneg's fabricate-and-build-nothing
+            # DEGEN. Same closure=off so the traps survive to be consumed.
+            @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'trapdown'; closure = 'off' },
+            @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 4); target = 'trapdown'; closure = 'off' },
             @{mode = 'both'; void = 'ex'; nosrc = 'ex'; pins = 3; qual = 'off'; hops = ($Hops * 2) },  # multi-pin DAG
             @{mode = 'both'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = $Hops }         # control
         )
