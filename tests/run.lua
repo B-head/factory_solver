@@ -134,6 +134,7 @@ local case_files = {
     "lp_fuel_burnt_result",
     "lp_masslosing_cycle_import",
     "lp_catalyst_loop_bootstrap",
+    "lp_explorer_catalyst",
     "chain_reachability",
 }
 
