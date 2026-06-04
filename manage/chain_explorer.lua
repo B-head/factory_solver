@@ -298,6 +298,73 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
         return nil, nil, "no candidate recipes in this mod set"
     end
 
+    -- Normalize a prototype recipe into chain_reachability's shape, resolving the
+    -- FLT temperature sentinels (unset ingredient min/max come back as +-3.4e38)
+    -- and nil product temperatures against the fluid prototype's default/max.
+    -- Memoized: build_chain re-reads every recipe many times across closure.
+    local FLT = 1e30
+    local norm_cache = {}
+    local function norm_recipe(rn)
+        local cached = norm_cache[rn]
+        if cached ~= nil then return cached or nil end
+        local rp = prototypes.recipe[rn]
+        if not rp then norm_cache[rn] = false; return nil end
+        local ings, prods = {}, {}
+        for _, ing in ipairs(rp.ingredients) do
+            if ing.type == "item" then
+                ings[#ings + 1] = { item = ing.name }
+            else
+                local fp = prototypes.fluid[ing.name]
+                local lo, hi = ing.minimum_temperature, ing.maximum_temperature
+                if lo == nil or lo <= -FLT then lo = fp and fp.default_temperature or 0 end
+                if hi == nil or hi >= FLT then hi = (fp and fp.max_temperature)
+                    or (fp and fp.default_temperature) or 0 end
+                ings[#ings + 1] = { fluid = ing.name, lo = lo, hi = hi }
+            end
+        end
+        for _, p in ipairs(rp.products) do
+            if p.type == "item" then
+                prods[#prods + 1] = { item = p.name }
+            else
+                local fp = prototypes.fluid[p.name]
+                local t = p.temperature
+                if t == nil then t = (fp and fp.default_temperature) or 0 end
+                prods[#prods + 1] = { fluid = p.name, t = t }
+            end
+        end
+        local n = { ings = ings, prods = prods }
+        norm_cache[rn] = n
+        return n
+    end
+
+    -- Temperature-aware reachability over a recipe-name set (the selected chain,
+    -- or the whole candidate universe). chain_reachability holds the pure model.
+    ---@param recipe_set table<string, true>
+    ---@return ChainReach
+    local function reach_for(recipe_set)
+        local list = {}
+        for rn in pairs(recipe_set) do
+            local n = norm_recipe(rn)
+            if n then list[#list + 1] = n end
+        end
+        return chain_reachability.reachable(list)
+    end
+
+    -- Reachability over the whole candidate universe, memoized: it is the
+    -- heaviest pass and is needed both to bias init=scc toward catalyst-bearing
+    -- SCCs and to classify unresolved materials as catalysts vs generator dead
+    -- ends. A material universe-unreachable here is one no chain can craft from
+    -- raws -- a genuine import (a net-zero catalyst), not a closure omission.
+    local _universe_reach
+    local function get_universe_reach()
+        if not _universe_reach then
+            local cand_set = {}
+            for _, rn in ipairs(candidates) do cand_set[rn] = true end
+            _universe_reach = reach_for(cand_set)
+        end
+        return _universe_reach
+    end
+
     local selected = {}
     local order = {}
 
@@ -327,9 +394,30 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     -- own; subsequent hops then grow feeders and consumers around it. Falls back
     -- to a single random seed recipe when the set has no cyclic SCC or the chosen
     -- SCC yields no loop recipe.
+    --
+    -- The cyclic SCCs are FILTERED to those that bear a true catalyst: at least
+    -- one item the universe cannot craft from raws (every producer needs the loop
+    -- back). pyanodon's recipe graph is dominated by trivial self-loops (a recipe
+    -- consuming and re-emitting one material) that always have an external
+    -- producer and so heal themselves the moment growth pulls it in -- picking
+    -- uniformly from ALL cyclic SCCs lands on those and never on the antimony-loop
+    -- shape. Restricting to catalyst-bearing SCCs is what makes the probe fire.
     local seed_recipe
     if init == "scc" then
-        local cyclic = find_cyclic_sccs(candidates)
+        local all_cyclic = find_cyclic_sccs(candidates)
+        local universe = get_universe_reach()
+        local cyclic = {}
+        for _, scc in ipairs(all_cyclic) do
+            local bears_catalyst = false
+            for _, m in ipairs(scc) do
+                local item = m:match("^item/(.+)$")
+                if item and chain_reachability.item_trapped(universe, item) then
+                    bears_catalyst = true
+                    break
+                end
+            end
+            if bears_catalyst then cyclic[#cyclic + 1] = scc end
+        end
         if #cyclic > 0 then
             local scc = cyclic[rng(1, #cyclic)]
             local scc_set = {}
@@ -431,68 +519,12 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
         end
     end
 
-    -- Reachability of every material from base resources THROUGH the current
-    -- selected recipe set, mirroring solver/create_problem.compute_reachable_
-    -- materials AND its temperature bridges so the generator's notion of "this
-    -- material has a real producer chain" matches the LP's exactly. A material
-    -- consumed but produced by no selected recipe is a raw seed (the LP
-    -- |initial_source|s it: ores, water, ...); a recipe's products only become
-    -- reachable once ALL its ingredients are reachable; and -- the temperature
-    -- part -- a fluid ingredient whose acceptance range no produced point falls
-    -- inside is ALSO a raw seed, because no bridge can make it (this is how a
-    -- temperature gap breaks an otherwise-cyclic chain, by importing the
-    -- out-of-range fluid). Materials are keyed type/name for items and
-    -- name@temperature for fluids; chain_reachability holds the pure model.
-
-    -- Normalize a prototype recipe into chain_reachability's shape, resolving the
-    -- FLT temperature sentinels (unset ingredient min/max come back as +-3.4e38)
-    -- and nil product temperatures against the fluid prototype's default/max.
-    -- Memoized: build_chain re-reads every recipe many times across closure.
-    local FLT = 1e30
-    local norm_cache = {}
-    local function norm_recipe(rn)
-        local cached = norm_cache[rn]
-        if cached ~= nil then return cached or nil end
-        local rp = prototypes.recipe[rn]
-        if not rp then norm_cache[rn] = false; return nil end
-        local ings, prods = {}, {}
-        for _, ing in ipairs(rp.ingredients) do
-            if ing.type == "item" then
-                ings[#ings + 1] = { item = ing.name }
-            else
-                local fp = prototypes.fluid[ing.name]
-                local lo, hi = ing.minimum_temperature, ing.maximum_temperature
-                if lo == nil or lo <= -FLT then lo = fp and fp.default_temperature or 0 end
-                if hi == nil or hi >= FLT then hi = (fp and fp.max_temperature)
-                    or (fp and fp.default_temperature) or 0 end
-                ings[#ings + 1] = { fluid = ing.name, lo = lo, hi = hi }
-            end
-        end
-        for _, p in ipairs(rp.products) do
-            if p.type == "item" then
-                prods[#prods + 1] = { item = p.name }
-            else
-                local fp = prototypes.fluid[p.name]
-                local t = p.temperature
-                if t == nil then t = (fp and fp.default_temperature) or 0 end
-                prods[#prods + 1] = { fluid = p.name, t = t }
-            end
-        end
-        local n = { ings = ings, prods = prods }
-        norm_cache[rn] = n
-        return n
-    end
-
-    ---@param recipe_set table<string, true> Recipe-name set to compute over (the selected chain, or the whole candidate universe for catalyst classification).
-    ---@return ChainReach
-    local function reach_for(recipe_set)
-        local list = {}
-        for rn in pairs(recipe_set) do
-            local n = norm_recipe(rn)
-            if n then list[#list + 1] = n end
-        end
-        return chain_reachability.reachable(list)
-    end
+    -- Reachability (norm_recipe / reach_for / get_universe_reach) is defined
+    -- above, before seeding, because init=scc needs universe reachability to pick
+    -- a catalyst-bearing SCC. It mirrors solver/create_problem's temperature-aware
+    -- model: an item or in-range fluid produced by no reached recipe is
+    -- unreachable, while a fluid whose acceptance range no produced point falls
+    -- inside is a raw seed (the temperature gap that breaks a cycle by import).
 
     -- Ingredient closure: ensure every consumed material is reachable from base
     -- resources, not merely "produced somewhere" (which a cyclic by-product
@@ -646,9 +678,7 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     -- something to classify; the universe pass is the heaviest step here.
     local catalysts = {}
     if #unresolved_entries > 0 then
-        local cand_set = {}
-        for _, n in ipairs(candidates) do cand_set[n] = true end
-        local universe = reach_for(cand_set)
+        local universe = get_universe_reach()
         for _, e in ipairs(unresolved_entries) do
             if not universe.ing_ok(e.ing) then catalysts[#catalysts + 1] = e.key end
         end
