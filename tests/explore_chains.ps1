@@ -258,6 +258,13 @@ try {
             # DEGEN. Same closure=off so the traps survive to be consumed.
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'trapdown'; closure = 'off' },
             @{mode = 'cycle'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 4); target = 'trapdown'; closure = 'off' },
+            # SCC-seeded: plant a whole cyclic material SCC up front (random growth
+            # almost never closes a catalyst loop), then demand it from downstream
+            # (trapdown) or directly (netneg). closure=off so the loop's own
+            # catalyst stays trapped instead of being bootstrapped away. This is
+            # the generation half of the catalyst-loop probe.
+            @{mode = 'cycle'; init = 'scc'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'trapdown'; closure = 'off' },
+            @{mode = 'cycle'; init = 'scc'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 2); target = 'netneg'; closure = 'off' },
             @{mode = 'both'; void = 'ex'; nosrc = 'ex'; pins = 3; qual = 'off'; hops = ($Hops * 2) },  # multi-pin DAG
             @{mode = 'both'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = $Hops }         # control
         )
@@ -265,13 +272,14 @@ try {
     foreach ($cfg in $configs) {
         $tgt = if ($cfg.target) { $cfg.target } else { 'recipe' }
         $cls = if ($cfg.closure) { $cfg.closure } else { 'on' }
-        $banner = "config mode=$($cfg.mode) void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) target=$tgt closure=$cls hops=$($cfg.hops)"
+        $ini = if ($cfg.init) { $cfg.init } else { 'recipe' }
+        $banner = "config mode=$($cfg.mode) init=$ini void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) target=$tgt closure=$cls hops=$($cfg.hops)"
         Write-Host "`n--- $banner ---"
         "## $banner" | Out-File -FilePath $HitLog -Append -Encoding utf8
         for ($i = 0; $i -lt $Seeds; $i++) {
             $s = $StartSeed + $i
             if ($proc.HasExited) { throw "factorio exited mid-run" }
-            $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual);target=$tgt;closure=$cls"
+            $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);init=$ini;void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual);target=$tgt;closure=$cls"
             $cmd = "/silent-command rcon.print(remote.call('$iface','explore','$exploreArgs'))"
             $r = Invoke-RconCommand -Stream $stream -Command $cmd
             if ($r -match '<<HIT') {

@@ -135,18 +135,124 @@ local function make_line(recipe_name, use_quality)
     }
 end
 
----Grow a connected chain from a random seed recipe.
+---Find cyclic strongly-connected components of the material graph induced by
+---`recipe_names`. An edge ingredient -> product exists for every (ingredient,
+---product) pair of every recipe; a cyclic SCC -- multi-node, or a single node
+---with a self-loop -- is a set of materials that mutually depend, the structural
+---signature of a recycling / catalytic / mutual-conversion loop. Materials are
+---keyed "type/name" to match compute_reachable. Seeding a chain from one of these
+---is how the explorer provokes catalyst-loop topologies that random growth almost
+---never assembles (the 2026-06-03 "random can't create traps" finding). Tarjan is
+---iterative to avoid Lua's C-stack limit on the pyanodon-scale graph; sorted node
+---/ neighbour iteration keeps the output deterministic for a given recipe set.
+---@param recipe_names string[]
+---@return string[][] sccs Each a sorted list of "type/name" material keys.
+local function find_cyclic_sccs(recipe_names)
+    local adj = {} ---@type table<string, table<string, true>>
+    local function ensure(v) if not adj[v] then adj[v] = {} end end
+    for _, rn in ipairs(recipe_names) do
+        local rp = prototypes.recipe[rn]
+        if rp then
+            for _, ing in ipairs(rp.ingredients) do
+                local ik = ing.type .. "/" .. ing.name
+                ensure(ik)
+                for _, p in ipairs(rp.products) do
+                    local pk = p.type .. "/" .. p.name
+                    ensure(pk)
+                    adj[ik][pk] = true
+                end
+            end
+            for _, p in ipairs(rp.products) do ensure(p.type .. "/" .. p.name) end
+        end
+    end
+
+    local nodes = {}
+    for k in pairs(adj) do nodes[#nodes + 1] = k end
+    table.sort(nodes)
+
+    local index_counter, stack, on_stack = 0, {}, {}
+    local node_index, node_lowlink = {}, {}
+    local sccs = {}
+
+    local function strongconnect(start)
+        local call = { { node = start, idx = 0, phase = "enter" } }
+        while #call > 0 do
+            local fr = call[#call]
+            local v = fr.node
+            if fr.phase == "enter" then
+                node_index[v] = index_counter
+                node_lowlink[v] = index_counter
+                index_counter = index_counter + 1
+                stack[#stack + 1] = v
+                on_stack[v] = true
+                local nb = {}
+                for w in pairs(adj[v] or {}) do nb[#nb + 1] = w end
+                table.sort(nb)
+                fr.nb = nb
+                fr.phase = "loop"
+            elseif fr.phase == "child" then
+                local w = fr.pending
+                if node_lowlink[w] < node_lowlink[v] then node_lowlink[v] = node_lowlink[w] end
+                fr.phase = "loop"
+            end
+            if fr.phase == "loop" then
+                fr.idx = fr.idx + 1
+                if fr.idx > #fr.nb then
+                    if node_lowlink[v] == node_index[v] then
+                        local comp = {}
+                        repeat
+                            local w = stack[#stack]
+                            stack[#stack] = nil
+                            on_stack[w] = nil
+                            comp[#comp + 1] = w
+                        until w == v
+                        table.sort(comp)
+                        sccs[#sccs + 1] = comp
+                    end
+                    call[#call] = nil
+                else
+                    local w = fr.nb[fr.idx]
+                    if node_index[w] == nil then
+                        fr.phase = "child"
+                        fr.pending = w
+                        call[#call + 1] = { node = w, idx = 0, phase = "enter" }
+                    elseif on_stack[w] and node_index[w] < node_lowlink[v] then
+                        node_lowlink[v] = node_index[w]
+                    end
+                end
+            end
+        end
+    end
+
+    for _, v in ipairs(nodes) do
+        if node_index[v] == nil then strongconnect(v) end
+    end
+
+    local cyclic = {}
+    for _, comp in ipairs(sccs) do
+        local is_cyclic = #comp > 1
+        if not is_cyclic then
+            local v = comp[1]
+            is_cyclic = (adj[v] and adj[v][v]) == true
+        end
+        if is_cyclic then cyclic[#cyclic + 1] = comp end
+    end
+    return cyclic
+end
+
+---Grow a connected chain from a seed.
 ---@param seed integer
 ---@param hops integer How many growth steps to attempt.
 ---@param mode string "both" (default) | "up" (upstream only) | "down" (downstream only) | "cycle" (both, preferring loop-closing candidates).
 ---@param exclude_void boolean Drop pyanodon *-pyvoid (waste/disposal) recipes from seeds and growth.
 ---@param exclude_source_sink boolean Drop recipes with no ingredients (source-like) or no products (sink-like).
 ---@param do_close boolean? Run ingredient closure (default true). Pass false to keep the chain's natural traps -- mass-losing-loop materials stay unreachable, which is what the netneg target mode wants to provoke a degenerate shortage solution.
+---@param init string? Seeding strategy: "recipe" (default, random seed recipe) or "scc" (seed with all cycle recipes of a random cyclic material SCC, so a catalyst loop is present from the start; falls back to a random seed when the recipe set has no cyclic SCC).
 ---@return string? seed_recipe nil on failure.
 ---@return string[]? order Selected recipe names in insertion order (nil on failure).
 ---@return string? err Error message, set when seed_recipe is nil.
 ---@return { added: integer, closed: boolean, unresolved: string[], trapped_items: string[] }? closure Ingredient-closure stats plus trapped_items = produced-but-unreachable items (the degenerate-shortage targets). nil on failure.
-function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close)
+function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close, init)
     -- Factorio's create_random_generator maps small seed differences to an
     -- IDENTICAL first draw (verified live: seeds 1/2/3/7/99 all yield 10580),
     -- and warming the generator does not help -- the raw seed barely reaches the
@@ -189,9 +295,8 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
         return nil, nil, "no candidate recipes in this mod set"
     end
 
-    local seed_recipe = candidates[rng(1, #candidates)]
-    local selected = { [seed_recipe] = true }
-    local order = { seed_recipe }
+    local selected = {}
+    local order = {}
 
     -- Materials touched by selected recipes. In "cycle" mode the growth step
     -- prefers candidates that reconnect to these (closing loops) instead of
@@ -203,7 +308,52 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
         for _, ing in ipairs(recipe_proto.ingredients) do selected_materials[ing.name] = true end
         for _, prod in ipairs(recipe_proto.products) do selected_materials[prod.name] = true end
     end
-    touch(prototypes.recipe[seed_recipe])
+    local function add_recipe(name)
+        if not selected[name] then
+            selected[name] = true
+            order[#order + 1] = name
+            touch(prototypes.recipe[name])
+        end
+    end
+
+    -- Seeding strategy. init="scc" seeds the chain with EVERY cycle recipe of one
+    -- randomly-chosen cyclic material SCC -- a recipe that both consumes and
+    -- produces an SCC material, i.e. one of the loop's own edges. This plants a
+    -- complete recycling / catalytic loop up front (the antimony purex loop, a
+    -- kovarex-style cycle, ...) that random growth essentially never closes on its
+    -- own; subsequent hops then grow feeders and consumers around it. Falls back
+    -- to a single random seed recipe when the set has no cyclic SCC or the chosen
+    -- SCC yields no loop recipe.
+    local seed_recipe
+    if init == "scc" then
+        local cyclic = find_cyclic_sccs(candidates)
+        if #cyclic > 0 then
+            local scc = cyclic[rng(1, #cyclic)]
+            local scc_set = {}
+            for _, m in ipairs(scc) do scc_set[m] = true end
+            local loop_recipes = {}
+            for _, rn in ipairs(candidates) do
+                local rp = prototypes.recipe[rn]
+                if rp then
+                    local cons, prod = false, false
+                    for _, ing in ipairs(rp.ingredients) do
+                        if scc_set[ing.type .. "/" .. ing.name] then cons = true; break end
+                    end
+                    for _, p in ipairs(rp.products) do
+                        if scc_set[p.type .. "/" .. p.name] then prod = true; break end
+                    end
+                    if cons and prod then loop_recipes[#loop_recipes + 1] = rn end
+                end
+            end
+            table.sort(loop_recipes)
+            for _, rn in ipairs(loop_recipes) do add_recipe(rn) end
+            seed_recipe = order[1]
+        end
+    end
+    if not seed_recipe then
+        seed_recipe = candidates[rng(1, #candidates)]
+        add_recipe(seed_recipe)
+    end
 
     for _ = 1, hops do
         local base = order[rng(1, #order)]
@@ -726,6 +876,10 @@ function M.explore(args_str)
     -- netneg needs trapped materials; with closure on they are mostly bootstrapped
     -- away (closure's whole job), so closure=off yields far more degenerate cases.
     local do_close = params.closure ~= "off"
+    -- init=scc seeds the chain from a cyclic material SCC so a recycling /
+    -- catalytic loop is present from the start (random growth almost never closes
+    -- one). init=recipe (default) seeds from a single random recipe.
+    local init = params.init or "recipe"
 
     save.init_force_data(FORCE_INDEX)
     save.init_player_data(PLAYER_INDEX)
@@ -745,7 +899,7 @@ function M.explore(args_str)
     end
 
     local ok_build, seed_recipe, order, err, closure =
-        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close)
+        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close, init)
     if not ok_build then
         return string.format("ERROR seed=%d build raised: %s", seed, tostring(seed_recipe))
     end
@@ -957,8 +1111,8 @@ function M.explore(args_str)
     end
 
     return string.format(
-        "seed=%d mode=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g ship=%s/%s steps=%d sr=%s tgt=%s%s%s%s",
-        seed, mode, exclude_void and "ex" or "in", exclude_source_sink and "ex" or "in", pins,
+        "seed=%d mode=%s init=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g ship=%s/%s steps=%d sr=%s tgt=%s%s%s%s",
+        seed, mode, init, exclude_void and "ex" or "in", exclude_source_sink and "ex" or "in", pins,
         use_quality and target_quality or "off", hops,
         tostring(solution.solver_state), built,
         d.recipes, d.active, d.near_zero, d.frac * 100,
