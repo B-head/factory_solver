@@ -251,7 +251,7 @@ end
 ---@return string? seed_recipe nil on failure.
 ---@return string[]? order Selected recipe names in insertion order (nil on failure).
 ---@return string? err Error message, set when seed_recipe is nil.
----@return { added: integer, closed: boolean, unresolved: string[], trapped_items: string[] }? closure Ingredient-closure stats plus trapped_items = produced-but-unreachable items (the degenerate-shortage targets). nil on failure.
+---@return { added: integer, closed: boolean, unresolved: string[], trapped_items: string[], catalysts: string[] }? closure Ingredient-closure stats; trapped_items = produced-but-unreachable items (the degenerate-shortage targets); catalysts = unresolved materials also unreachable universe-wide (the solver must import these, so a cheat beside one is a real finding, not a generator dead end). nil on failure.
 function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close, init)
     -- Factorio's create_random_generator maps small seed differences to an
     -- IDENTICAL first draw (verified live: seeds 1/2/3/7/99 all yield 10580),
@@ -439,17 +439,18 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     -- burner-mining-drill-recycling dead end that the old "is it produced at
     -- all" test missed (the by-product made the material look craftable while it
     -- was only makeable from inside the cycle).
+    ---@param recipe_set table<string, true> Recipe-name set to compute over (the selected chain, or the whole candidate universe for catalyst classification).
     ---@return table<string, true> reachable Set of "type/name" keys.
-    local function compute_reachable()
+    local function compute_reachable(recipe_set)
         local produced = {}
-        for rn in pairs(selected) do
+        for rn in pairs(recipe_set) do
             local rp2 = prototypes.recipe[rn]
             if rp2 then
                 for _, p in ipairs(rp2.products) do produced[p.type .. "/" .. p.name] = true end
             end
         end
         local reachable = {}
-        for rn in pairs(selected) do
+        for rn in pairs(recipe_set) do
             local rp2 = prototypes.recipe[rn]
             if rp2 then
                 for _, ing in ipairs(rp2.ingredients) do
@@ -461,7 +462,7 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
         local changed = true
         while changed do
             changed = false
-            for rn in pairs(selected) do
+            for rn in pairs(recipe_set) do
                 local rp2 = prototypes.recipe[rn]
                 if rp2 then
                     local all_in = true
@@ -502,7 +503,7 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     local closure_added = 0
     local closure_closed = false
     for _ = 1, (do_close == false and 0 or 200) do
-        local reachable = compute_reachable()
+        local reachable = compute_reachable(selected)
 
         -- Consumed materials not reachable from base. Raw resources never appear
         -- here: with no in-chain producer they are seeds, hence reachable.
@@ -573,17 +574,25 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
         end
     end
 
-    -- Final reachability snapshot, used two ways:
-    --   unresolved   = consumed-but-unreachable materials. Closure could not
-    --                  bottom these out; a resulting cheat>0 next to a non-empty
-    --                  list is a generator dead end, not a solver finding (no
-    --                  silent cap -- the leftovers are named).
+    -- Final reachability snapshot, used three ways:
+    --   unresolved    = consumed-but-unreachable materials. Closure could not
+    --                   bottom these out (no silent cap -- the leftovers are named).
     --   trapped_items = produced-but-unreachable ITEMS. These are the exact
-    --                  degenerate-shortage targets: an item some recipe makes yet
-    --                  no non-negative recipe scaling can produce net of (its
-    --                  producers are all inside a mass-losing loop). The netneg
-    --                  target mode aims the constraint at one of these.
-    local reachable = compute_reachable()
+    --                   degenerate-shortage targets: an item some recipe makes yet
+    --                   no non-negative recipe scaling can produce net of (its
+    --                   producers are all inside a mass-losing loop). The netneg
+    --                   target mode aims the constraint at one of these.
+    --   catalysts     = the subset of unresolved that is ALSO unreachable in the
+    --                   whole candidate universe (below): no external chain can
+    --                   make it, so it is a genuine catalyst that the solver should
+    --                   IMPORT via |initial_source| (the antimony sb-oxide net-zero
+    --                   catalyst). A cheat next to a catalyst is a REAL solver
+    --                   finding (it fabricated downstream instead of importing the
+    --                   catalyst), NOT the "generator left the chain incomplete"
+    --                   dead end that an unresolved-but-universe-reachable material
+    --                   signals. The two are otherwise indistinguishable in the
+    --                   unresolved list, and the latter would wrongly be dismissed.
+    local reachable = compute_reachable(selected)
     local unresolved, seen_u = {}, {}
     local trapped_items, seen_t = {}, {}
     for rn in pairs(selected) do
@@ -607,8 +616,27 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     table.sort(unresolved)
     table.sort(trapped_items)
 
+    -- Classify the unresolved materials. A material that is also unreachable in
+    -- the FULL candidate universe (every producer transitively needs it back, the
+    -- catalyst signature) is something the solver must import -- a real finding,
+    -- not a dead end. One reachable in the universe but not in this chain is a
+    -- generator omission (closure failed to pull the producer in). Only built when
+    -- there is something to classify; the universe reachability pass is the
+    -- heaviest step here.
+    local catalysts = {}
+    if #unresolved > 0 then
+        local cand_set = {}
+        for _, n in ipairs(candidates) do cand_set[n] = true end
+        local universe_reachable = compute_reachable(cand_set)
+        for _, key in ipairs(unresolved) do
+            if not universe_reachable[key] then catalysts[#catalysts + 1] = key end
+        end
+        table.sort(catalysts)
+    end
+
     return seed_recipe, order, nil,
-        { added = closure_added, closed = closure_closed, unresolved = unresolved, trapped_items = trapped_items }
+        { added = closure_added, closed = closure_closed, unresolved = unresolved,
+            trapped_items = trapped_items, catalysts = catalysts }
 end
 
 ---Inspect a solved variable set. Reports the TRUE-signal cheat mass plus the
@@ -1069,6 +1097,7 @@ function M.explore(args_str)
     -- target conjured, nothing built); NOSHIP (cheat=0 but no |final_sink| -- a
     -- factory that imports and runs yet voids all output); plain HIT (a partial
     -- shortage with some real flow). All carry "<<HIT" so the launcher matches.
+    local cats = (closure and closure.catalysts) or {}
     local tag = ""
     if true_hit then
         if d.degenerate then
@@ -1077,6 +1106,14 @@ function M.explore(args_str)
             tag = "  <<HIT NOSHIP"
         else
             tag = "  <<HIT"
+        end
+        -- A cheat sitting on top of a genuine catalyst is a SOLVER finding (the LP
+        -- fabricated a material downstream of the catalyst instead of importing
+        -- the catalyst), not the generator-incompleteness dead end that an
+        -- unclosed-but-universe-reachable material is. Mark it so it is not
+        -- dismissed with the ordinary unclosed cheats.
+        if d.cheat > CHEAT_EPS and #cats > 0 then
+            tag = tag .. " CATALYST"
         end
     elseif park_note then
         tag = "  ~park"
@@ -1089,9 +1126,10 @@ function M.explore(args_str)
 
     -- Closure note: how many bootstrap producers the generator had to add, and
     -- (when it could not bottom the chain out at raw resources) which materials
-    -- stayed unreachable. A cheat>0 next to a non-empty unclosed set is a
-    -- generator dead end, not a solver weakness -- this is the disambiguation
-    -- the reachability rework exists to provide.
+    -- stayed unreachable. An unclosed material that IS reachable universe-wide is
+    -- a generator dead end (closure missed a producer the mod set has); one that
+    -- is NOT (a catalyst, reported separately below) is a real import the solver
+    -- must handle. The reachability rework provides this disambiguation.
     local closure_note = ""
     if closure then
         if not do_close then
@@ -1109,16 +1147,24 @@ function M.explore(args_str)
             closure_note = string.format(" closure=add%d", closure.added)
         end
     end
+    -- Catalysts (unresolved AND universe-unreachable): the materials the solver
+    -- should import via |initial_source| but may instead fabricate downstream.
+    -- Surfaced always when present -- this is the load-bearing signal that a
+    -- cheat here is a solver finding, not a generator artifact.
+    local catalyst_note = ""
+    if #cats > 0 then
+        catalyst_note = " catalyst={" .. table.concat(cats, ",") .. "}"
+    end
 
     return string.format(
-        "seed=%d mode=%s init=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g ship=%s/%s steps=%d sr=%s tgt=%s%s%s%s",
+        "seed=%d mode=%s init=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g ship=%s/%s steps=%d sr=%s tgt=%s%s%s%s%s",
         seed, mode, init, exclude_void and "ex" or "in", exclude_source_sink and "ex" or "in", pins,
         use_quality and target_quality or "off", hops,
         tostring(solution.solver_state), built,
         d.recipes, d.active, d.near_zero, d.frac * 100,
         d.recipes_nv, d.frac_nv * 100,
         d.cheat, d.has_initial and "i" or "-", d.has_final and "f" or "-",
-        steps, seed_recipe, target_label, closure_note, tag, parked)
+        steps, seed_recipe, target_label, closure_note, catalyst_note, tag, parked)
 end
 
 ---Diagnostic: normalize a single quality-module line and report the slot count,
