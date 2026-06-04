@@ -34,6 +34,7 @@ local relation = require "manage/relation"
 local save = require "manage/save"
 local pre_solve = require "manage/pre_solve"
 local tn = require "manage/typed_name"
+local chain_reachability = require "manage/chain_reachability"
 
 local log = fs_log.for_module("chain_explorer")
 
@@ -140,8 +141,10 @@ end
 ---product) pair of every recipe; a cyclic SCC -- multi-node, or a single node
 ---with a self-loop -- is a set of materials that mutually depend, the structural
 ---signature of a recycling / catalytic / mutual-conversion loop. Materials are
----keyed "type/name" to match compute_reachable. Seeding a chain from one of these
----is how the explorer provokes catalyst-loop topologies that random growth almost
+---keyed "type/name" (temperature-agnostic -- a loop is a loop regardless of the
+---fluid temperatures on its edges; the temperature-aware reach_for then decides
+---whether it is actually trapped). Seeding a chain from one of these is how the
+---explorer provokes catalyst-loop topologies that random growth almost
 ---never assembles (the 2026-06-03 "random can't create traps" finding). Tarjan is
 ---iterative to avoid Lua's C-stack limit on the pyanodon-scale graph; sorted node
 ---/ neighbour iteration keeps the output deterministic for a given recipe set.
@@ -430,61 +433,65 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
 
     -- Reachability of every material from base resources THROUGH the current
     -- selected recipe set, mirroring solver/create_problem.compute_reachable_
-    -- materials so the generator's notion of "this material has a real producer
-    -- chain" matches the LP's exactly. A material consumed but produced by no
-    -- selected recipe is a raw seed (the LP |initial_source|s it: ores, water,
-    -- ...); a recipe's products only become reachable once ALL its ingredients
-    -- are reachable. Crucially, a by-product of a cyclic recipe is NOT reachable
-    -- until the cycle gains an external entry -- which is the stone-furnace <-
-    -- burner-mining-drill-recycling dead end that the old "is it produced at
-    -- all" test missed (the by-product made the material look craftable while it
-    -- was only makeable from inside the cycle).
+    -- materials AND its temperature bridges so the generator's notion of "this
+    -- material has a real producer chain" matches the LP's exactly. A material
+    -- consumed but produced by no selected recipe is a raw seed (the LP
+    -- |initial_source|s it: ores, water, ...); a recipe's products only become
+    -- reachable once ALL its ingredients are reachable; and -- the temperature
+    -- part -- a fluid ingredient whose acceptance range no produced point falls
+    -- inside is ALSO a raw seed, because no bridge can make it (this is how a
+    -- temperature gap breaks an otherwise-cyclic chain, by importing the
+    -- out-of-range fluid). Materials are keyed type/name for items and
+    -- name@temperature for fluids; chain_reachability holds the pure model.
+
+    -- Normalize a prototype recipe into chain_reachability's shape, resolving the
+    -- FLT temperature sentinels (unset ingredient min/max come back as +-3.4e38)
+    -- and nil product temperatures against the fluid prototype's default/max.
+    -- Memoized: build_chain re-reads every recipe many times across closure.
+    local FLT = 1e30
+    local norm_cache = {}
+    local function norm_recipe(rn)
+        local cached = norm_cache[rn]
+        if cached ~= nil then return cached or nil end
+        local rp = prototypes.recipe[rn]
+        if not rp then norm_cache[rn] = false; return nil end
+        local ings, prods = {}, {}
+        for _, ing in ipairs(rp.ingredients) do
+            if ing.type == "item" then
+                ings[#ings + 1] = { item = ing.name }
+            else
+                local fp = prototypes.fluid[ing.name]
+                local lo, hi = ing.minimum_temperature, ing.maximum_temperature
+                if lo == nil or lo <= -FLT then lo = fp and fp.default_temperature or 0 end
+                if hi == nil or hi >= FLT then hi = (fp and fp.max_temperature)
+                    or (fp and fp.default_temperature) or 0 end
+                ings[#ings + 1] = { fluid = ing.name, lo = lo, hi = hi }
+            end
+        end
+        for _, p in ipairs(rp.products) do
+            if p.type == "item" then
+                prods[#prods + 1] = { item = p.name }
+            else
+                local fp = prototypes.fluid[p.name]
+                local t = p.temperature
+                if t == nil then t = (fp and fp.default_temperature) or 0 end
+                prods[#prods + 1] = { fluid = p.name, t = t }
+            end
+        end
+        local n = { ings = ings, prods = prods }
+        norm_cache[rn] = n
+        return n
+    end
+
     ---@param recipe_set table<string, true> Recipe-name set to compute over (the selected chain, or the whole candidate universe for catalyst classification).
-    ---@return table<string, true> reachable Set of "type/name" keys.
-    local function compute_reachable(recipe_set)
-        local produced = {}
+    ---@return ChainReach
+    local function reach_for(recipe_set)
+        local list = {}
         for rn in pairs(recipe_set) do
-            local rp2 = prototypes.recipe[rn]
-            if rp2 then
-                for _, p in ipairs(rp2.products) do produced[p.type .. "/" .. p.name] = true end
-            end
+            local n = norm_recipe(rn)
+            if n then list[#list + 1] = n end
         end
-        local reachable = {}
-        for rn in pairs(recipe_set) do
-            local rp2 = prototypes.recipe[rn]
-            if rp2 then
-                for _, ing in ipairs(rp2.ingredients) do
-                    local key = ing.type .. "/" .. ing.name
-                    if not produced[key] then reachable[key] = true end
-                end
-            end
-        end
-        local changed = true
-        while changed do
-            changed = false
-            for rn in pairs(recipe_set) do
-                local rp2 = prototypes.recipe[rn]
-                if rp2 then
-                    local all_in = true
-                    for _, ing in ipairs(rp2.ingredients) do
-                        if not reachable[ing.type .. "/" .. ing.name] then
-                            all_in = false
-                            break
-                        end
-                    end
-                    if all_in then
-                        for _, p in ipairs(rp2.products) do
-                            local key = p.type .. "/" .. p.name
-                            if not reachable[key] then
-                                reachable[key] = true
-                                changed = true
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        return reachable
+        return chain_reachability.reachable(list)
     end
 
     -- Ingredient closure: ensure every consumed material is reachable from base
@@ -503,17 +510,22 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     local closure_added = 0
     local closure_closed = false
     for _ = 1, (do_close == false and 0 or 200) do
-        local reachable = compute_reachable(selected)
+        local reach = reach_for(selected)
 
-        -- Consumed materials not reachable from base. Raw resources never appear
-        -- here: with no in-chain producer they are seeds, hence reachable.
+        -- Consumed materials not satisfied from base (temperature-aware). Raw
+        -- resources never appear here: with no in-range producer they are seeds.
         local needs = {} ---@type table<string, { type: string, name: string }>
         for rn in pairs(selected) do
-            local rp2 = prototypes.recipe[rn]
-            if rp2 then
-                for _, ing in ipairs(rp2.ingredients) do
-                    local key = ing.type .. "/" .. ing.name
-                    if not reachable[key] then needs[key] = { type = ing.type, name = ing.name } end
+            local n = norm_recipe(rn)
+            if n then
+                for _, ing in ipairs(n.ings) do
+                    if not reach.ing_ok(ing) then
+                        if ing.item then
+                            needs["item/" .. ing.item] = { type = "item", name = ing.item }
+                        else
+                            needs["fluid/" .. ing.fluid] = { type = "fluid", name = ing.fluid }
+                        end
+                    end
                 end
             end
         end
@@ -538,12 +550,12 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
                     local fr = force.recipes[prn]
                     if prototypes.recipe[prn] and not selected[prn] and not to_add[prn]
                         and fr and fr.enabled and allowed(prn) and structural_ok(fr) then
-                        local crp = prototypes.recipe[prn]
+                        local cn = norm_recipe(prn)
                         local rscore = 0
-                        for _, ing in ipairs(crp.ingredients) do
-                            if reachable[ing.type .. "/" .. ing.name] then rscore = rscore + 1 end
+                        for _, ing in ipairs(cn and cn.ings or {}) do
+                            if reach.ing_ok(ing) then rscore = rscore + 1 end
                         end
-                        local ning = #crp.ingredients
+                        local ning = cn and #cn.ings or 0
                         local take = rscore > best_score
                             or (rscore == best_score and ning < best_ning)
                             or (rscore == best_score and ning == best_ning and (not best or prn < best))
@@ -592,23 +604,31 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     --                   dead end that an unresolved-but-universe-reachable material
     --                   signals. The two are otherwise indistinguishable in the
     --                   unresolved list, and the latter would wrongly be dismissed.
-    local reachable = compute_reachable(selected)
-    local unresolved, seen_u = {}, {}
+    local reach = reach_for(selected)
+    local unresolved, seen_u, unresolved_entries = {}, {}, {}
     local trapped_items, seen_t = {}, {}
+    local function ing_key(ing)
+        if ing.item then return "item/" .. ing.item end
+        return string.format("fluid/%s@[%g,%g]", ing.fluid, ing.lo, ing.hi)
+    end
     for rn in pairs(selected) do
-        local rp2 = prototypes.recipe[rn]
-        if rp2 then
-            for _, ing in ipairs(rp2.ingredients) do
-                local key = ing.type .. "/" .. ing.name
-                if not reachable[key] and not seen_u[key] then
-                    seen_u[key] = true
-                    unresolved[#unresolved + 1] = key
+        local n = norm_recipe(rn)
+        if n then
+            for _, ing in ipairs(n.ings) do
+                if not reach.ing_ok(ing) then
+                    local key = ing_key(ing)
+                    if not seen_u[key] then
+                        seen_u[key] = true
+                        unresolved[#unresolved + 1] = key
+                        unresolved_entries[#unresolved_entries + 1] = { key = key, ing = ing }
+                    end
                 end
             end
-            for _, p in ipairs(rp2.products) do
-                if p.type == "item" and not reachable["item/" .. p.name] and not seen_t[p.name] then
-                    seen_t[p.name] = true
-                    trapped_items[#trapped_items + 1] = p.name
+            for _, p in ipairs(n.prods) do
+                if p.item and not seen_t[p.item]
+                    and chain_reachability.item_trapped(reach, p.item) then
+                    seen_t[p.item] = true
+                    trapped_items[#trapped_items + 1] = p.item
                 end
             end
         end
@@ -616,20 +636,21 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
     table.sort(unresolved)
     table.sort(trapped_items)
 
-    -- Classify the unresolved materials. A material that is also unreachable in
-    -- the FULL candidate universe (every producer transitively needs it back, the
-    -- catalyst signature) is something the solver must import -- a real finding,
-    -- not a dead end. One reachable in the universe but not in this chain is a
-    -- generator omission (closure failed to pull the producer in). Only built when
-    -- there is something to classify; the universe reachability pass is the
-    -- heaviest step here.
+    -- Classify the unresolved materials. A material still unsatisfied under
+    -- reachability over the WHOLE candidate universe (every producer transitively
+    -- needs it back, the catalyst signature) is something the solver must import
+    -- -- a real finding, not a dead end. One satisfied in the universe but not in
+    -- this chain is a generator omission (closure failed to pull the producer in).
+    -- Re-testing each unresolved ingredient (range and all) against the universe
+    -- reachability keeps the temperature semantics exact. Only built when there is
+    -- something to classify; the universe pass is the heaviest step here.
     local catalysts = {}
-    if #unresolved > 0 then
+    if #unresolved_entries > 0 then
         local cand_set = {}
         for _, n in ipairs(candidates) do cand_set[n] = true end
-        local universe_reachable = compute_reachable(cand_set)
-        for _, key in ipairs(unresolved) do
-            if not universe_reachable[key] then catalysts[#catalysts + 1] = key end
+        local universe = reach_for(cand_set)
+        for _, e in ipairs(unresolved_entries) do
+            if not universe.ing_ok(e.ing) then catalysts[#catalysts + 1] = e.key end
         end
         table.sort(catalysts)
     end

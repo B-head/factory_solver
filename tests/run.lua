@@ -134,6 +134,7 @@ local case_files = {
     "lp_fuel_burnt_result",
     "lp_masslosing_cycle_import",
     "lp_catalyst_loop_bootstrap",
+    "chain_reachability",
 }
 
 local total, passed, failed = 0, 0, 0
