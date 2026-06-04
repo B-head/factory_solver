@@ -467,6 +467,128 @@ function M.is_self_sustaining(production_lines, scc)
     return cone_feasible(A, #scc, A[1] and #A[1] or 0)
 end
 
+---Phase-1 feasibility for the EXPORT cone
+---   ∃ x ≥ 0, A·x ≥ e_target
+---i.e. "can this SCC yield a strict unit surplus of the `target` material while
+---keeping every other internal material balanced (≥ 0)?" Self-sustaining is the
+---target = nothing case (A·x ≥ 0); export adds a unit floor on one row. A cycle
+---can circulate yet be unable to export a specific material it is mass-losing on.
+---
+---min Σ aᵢ  s.t.  A·x − s + a = e_target,  x, s, a ≥ 0  is feasible (cost 0) iff
+---such an x exists. Bland's rule for termination under the degenerate all-zero
+---rows. Mirrors cone_feasible's tableau machinery with a non-zero RHS.
+---@param A number[][]
+---@param m integer
+---@param n integer
+---@param target integer  row index (1..m) to force a unit surplus on
+---@return boolean
+local function cone_export_feasible(A, m, n, target)
+    if n == 0 then return false end
+    -- columns: x(1..n), surplus s(n+1..n+m), artificial a(n+m+1..n+2m)
+    local N = n + m + m
+    local rhs = N + 1
+
+    local T = {}
+    for i = 1, m do
+        local row = {}
+        for c = 1, rhs do row[c] = 0 end
+        for j = 1, n do row[j] = A[i][j] end
+        row[n + i] = -1                       -- surplus sᵢ
+        row[n + m + i] = 1                     -- artificial aᵢ
+        row[rhs] = (i == target) and 1 or 0    -- e_target
+        T[i] = row
+    end
+
+    local basis = {}
+    for i = 1, m do basis[i] = n + m + i end
+
+    local function reduced_cost(j)
+        local cj = (j >= n + m + 1) and 1 or 0
+        local z = 0
+        for i = 1, m do
+            if basis[i] >= n + m + 1 then z = z + T[i][j] end
+        end
+        return cj - z
+    end
+
+    local max_iter = 1000 + 20 * N
+    for _ = 1, max_iter do
+        local enter = nil
+        for j = 1, N do
+            if reduced_cost(j) < -feasibility_eps then enter = j; break end
+        end
+        if not enter then break end
+
+        local min_ratio = math.huge
+        for i = 1, m do
+            local aij = T[i][enter]
+            if aij > feasibility_eps then
+                local ratio = T[i][rhs] / aij
+                if ratio < min_ratio then min_ratio = ratio end
+            end
+        end
+        if min_ratio == math.huge then break end
+
+        local leave, leave_basis = nil, math.huge
+        for i = 1, m do
+            local aij = T[i][enter]
+            if aij > feasibility_eps then
+                local ratio = T[i][rhs] / aij
+                if ratio <= min_ratio + feasibility_eps and basis[i] < leave_basis then
+                    leave, leave_basis = i, basis[i]
+                end
+            end
+        end
+        if not leave then break end
+
+        local piv = T[leave][enter]
+        for c = 1, rhs do T[leave][c] = T[leave][c] / piv end
+        for i = 1, m do
+            if i ~= leave then
+                local f = T[i][enter]
+                if f ~= 0 then
+                    for c = 1, rhs do T[i][c] = T[i][c] - f * T[leave][c] end
+                end
+            end
+        end
+        basis[leave] = enter
+    end
+
+    local obj = 0
+    for i = 1, m do
+        if basis[i] >= n + m + 1 then obj = obj + T[i][rhs] end
+    end
+    return obj <= feasibility_eps * 100
+end
+
+---True when `material`'s cyclic SCC can yield an exportable unit surplus of it
+---(see cone_export_feasible). The diagnose-then-reclassify pass uses this to tell
+---an AVOIDABLE cheat (the recipe set CAN make the material, the LP just found
+---fabrication cheaper) from an UNAVOIDABLE one (no recipe flow produces it). Only
+---avoidable cheats are re-seeded; unavoidable ones keep the |shortage_source|
+---escape hatch. A material outside every cyclic SCC returns false: a non-cycle
+---unreachable material has no producing loop to force.
+---@param production_lines NormalizedProductionLine[]
+---@param material string  material variable name
+---@return boolean
+function M.export_feasible(production_lines, material)
+    local adj = M.build_material_graph(production_lines)
+    local sccs = M.find_sccs(adj)
+    for _, scc in ipairs(sccs) do
+        if M.is_cyclic_scc(scc, adj) then
+            local idx = nil
+            for i, mm in ipairs(scc) do
+                if mm == material then idx = i; break end
+            end
+            if idx then
+                local A = build_scc_matrix(production_lines, scc)
+                return cone_export_feasible(A, #scc, A[1] and #A[1] or 0, idx)
+            end
+        end
+    end
+    return false
+end
+
 ---Default deficit threshold: a material is flagged when its net deficit is
 ---more than 50% of its internal PRODUCTION at uniform recipe rates (the cycle
 ---consumes it more than 1.5x faster than it produces it). Measuring against

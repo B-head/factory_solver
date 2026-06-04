@@ -512,8 +512,9 @@ end
 ---@param solution_name string
 ---@param constraints Constraint[]
 ---@param production_lines NormalizedProductionLine[]
+---@param forced_imports table<string, true>?  Material variable names to seed as |initial_source| imports when unreachable (in addition to the heuristic deficits). The diagnose-then-reclassify pass fills this with the AVOIDABLE cheats from a first solve (see M.diagnose_avoidable_cheats). nil leaves behaviour unchanged.
 ---@return Problem
-function M.create_problem(solution_name, constraints, production_lines)
+function M.create_problem(solution_name, constraints, production_lines, forced_imports)
     local problem = problem_generator.new(solution_name)
 
     -- The constraints + normalized lines are the minimal data needed to replay
@@ -577,6 +578,22 @@ function M.create_problem(solution_name, constraints, production_lines)
     for name in pairs(raw_deficits) do
         if not pre_reachable[name] then deficits[name] = true end
     end
+
+    -- Diagnose-then-reclassify imports. A first solve found these materials
+    -- being fabricated via |shortage_source| even though their recipe set CAN
+    -- produce them (export_feasible) -- an AVOIDABLE cheat the cost tiers
+    -- preferred over an inefficient real chain. Seed them so they get an
+    -- |initial_source| import (and become reachability seeds), which prices in
+    -- well below the shortage penalty so the second solve runs the chain or
+    -- imports cheaply instead of fabricating. Unavoidable cheats (a material no
+    -- flow can produce) are never put here and keep their escape hatch. Filtered
+    -- to unreachable names for the same reason as the heuristic deficits.
+    if forced_imports then
+        for name in pairs(forced_imports) do
+            if not pre_reachable[name] then deficits[name] = true end
+        end
+    end
+
     local reachable = M.compute_reachable_materials(all_lines, deficits)
 
     -- Catalyst-loop closure (purely additive over the mass-losing deficits
@@ -793,6 +810,66 @@ function M.create_problem(solution_name, constraints, production_lines)
     end
 
     return problem
+end
+
+local shortage_prefix = "|shortage_source|"
+local elastic_prefix = "|elastic|"
+local elastic_limit_prefix = "|elastic||limit|"
+
+---Diagnose the AVOIDABLE cheats in a converged solve: materials the LP
+---fabricated through |shortage_source| (or relaxed a constraint on via
+---|elastic|) even though their recipe set can actually produce them
+---(material_cycles.export_feasible). These are the ones a second solve should
+---import rather than fabricate -- the cost tiers preferred the cheap shortage
+---over an inefficient but valid real chain. UNAVOIDABLE cheats (no recipe flow
+---makes the material -- a fabricated dead-end intermediate, or a base resource
+---only the prototype layer knows is suppliable) are left out so they keep the
+---escape hatch. Feed the result back as create_problem's `forced_imports` and
+---re-solve.
+---
+---`x` is the packed primal map (variable name -> value) from a finished solve.
+---@param x table<string, number>
+---@param production_lines NormalizedProductionLine[]
+---@param epsilon number?  treat |x| below this as zero (default 1e-6)
+---@return table<string, true> avoidable  material variable names to re-import
+function M.diagnose_avoidable_cheats(x, production_lines, epsilon)
+    epsilon = epsilon or 1e-6
+
+    -- Collect the materials that carry a non-zero cheat, deduped. A shortage is
+    -- keyed by the bare material; an elastic is keyed by the constraint's |limit|
+    -- dual, so strip both prefixes back to the material variable name.
+    local cheated = {} ---@type table<string, true>
+    for name, value in pairs(x) do
+        if math.abs(value) > epsilon then
+            if string.sub(name, 1, #shortage_prefix) == shortage_prefix then
+                cheated[string.sub(name, #shortage_prefix + 1)] = true
+            elseif string.sub(name, 1, #elastic_limit_prefix) == elastic_limit_prefix then
+                cheated[string.sub(name, #elastic_limit_prefix + 1)] = true
+            elseif string.sub(name, 1, #elastic_prefix) == elastic_prefix then
+                -- |elastic||limit|<m> is handled above; a bare |elastic|<dual>
+                -- with a non-|limit| body is a constraint relaxation we cannot
+                -- map to a single material, so skip it.
+            end
+        end
+    end
+
+    -- export_feasible must see the SAME graph create_problem solved: a cycle that
+    -- closes only through a temperature bridge (the limestone slacked-lime loop,
+    -- produced @[10,10] / consumed @[10,100]) is not a cycle in the bare line set,
+    -- so build the bridges here too before testing.
+    local all_lines = {}
+    for _, line in ipairs(production_lines) do all_lines[#all_lines + 1] = line end
+    for _, line in ipairs(M.create_temperature_bridges(production_lines)) do
+        all_lines[#all_lines + 1] = line
+    end
+
+    local avoidable = {} ---@type table<string, true>
+    for material in pairs(cheated) do
+        if material_cycles.export_feasible(all_lines, material) then
+            avoidable[material] = true
+        end
+    end
+    return avoidable
 end
 
 return M

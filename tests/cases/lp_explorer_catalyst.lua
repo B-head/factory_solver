@@ -7,21 +7,28 @@
 -- catalysts -- via |shortage_source| instead of importing the catalysts and
 -- running the chain. Captured unedited from the explorer (init=recipe netneg
 -- probe, all tech researched) so the regressions ride real pyanodon topologies.
--- They span the spectrum: the rennea/dingrits case fabricates almost everything
--- (1 recipe active), the limestone case runs most of the chain yet still cheats
+-- They span the spectrum: the rennea/dingrits case fabricated almost everything
+-- (1 recipe active), the limestone case ran most of the chain yet still cheated
 -- (12 active). Headless solves reproduce the in-game cheat exactly (0.75 / 0.82).
--- Practicality is decided in create_problem / material_cycles, not the IPM. xfail
--- until the catalyst is imported via |initial_source| instead of fabricated.
+-- Practicality is decided in create_problem / material_cycles, not the IPM.
 --
--- NOTE: NS2's catalyst fix (net-zero seed_candidates in a NON-self-sustaining
--- cycle) does NOT reach these. Both loops here are self-sustaining (cone_feasible
--- admits a positive circulation) yet still cannot bootstrap from zero, and the
--- limestone primer (slacked-lime) is mass-losing, not a net-zero catalyst -- so
--- both fall outside the deliberately conservative gate that keeps Gleba <grow>
--- loops and mild-loss dead-ends on their existing (correct) paths. Closing these
--- needs a reachability-driven primer that can fire inside a self-sustaining SCC
--- without also priming a mass-positive <grow> loop -- a sharper test than
--- is_self_sustaining alone provides.
+-- NS2's catalyst fix (net-zero seed_candidates in a NON-self-sustaining cycle)
+-- does NOT reach these: both loops here are self-sustaining (cone_feasible admits
+-- a positive circulation) yet still cannot bootstrap from zero. The two split on
+-- EXPORT feasibility -- whether the recipe set can net-produce the demanded
+-- material at all:
+--
+--   limestone is export_feasible (the slacked-lime cycle, closed through a
+--   temperature bridge, CAN net-produce limestone fed by raws) -- the LP just
+--   found fabrication cheaper than the inefficient chain. That is an AVOIDABLE
+--   cheat, fixed here with NO prototype signal by the diagnose-then-reclassify
+--   two-pass (solve, see the cheat is export_feasible, re-seed it as an import,
+--   solve again). See lp_two_pass_reclassify for the mechanism in isolation.
+--
+--   tuuphra is NOT export_feasible (tuuphra-mk02 consumes the tuuphra it makes,
+--   so no flow yields it) -- an UNAVOIDABLE cheat. diagnose leaves it alone, and
+--   it still needs the orthogonal base-resource import signal (a farmed crop the
+--   prototype layer must declare suppliable). It stays xfail on this branch.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
@@ -764,18 +771,37 @@ local lines_limestone = {
   },
 }
 
+-- limestone's loop is export-feasible -- the recipe set CAN net-produce it -- so
+-- its cheat is AVOIDABLE and the diagnose-then-reclassify two-pass fixes it with
+-- no prototype signal: solve, see that limestone was fabricated yet is
+-- export_feasible, re-seed it as an import, solve again. (tuuphra above is the
+-- unavoidable companion: its self-loop cannot self-produce, so diagnose leaves it
+-- alone and it still needs the orthogonal base-resource signal.)
 table.insert(cases, {
     name = "explorer catalyst (fuel-cell-dissolve loop -> limestone) runs the chain without cheating",
-    xfail = true,
     run = function()
-        local problem = cp.create_problem("explorer-limestone", constraints_limestone, lines_limestone)
+        local x1 = (function()
+            local problem = cp.create_problem("explorer-limestone-p1",
+                constraints_limestone, lines_limestone)
+            local state, vars = harness.solve_to_completion(lp, problem,
+                { tolerance = 1e-6, iterate_limit = 600 })
+            harness.assert_eq(state, "finished", "pass 1 solver_state")
+            return vars.x
+        end)()
+
+        local avoidable = cp.diagnose_avoidable_cheats(x1, lines_limestone)
+        harness.assert_true(avoidable["item/limestone/normal"],
+            "limestone is diagnosed as an avoidable cheat (its cycle is export-feasible)")
+
+        local problem = cp.create_problem("explorer-limestone-p2",
+            constraints_limestone, lines_limestone, avoidable)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 600 })
-        harness.assert_eq(state, "finished", "solver_state")
+        harness.assert_eq(state, "finished", "pass 2 solver_state")
         local cheat, has_initial = cheat_and_imports(vars)
         harness.assert_true(has_initial, "imports declared external inputs")
         harness.assert_near(cheat, 0, 1e-3,
-            "limestone + catalyst from the real chain + imports, not shortage (cheat = 0.82 today)")
+            "limestone imported via the reclassify pass, not fabricated (cheat = 0.82 before)")
     end,
 })
 

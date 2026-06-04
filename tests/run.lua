@@ -97,6 +97,7 @@ local case_files = {
     "lp_explorer_catalyst",
     "lp_explorer_constrained_material",
     "lp_explorer_pyanodon_chains",
+    "lp_two_pass_reclassify",
     "chain_reachability",
     "explore_detect",
 }
