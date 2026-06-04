@@ -12,6 +12,16 @@
 -- (12 active). Headless solves reproduce the in-game cheat exactly (0.75 / 0.82).
 -- Practicality is decided in create_problem / material_cycles, not the IPM. xfail
 -- until the catalyst is imported via |initial_source| instead of fabricated.
+--
+-- NOTE: NS2's catalyst fix (net-zero seed_candidates in a NON-self-sustaining
+-- cycle) does NOT reach these. Both loops here are self-sustaining (cone_feasible
+-- admits a positive circulation) yet still cannot bootstrap from zero, and the
+-- limestone primer (slacked-lime) is mass-losing, not a net-zero catalyst -- so
+-- both fall outside the deliberately conservative gate that keeps Gleba <grow>
+-- loops and mild-loss dead-ends on their existing (correct) paths. Closing these
+-- needs a reachability-driven primer that can fire inside a self-sustaining SCC
+-- without also priming a mass-positive <grow> loop -- a sharper test than
+-- is_self_sustaining alone provides.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"

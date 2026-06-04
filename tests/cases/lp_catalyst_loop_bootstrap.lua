@@ -13,20 +13,24 @@
 -- and not in the display. These recipes are verbatim from the in-game
 -- create_problem dump (power/pollution dropped -- the LP ignores them).
 --
--- Both cases are xfail today and assert that same criterion. They fail for
--- DIFFERENT reasons and will be fixed by different changes:
+-- The two cases fail for DIFFERENT reasons and are fixed by different changes;
+-- NS2 is fixed today, NS1 is still xfail:
 --
---   NS2 fabricates pu-238 via |shortage_source| because the antimony recycling
---   loop never becomes reachable. The loop turns on a catalyst, sb-oxide, that
---   purex-antimony-void produces and antimony-phosphate consumes at the SAME
---   rate (net = 0). find_deficit_materials' net-flow test can never flag a
---   net-zero material, so the catalyst is never seeded with an |initial_source|,
---   the reachability BFS stalls, and pu-238 falls through to fabrication.
---   (plastic-bar compounds it: net -0.1 sits exactly on the -0.5*production
---   threshold and the strict `<` lets it slip too.) Verified: seeding sb-oxide +
---   plastic-bar as |initial_source| makes the whole chain run with zero
---   shortage. This is the fourth failure mode of the same heuristic
---   (cf. lp_masslosing_cycle_import.lua) and is fixed in material_cycles.
+--   NS2 used to fabricate pu-238 via |shortage_source| because the antimony
+--   recycling loop never became reachable. The loop turns on a catalyst,
+--   sb-oxide, that purex-antimony-void produces and antimony-phosphate consumes
+--   at the SAME rate (net = 0). find_deficit_materials' net-flow test can never
+--   flag a net-zero material, so the catalyst was never seeded with an
+--   |initial_source|, the reachability BFS stalled, and pu-238 fell through to
+--   fabrication. (plastic-bar compounded it: net -0.1 sits exactly on the
+--   -0.5*production threshold and the strict `<` let it slip too.) FIXED:
+--   find_deficit_materials now also returns net-zero catalysts of a
+--   non-self-sustaining cycle as `seed_candidates`, and create_problem seeds the
+--   ones that stay unreachable as |initial_source| (a reachability-driven
+--   bootstrap primer); the threshold also became `<=` so plastic-bar is claimed
+--   as a mass-losing cycle input. The whole chain now runs with zero shortage.
+--   This was the fourth failure mode of the same heuristic
+--   (cf. lp_masslosing_cycle_import.lua).
 --
 --   NS1 pins an intermediate (sb-phosphate-1) that already has a consumer recipe
 --   in the set, so create_problem routes the pinned output to |surplus_sink|
@@ -135,7 +139,6 @@ local cases = {}
 -- promoted to a deficit in material_cycles.
 table.insert(cases, {
     name = "catalyst loop bootstraps instead of fabricating pu-238 (Nuc Sample 2)",
-    xfail = true,
     run = function()
         local lines = make_lines()
         local constraints = {

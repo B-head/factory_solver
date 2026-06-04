@@ -561,12 +561,38 @@ function M.create_problem(solution_name, constraints, production_lines)
     -- boundary -- an iron-ore that already has a mining recipe doesn't need
     -- a second free supply line just because it also participates in a cycle.
     local pre_reachable = M.compute_reachable_materials(all_lines)
-    local raw_deficits = material_cycles.find_deficit_materials(all_lines)
+    local raw_deficits, _, seed_candidates = material_cycles.find_deficit_materials(all_lines)
     local deficits = {} ---@type table<string, true>
     for name in pairs(raw_deficits) do
         if not pre_reachable[name] then deficits[name] = true end
     end
     local reachable = M.compute_reachable_materials(all_lines, deficits)
+
+    -- Catalyst-loop closure (purely additive over the mass-losing deficits
+    -- above). A closed catalyst cycle turns on materials the net-flow heuristic
+    -- cannot flag -- net-zero catalysts (sb-oxide in the antimony purex loop),
+    -- or self-sustaining loops that still cannot bootstrap from zero (the
+    -- limestone slacked-lime cycle, the tuuphra biological loop). Their
+    -- materials stay unreachable even after the deficits are seeded, so the LP
+    -- falls back to |shortage_source| to fabricate the demanded product. Seed
+    -- the still-unreachable primer candidates one at a time, recomputing
+    -- reachability after each, so we never add a seed a previous one already
+    -- unblocked (the chicken-and-egg pair only needs one primer; the quality
+    -- cascade's downstream tiers become reachable on their own and are never
+    -- seeded). Cases that already reach their whole chain skip this loop
+    -- entirely -- there is nothing left unreachable to pick.
+    while true do
+        local pick = nil
+        for name in pairs(seed_candidates) do
+            if not reachable[name] and not deficits[name]
+                and (not pick or name < pick) then
+                pick = name
+            end
+        end
+        if not pick then break end
+        deficits[pick] = true
+        reachable = M.compute_reachable_materials(all_lines, deficits)
+    end
 
     local included_products, included_ingresients = {}, {} ---@type table<string, true>, table<string, true>
     for i, line in ipairs(all_lines) do

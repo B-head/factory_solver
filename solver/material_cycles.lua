@@ -492,6 +492,7 @@ local default_threshold_ratio = 0.5
 ---@param threshold_ratio number?  default 0.5
 ---@return table<string, true> deficits  material variable names
 ---@return string[][] cyclic_sccs  every cyclic SCC, not just source ones (for diagnostics)
+---@return table<string, true> seed_candidates  cycle materials a bootstrap primer could seed
 function M.find_deficit_materials(production_lines, threshold_ratio)
     threshold_ratio = threshold_ratio or default_threshold_ratio
 
@@ -499,45 +500,85 @@ function M.find_deficit_materials(production_lines, threshold_ratio)
     local sccs = M.find_sccs(adj)
     local cyclic_sccs = {}
     local deficits = {}
+    -- seed_candidates names the materials a bootstrap primer could legitimately
+    -- seed but that the net-flow deficit test below can NEVER flag: the
+    -- net-zero catalysts of a cycle (sb-oxide in the antimony purex loop --
+    -- produced and consumed at exactly the same rate). Such a catalyst leaves a
+    -- closed cycle stuck in a chicken-and-egg deadlock (each coupled recipe
+    -- needs the other's output), so no recipe in it ever fires and the LP
+    -- fabricates the demanded downstream product from |shortage_source|. Whether
+    -- a given catalyst is actually deadlocked is a reachability question only
+    -- create_problem can answer, so this is a reachability-agnostic superset;
+    -- the caller seeds only the ones that stay unreachable.
+    --
+    -- The gates mirror `deficits` deliberately: restricted to non-self-sustaining
+    -- SCCs so a mass-positive loop that closes on its own (a Gleba <grow> seed
+    -- cycle) is never primed, and to materials the cycle balances exactly
+    -- (|net| ~ 0) so a genuinely mass-losing intermediate keeps the
+    -- |shortage_source| escape hatch (a mild-loss dead-end self-loop) or the
+    -- threshold's |initial_source| (a strong-loss one) instead of being primed
+    -- as a catalyst it is not.
+    local seed_candidates = {}
 
     for _, scc in ipairs(sccs) do
         if M.is_cyclic_scc(scc, adj) then
             cyclic_sccs[#cyclic_sccs + 1] = scc
             local scc_set = {}
             for _, m in ipairs(scc) do scc_set[m] = true end
-            -- The whole-SCC is_source_scc gate is replaced by a per-material
-            -- has_external_producer check below: a non-source SCC is no longer
-            -- skipped wholesale (which left genuine deficits like ash to
-            -- |shortage_source|), only its materials that ARE fed from outside
-            -- are spared. self-sustaining cycles (kovarex / <grow>) still need
-            -- no external supply at all, so they are skipped entirely.
-            if not M.is_self_sustaining(production_lines, scc) then
-                local net, consumption = M.compute_net_flow(production_lines, scc_set)
-                for _, m in ipairs(scc) do
-                    -- Measure the deficit against the material's internal
-                    -- PRODUCTION, not its consumption. A recipe that consumes
-                    -- and re-emits the same material at the same tier (asteroid
-                    -- reprocessing, which crushes 0.9 oxide/normal and re-rolls
-                    -- 0.315 back) inflates consumption with mass it immediately
-                    -- replaces, masking a genuine deficit under a consumption
-                    -- ratio. production = net + consumption (compute_net_flow
-                    -- gives net and consumption); flag when the cycle consumes
-                    -- this material more than (1 + threshold)x faster than it
-                    -- can produce it internally.
-                    local production = net[m] + consumption[m]
-                    if production > 0 and net[m] < -threshold_ratio * production
-                        -- Skip materials supplied from outside the SCC (quality
-                        -- cascades feed cu/uncommon in from normal recycling);
-                        -- flag only those whose every producer is inside the
-                        -- cycle, which genuinely need an external |initial_source|.
-                        and not M.has_external_producer(m, scc_set, adj) then
-                        deficits[m] = true
-                    end
+            local self_sustaining = M.is_self_sustaining(production_lines, scc)
+            local net, consumption = M.compute_net_flow(production_lines, scc_set)
+            for _, m in ipairs(scc) do
+                -- Measure the deficit against the material's internal
+                -- PRODUCTION, not its consumption. A recipe that consumes
+                -- and re-emits the same material at the same tier (asteroid
+                -- reprocessing, which crushes 0.9 oxide/normal and re-rolls
+                -- 0.315 back) inflates consumption with mass it immediately
+                -- replaces, masking a genuine deficit under a consumption
+                -- ratio. production = net + consumption (compute_net_flow
+                -- gives net and consumption); flag when the cycle consumes
+                -- this material more than (1 + threshold)x faster than it
+                -- can produce it internally.
+                local production = net[m] + consumption[m]
+
+                -- Net-zero catalyst: consumed inside the cycle and balanced
+                -- exactly by its in-cycle production (a relative epsilon
+                -- absorbs float noise). These are invisible to the threshold
+                -- below (net is never < -threshold * production) yet can
+                -- deadlock the whole cycle, so they are the only primer the
+                -- threshold cannot already supply.
+                if not self_sustaining and consumption[m] > 0
+                    and math.abs(net[m]) <= production * 1e-6 then
+                    seed_candidates[m] = true
+                end
+
+                -- The whole-SCC is_source_scc gate is replaced by a per-material
+                -- has_external_producer check below: a non-source SCC is no longer
+                -- skipped wholesale (which left genuine deficits like ash to
+                -- |shortage_source|), only its materials that ARE fed from outside
+                -- are spared. self-sustaining cycles (kovarex / <grow>) still need
+                -- no external supply at all, so they are skipped entirely.
+                --
+                -- The threshold is `<=` (with a relative float slack), not `<`:
+                -- a material sitting exactly on the -0.5 * production boundary
+                -- (plastic-bar in the antimony purex loop nets -0.1 against 0.2
+                -- production, which float rounds to -0.0999...998) is a genuine
+                -- mass-losing cycle input, not an "uncertain" intermediate, so it
+                -- belongs on |initial_source| with the rest. A mild-loss dead-end
+                -- self-loop (-0.33 ratio) still sits well above the boundary and
+                -- keeps its shortage escape hatch.
+                if not self_sustaining and production > 0
+                    and net[m] <= -threshold_ratio * production + production * 1e-9
+                    -- Skip materials supplied from outside the SCC (quality
+                    -- cascades feed cu/uncommon in from normal recycling);
+                    -- flag only those whose every producer is inside the
+                    -- cycle, which genuinely need an external |initial_source|.
+                    and not M.has_external_producer(m, scc_set, adj) then
+                    deficits[m] = true
                 end
             end
         end
     end
-    return deficits, cyclic_sccs
+    return deficits, cyclic_sccs, seed_candidates
 end
 
 return M
