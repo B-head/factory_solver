@@ -135,6 +135,7 @@ local case_files = {
     "lp_masslosing_cycle_import",
     "lp_catalyst_loop_bootstrap",
     "lp_explorer_catalyst",
+    "lp_explorer_constrained_material",
     "chain_reachability",
 }
 
