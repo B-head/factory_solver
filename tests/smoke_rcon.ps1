@@ -37,6 +37,7 @@ param(
     # Seconds to wait for the server to open its RCON port after launch.
     [int] $RconStartupSeconds = 90,
     [string[]] $Fixtures = @("iron_plate", "missing_prototype", "boiler_steam", "reactor_burnt_fuel",
+        "catalyst_reclassify",
         "migration_legacy_shape", "codec_solution_roundtrip", "codec_fp_roundtrip", "codec_helmod_roundtrip"),
     # Mods to enable for the run; everything else in mod-list.json is disabled.
     # Default is the vanilla minimal set. Pass @() to leave mod-list.json
@@ -441,8 +442,20 @@ try {
             if ($readSide -ne "OK") { $verdict = "FAIL" }
         }
 
+        # The catalyst_reclassify fixture additionally proves the two-pass
+        # diagnose-then-reclassify actually fired (forced_imports set, residual
+        # cheat ~0), not merely that the solve converged -- a clean solve also
+        # reaches "finished".
+        $reclassify = $null
+        if ($verdict -eq "PASS" -and $fixture -eq "catalyst_reclassify") {
+            $reclassify = Invoke-RconCommand -Stream $stream `
+                -Command "/silent-command rcon.print(remote.call('$iface','check_catalyst_reclassify'))"
+            if ($reclassify -ne "OK") { $verdict = "FAIL" }
+        }
+
         $detail = "solver_state=$state"
         if ($readSide) { $detail += "; read_side=$readSide" }
+        if ($reclassify) { $detail += "; reclassify=$reclassify" }
         Write-Host "SMOKE $verdict`: [$fixture] $detail"
         if ($verdict -ne "PASS") { $allPass = $false }
     }

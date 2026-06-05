@@ -482,6 +482,54 @@ fixtures.reactor_burnt_fuel = {
     end,
 }
 
+---Two-pass diagnose-then-reclassify (manage/pre_solve.lua). Plant the data_test
+---bootstrap-trapped catalyst loop -- two recipes forming a copper-plate <->
+---iron-gear-wheel cycle whose entry recipe is gated behind a large priced raw
+---(a: copper + 2000 iron-plate -> gear, b: gear -> 2 copper) -- and demand
+---copper-plate. Neither cycle material can be produced from zero, and the
+---2000-iron real chain costs more than the shortage penalty, so pass 1 fabricates
+---copper-plate via |shortage_source| (an AVOIDABLE cheat the cost tiers prefer).
+---The cycle is self-sustaining, so the upfront catalyst-loop heuristics skip it;
+---only the reclassify pass -- which diagnoses copper-plate as export-feasible and
+---re-seeds it as an import -- removes the cheat, and pass 2 converges at zero
+---cheat. The launcher polls state() until "finished" (which now spans both
+---passes), then calls check_catalyst_reclassify to assert the reclassify actually
+---fired -- a bare "finished" would also pass for a clean solve. Needs the
+---data_test.lua synthetic recipes (always present in a dev checkout); build()
+---asserts them so a missing one surfaces as ERROR, not a silently-degraded solve.
+fixtures.catalyst_reclassify = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        assert(prototypes.recipe["fs-test-catalyst-a"] and prototypes.recipe["fs-test-catalyst-b"],
+            "fs-test-catalyst-a/-b recipes missing -- data_test.lua not loaded?")
+
+        for _, recipe in ipairs({ "fs-test-catalyst-a", "fs-test-catalyst-b" }) do
+            ---@type ProductionLine
+            local line = {
+                recipe_typed_name = tn.create_typed_name("recipe", recipe),
+                machine_typed_name = tn.create_typed_name("machine", "fs-test-catalyst-machine"),
+                module_typed_names = {},
+                affected_by_beacons = {},
+            }
+            flib_table.insert(solution.production_lines, line)
+        end
+
+        -- Demand exactly 1 copper-plate. It is trapped in the cycle (no seed) and
+        -- the real chain is costlier than the shortage penalty, so pass 1 cheats
+        -- and the reclassify pass has an avoidable cheat to diagnose.
+        ---@type Constraint
+        local constraint = {
+            type = "item",
+            name = "copper-plate",
+            quality = "normal",
+            limit_type = "equal",
+            limit_amount_per_second = 1,
+        }
+        flib_table.insert(solution.constraints, constraint)
+    end,
+}
+
 ---RCON entry point: clear any prior solution, build the named fixture, and hand
 ---it to the pump. Returns a status string the launcher reads via rcon.print --
 ---"OK: <solution name>", "SKIP: <detail>" (a required mod isn't loaded), or
@@ -566,6 +614,52 @@ function M.check_read_side()
     if not ok then
         return "ERROR: read-side raised: " .. tostring(err)
     end
+    return "OK"
+end
+
+---RCON entry point: assert the two-pass diagnose-then-reclassify actually fired
+---for the catalyst_reclassify fixture. The launcher calls this after that fixture
+---converges (a bare "finished" can't tell a reclassified solve from a clean one).
+---Asserts (a) the solve reached "finished", (b) forced_imports is non-empty -- an
+---avoidable cheat was diagnosed and re-seeded for pass 2 -- and (c) the converged
+---primal carries no residual cheat (|shortage_source| / |elastic| all ~0), i.e.
+---pass 2 replaced fabrication with a real import plus the loop running. WHICH
+---cycle material the LP fabricates (copper-plate the target, or iron-gear-wheel
+---the mid) is the LP's own least-cost choice, so this asserts the set is non-empty
+---rather than naming one -- mirroring lp_two_pass_reclassify.lua. Returns "OK" or
+---"ERROR: <detail>".
+---@return string
+function M.check_catalyst_reclassify()
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data and force_data.solutions
+    local _, solution = next(solutions or {})
+    if not solution then
+        return "ERROR: no solution"
+    end
+    if solution.solver_state ~= "finished" then
+        return "ERROR: solver_state is " .. tostring(solution.solver_state) .. ", not finished"
+    end
+
+    local forced = solution.forced_imports
+    if not forced or next(forced) == nil then
+        return "ERROR: forced_imports empty -- the reclassify pass never fired " ..
+            "(pass 1 found no avoidable cheat?)"
+    end
+
+    local x = solution.raw_variables and solution.raw_variables.x or {}
+    local cheat = 0
+    for k, v in pairs(x) do
+        if math.abs(v) > 1e-6
+            and (string.find(k, "|shortage_source|", 1, true)
+                or string.find(k, "|elastic|", 1, true)) then
+            cheat = cheat + math.abs(v)
+        end
+    end
+    if cheat > 1e-3 then
+        return "ERROR: residual cheat " .. string.format("%.4f", cheat) ..
+            " after reclassify (pass 2 did not eliminate the avoidable shortage)"
+    end
+
     return "OK"
 end
 
@@ -1290,6 +1384,7 @@ function M.register()
         setup = M.setup,
         state = M.state,
         check_read_side = M.check_read_side,
+        check_catalyst_reclassify = M.check_catalyst_reclassify,
         check_force_caches = M.check_force_caches,
         check_fuel_reconciliation = M.check_fuel_reconciliation,
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,

@@ -789,6 +789,66 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     })
 end
 
+-- 8e2. Bootstrap-trapped, export-feasible cycle whose real chain is COSTLIER than
+--      the shortage penalty -- the AVOIDABLE-cheat shape the two-pass diagnose-
+--      then-reclassify pass (manage/pre_solve.lua) is built to fix. Two recipes
+--      form a copper-plate <-> iron-gear-wheel cycle, with the entry recipe gated
+--      behind a large priced raw (iron-plate, no producer -> a 1/unit
+--      |initial_source| import):
+--        a:  1 copper-plate + 2000 iron-plate -> 1 iron-gear-wheel  (costly entry)
+--        b:  1 iron-gear-wheel                -> 2 copper-plate      (net surplus)
+--      Neither cycle material can be produced from zero, so a demand for
+--      copper-plate is met in pass 1 by fabricating it via |shortage_source|: the
+--      2000-iron real chain costs ~2000/copper, ABOVE the 2^10 shortage penalty,
+--      so the cost tiers genuinely prefer the cheat. The cycle is self-sustaining
+--      and mass-gaining, so (1) the upfront net-flow / catalyst-loop heuristics
+--      skip it -- they only seed non-self-sustaining net-zero loops -- and (2)
+--      copper-plate is export-feasible (SCC {copper-plate, iron-gear-wheel}, x=(1,1)
+--      gives net +1 copper, gear balanced). diagnose_avoidable_cheats therefore
+--      tags it AVOIDABLE and re-seeds it as an import, and pass 2 converges at zero
+--      cheat. (A cheap feedstock would make the chain undercut the penalty and the
+--      LP would just run it -- no cheat; the costly raw is what forces the cheat,
+--      exactly limestone's shape.) Mirrors tests/cases/lp_two_pass_reclassify.lua's
+--      avoidable case. Asserted by smoke check_catalyst_reclassify (fixture
+--      catalyst_reclassify). A dedicated category on a non-fixed assembling-machine-2
+--      copy keeps both recipes off every vanilla machine list and crafts fuel-free.
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"]
+    and raw.item and raw.item["iron-plate"] and raw.item["copper-plate"]
+    and raw.item["iron-gear-wheel"] then
+    local catalyst_machine = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+    catalyst_machine.name = "fs-test-catalyst-machine"
+    catalyst_machine.localised_name = "fs-test-catalyst-machine"
+    catalyst_machine.minable = nil
+    catalyst_machine.next_upgrade = nil
+    catalyst_machine.placeable_by = nil
+    catalyst_machine.crafting_categories = { "fs-test-catalyst-cat" }
+    extend_test({
+        { type = "recipe-category", name = "fs-test-catalyst-cat" },
+        catalyst_machine,
+        {
+            type = "recipe",
+            name = "fs-test-catalyst-a",
+            category = "fs-test-catalyst-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = {
+                { type = "item", name = "copper-plate", amount = 1 },
+                { type = "item", name = "iron-plate", amount = 2000 },
+            },
+            results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
+        },
+        {
+            type = "recipe",
+            name = "fs-test-catalyst-b",
+            category = "fs-test-catalyst-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
+            results = { { type = "item", name = "copper-plate", amount = 2 } },
+        },
+    })
+end
+
 -- 8f. Three general machines in one isolated category disagreeing on ingredient_count
 --     (item-ingredient cap; fluids exempt), with caps 2 / 4 / 10 and explicit order
 --     a/b/c so the preset sort is deterministic. factory_solver filters a machine out

@@ -34,11 +34,32 @@ end
 function M.forwerd_solve(force_data, solution)
     local bonuses = force_data.research_bonuses
 
+    -- Normalized lines are needed by create_problem on a "ready" rebuild and by
+    -- the two-pass diagnose below. Compute lazily and share the result so a tick
+    -- that does both never normalizes twice.
+    local normalized = nil
+    local function get_normalized()
+        if not normalized then
+            normalized = M.to_normalized_production_lines(solution.production_lines, bonuses)
+        end
+        return normalized
+    end
+
     if solution.solver_state == "ready" then
+        -- A fresh "ready" (any edit / migration / new solution) starts pass 1 and
+        -- must drop forced imports left from a previous solve's reclassify pass.
+        -- The two-pass restart below sets reclassify_pending so its own "ready"
+        -- tick keeps the freshly diagnosed seeds instead of clearing them.
+        if not solution.reclassify_pending then
+            solution.forced_imports = nil
+        end
+        solution.reclassify_pending = nil
+
         solution.problem = create_problem.create_problem(
             solution.name,
             solution.constraints,
-            M.to_normalized_production_lines(solution.production_lines, bonuses)
+            get_normalized(),
+            solution.forced_imports
         )
         -- Mirror the inactive-recipe set onto the solution so save / UI lookups
         -- (which see solution, not problem) can gray out isolated lines without
@@ -64,6 +85,29 @@ function M.forwerd_solve(force_data, solution)
     )
 
     solution.quantity_of_machines_required = problem:filter_result(solution.raw_variables)
+
+    -- Two-pass diagnose-then-reclassify (catalyst-loop import-vs-fabricate). When
+    -- the FIRST pass converges, check whether it fabricated any material through
+    -- |shortage_source| / |elastic| that its own recipe set can actually produce
+    -- (export_feasible) -- an AVOIDABLE cheat the cost tiers preferred over an
+    -- inefficient real chain. If any, re-seed them as forced imports and restart
+    -- for ONE more pass, warm-started from the pass-1 primal. forced_imports is
+    -- nil through pass 1, so this guard fires exactly once per solve cycle; pass 2
+    -- has it set and skips re-diagnosis. Unavoidable cheats (no flow makes the
+    -- material) are never diagnosed and keep their |shortage_source| escape hatch.
+    if solution.solver_state == "finished"
+        and solution.forced_imports == nil
+        and solution.raw_variables then
+        local avoidable = create_problem.diagnose_avoidable_cheats(
+            solution.raw_variables.x, get_normalized())
+        if next(avoidable) ~= nil then
+            solution.forced_imports = avoidable
+            solution.reclassify_pending = true
+            solution.solver_state = "ready"
+            solution.solver_iteration = nil
+            -- raw_variables kept as the pass-2 warm start.
+        end
+    end
 end
 
 ---comment

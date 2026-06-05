@@ -134,6 +134,8 @@ __factory_solver__storage = {}
 ---@field solver_iteration integer?
 ---@field raw_variables PackedVariables?
 ---@field done_lines table<string, true>?
+---@field forced_imports table<string, true>?  Two-pass reclassify (manage/pre_solve.lua): avoidable cheats diagnosed from pass 1, re-seeded as |initial_source| imports for pass 2. nil during pass 1 / a clean solve.
+---@field reclassify_pending boolean?  Internal flag: set when the two-pass restart re-arms solver_state="ready" for pass 2, so forwerd_solve keeps forced_imports instead of clearing them as it would for a fresh solve.
 
 ---@class Constraint
 ---@field type FilterType
