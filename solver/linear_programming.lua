@@ -222,7 +222,7 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
         -- values forward when the next solve scales x or b by 10×
         -- breaks the unpivoted Cholesky: D² = X·S⁻¹ spans ~2¹⁰⁴ orders
         -- of magnitude, round-off cancellation drives a pivot to 0 /
-        -- produces NaN, and the LP terminates "unfinished" already at
+        -- produces NaN, and the LP terminates "singular" already at
         -- the second IPM iteration (observed in-game when the user
         -- toggled an upper-limit constraint between 1/min and 10/min
         -- on a 5-tier quality recycling chain).
@@ -327,11 +327,19 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
         y_step, s_step, x_step = solve_step(2 ^ -12)
     end
     if has_nan(y_step) or has_nan(s_step) or has_nan(x_step) then
-        log.trace("-- unfinished solve '%s' (Cholesky lost precision) --",
+        log.trace("-- singular solve '%s' (Cholesky lost precision) --",
             problem.name)
         log.trace("  iterate = %i, width = %i, height = %i",
             iteration, p_degree, d_degree)
-        return "unfinished", iteration, nil
+        -- "singular", not "unfinished": the iterate budget is NOT exhausted -- the
+        -- reduced normal equations A·D²·Aᵀ went singular under round-off and the
+        -- unpivoted Cholesky produced NaN even after the regularised retry. This
+        -- terminal state is reachable at any iteration (as early as the second),
+        -- so it is a distinct numerical-breakdown signal from the iterate-limit
+        -- "unfinished" above; callers that only branch on "finished" treat both
+        -- the same, but the split lets diagnosis tell convergence-budget failures
+        -- apart from conditioning failures.
+        return "singular", iteration, nil
     end
 
     local p_step = math.min(1, step_fraction * find_step(x, x_step))

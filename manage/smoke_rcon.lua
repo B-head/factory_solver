@@ -528,7 +528,7 @@ end
 
 ---RCON entry point: report the current solver_state of the single smoke
 ---solution as a string. The launcher polls this until it reads a terminal
----value ("finished" / "unfinished" / "unbounded" / "unfeasible") or an ERROR.
+---value ("finished" / "unfinished" / "singular" / "unbounded" / "unfeasible") or an ERROR.
 ---@return string
 function M.state()
     local force_data = storage.forces[FORCE_INDEX]
