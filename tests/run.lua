@@ -136,6 +136,7 @@ local case_files = {
     "lp_catalyst_loop_bootstrap",
     "lp_explorer_catalyst",
     "lp_explorer_constrained_material",
+    "lp_explorer_pyanodon_chains",
     "chain_reachability",
 }
 
