@@ -88,8 +88,11 @@ if not path then
     die("usage: lua tests/sweep_cost.lua <problem-file> [<key-substring> <v1,v2,...>]")
 end
 local pattern = arg[2] -- nil => inspect mode
+-- For --ablate / --measure, arg[3] is an optional key-substring FILTER, not a
+-- numeric value list, so the CSV-of-numbers parse below must not run for them.
+local mode_flag = pattern == "--ablate" or pattern == "--measure"
 local values = {}
-if arg[3] then
+if arg[3] and not mode_flag then
     for tok in string.gmatch(arg[3], "[^,]+") do
         local n = tonumber(tok)
         if not n then die("bad cost value '" .. tok .. "' (must be a number)") end
@@ -109,12 +112,30 @@ local meta = prob.meta
 
 -- ---- helpers ----------------------------------------------------------------
 
+-- RECIPE_EPS (env): when set, add this tiny per-unit cost to every user-facing
+-- recipe flow variable (recipe/ and non-bridge virtual_recipe/, EXCLUDING |bridge|
+-- temperature plumbing). It is the experimental "penalise pointless production"
+-- tie-break: a net-zero futile cycle (e.g. barrel-fill ↔ barrel-empty) has zero
+-- objective benefit, so any eps>0 makes running it strictly costly and the LP
+-- drops it to 0 -- testing whether a recipe cost collapses degenerate loops
+-- WITHOUT distorting solutions that ship real output. Kept additive so <source>
+-- recipes keep their source_cost + eps.
+local RECIPE_EPS = tonumber(os.getenv("RECIPE_EPS"))
+
 -- Build a fresh Problem from the dump. Rebuilt per solve so each cost variant
 -- starts from create_problem's defaults rather than inheriting a prior override.
 local function build_problem()
     local ok, problem = pcall(create_problem.create_problem, "sweep",
         prob.constraints, prob.normalized_lines)
     if not ok then die("create_problem raised: " .. tostring(problem), 1) end
+    if RECIPE_EPS then
+        for key, term in pairs(problem.primals) do
+            if (key:sub(1, 7) == "recipe/" or key:sub(1, 15) == "virtual_recipe/")
+                and not key:find("|bridge|", 1, true) then
+                term.cost = term.cost + RECIPE_EPS
+            end
+        end
+    end
     return problem
 end
 
