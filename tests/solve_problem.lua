@@ -25,6 +25,7 @@ require "tests/headless_env"
 local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 local ed = require "tests/explore_detect"
+local problem_dump = require "tests/problem_dump"
 
 local path = arg[1]
 if not path then
@@ -32,14 +33,15 @@ if not path then
     os.exit(2)
 end
 
-local chunk, load_err = loadfile(path)
-if not chunk then
-    print("ERROR " .. path .. " load: " .. tostring(load_err))
-    os.exit(0)
-end
-local ok_load, prob = pcall(chunk)
-if not ok_load or type(prob) ~= "table" or type(prob.meta) ~= "table" then
-    print("ERROR " .. path .. " malformed problem file")
+-- Load + validate the dump (shared with sweep_cost via problem_dump). The wording
+-- and exit 0 (so the worker pool keeps draining its queue) are this consumer's.
+local prob, kind, detail = problem_dump.load_problem(path)
+if not prob then
+    if kind == "load" then
+        print("ERROR " .. path .. " load: " .. tostring(detail))
+    else
+        print("ERROR " .. path .. " malformed problem file")
+    end
     os.exit(0)
 end
 
@@ -51,20 +53,13 @@ if not ok_cp then
     os.exit(0)
 end
 
--- Drive the IPM exactly as pre_solve.forwerd_solve / the in-engine explore loop
--- do: solve() advances one step per call, "ready" -> "calculating" -> terminal.
--- tolerance / iterate_limit / step_cap come from meta so they match the producer.
-local state, iteration, vars = "ready", nil, nil
-local steps = 0
-repeat
-    local ok_solve, s, it, v = pcall(linear_programming.solve, problem, state, iteration, vars,
-        meta.tolerance, meta.iterate_limit)
-    if not ok_solve then
-        print("ERROR seed=" .. tostring(meta.seed) .. " solve raised: " .. tostring(s))
-        os.exit(0)
-    end
-    state, iteration, vars = s, it, v
-    steps = steps + 1
-until (state ~= "ready" and state ~= "calculating") or steps > meta.step_cap
+-- Drive the IPM to a terminal state (shared with sweep_cost via problem_dump):
+-- solve() advances one step per call, "ready" -> "calculating" -> terminal, with
+-- tolerance / iterate_limit / step_cap from meta so it matches the producer.
+local state, steps, vars, solve_err = problem_dump.solve_dumped(linear_programming, problem, meta)
+if solve_err then
+    print("ERROR seed=" .. tostring(meta.seed) .. " solve raised: " .. solve_err)
+    os.exit(0)
+end
 
 print(ed.format_result(meta, state, steps, ed.detect(vars)))

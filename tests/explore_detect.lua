@@ -31,6 +31,38 @@ local PARK_ABS = M.PARK_ABS
 local CHEAT_EPS = M.CHEAT_EPS
 local PARK_NOTE_FRACTION = M.PARK_NOTE_FRACTION
 
+---True for a real production recipe flow variable: a `recipe/` or
+---`virtual_recipe/` primal that is NOT a |bridge| temperature-conversion
+---variable. |bridge| variables are LP-internal plumbing create_problem injects,
+---not recipes the user placed, so they are excluded. Shared by detect() and the
+---cost-sweep driver (tests/sweep_cost.lua) so the two agree on what counts as a
+---recipe.
+---@param k string
+---@return boolean
+function M.is_recipe(k)
+    if k:find("|bridge|", 1, true) then return false end
+    return k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/"
+end
+
+---The park threshold for a solved variable set: a recipe value with |value|
+---below this sits at the IPM's interior floor rather than carrying real flow.
+---Relative to the chain's largest recipe value (with an absolute floor) so it
+---adapts to the solution scale instead of assuming a fixed one. Shared with the
+---cost-sweep driver so park decisions stay consistent across both readers.
+---@param vars PackedVariables?
+---@return number
+function M.park_threshold(vars)
+    local max_x = 0
+    if vars and vars.x then
+        for k, v in pairs(vars.x) do
+            if M.is_recipe(k) and math.abs(v) > max_x then
+                max_x = math.abs(v)
+            end
+        end
+    end
+    return math.max(PARK_ABS, max_x * PARK_REL)
+end
+
 ---Inspect a solved variable set. Reports the TRUE-signal cheat mass plus the
 ---(secondary) park fractions: all recipes, and excluding pyvoid waste recipes.
 ---`active` is how many real recipes carry flow; `degenerate` flags the sharpest
@@ -62,22 +94,14 @@ function M.detect(vars)
     -- variables (keyed virtual_recipe/|bridge|...) are LP-internal plumbing
     -- create_problem injects, not recipes the user placed; they park whenever no
     -- temperature conversion is needed, so excluding them keeps the count about
-    -- the user's chain rather than solver internals.
-    local function is_recipe(k)
-        if k:find("|bridge|", 1, true) then return false end
-        return k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/"
-    end
+    -- the user's chain rather than solver internals. M.is_recipe is the shared
+    -- predicate; is_void is pyvoid-specific and stays local to this taxonomy.
+    local is_recipe = M.is_recipe
     local function is_void(k)
         return k:find("pyvoid", 1, true) ~= nil
     end
 
-    local max_x = 0
-    for k, v in pairs(vars.x) do
-        if is_recipe(k) and math.abs(v) > max_x then
-            max_x = math.abs(v)
-        end
-    end
-    local thresh = math.max(PARK_ABS, max_x * PARK_REL)
+    local thresh = M.park_threshold(vars)
 
     local recipes, near_zero = 0, 0
     local recipes_nv, near_zero_nv = 0, 0

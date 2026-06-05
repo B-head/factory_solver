@@ -51,75 +51,19 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
+# Shared RCON transport / config resolution / mod-list control (also used by
+# tests/smoke_rcon.ps1 and tests/explore_chains.ps1).
+. "$PSScriptRoot/rcon_lib.ps1"
+
 # -Mods comma/space normalization (see smoke_rcon.ps1 for why -File mangles it).
 $Mods = @($Mods | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 $logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
 $booting = [string]::IsNullOrWhiteSpace($Connect)
 
-# ---------------------------------------------------------------------------
-# RCON client (Source RCON over TCP, .NET sockets). Same framing as
-# tests/smoke_rcon.ps1, plus a multi-packet drain so large pretty-printed tables
-# come back whole.
-# ---------------------------------------------------------------------------
-function Read-Exact {
-    param([System.IO.Stream] $Stream, [int] $Count)
-    $buf = [byte[]]::new($Count)
-    $off = 0
-    while ($off -lt $Count) {
-        $n = $Stream.Read($buf, $off, $Count - $off)
-        if ($n -le 0) { throw "RCON stream closed mid-packet" }
-        $off += $n
-    }
-    return , $buf
-}
-
-function Send-RconPacket {
-    param([System.IO.Stream] $Stream, [int] $Id, [int] $Type, [string] $Body)
-    $bodyBytes = [System.Text.Encoding]::ASCII.GetBytes($Body)
-    $size = 10 + $bodyBytes.Length
-    $buf = [byte[]]::new(4 + $size)
-    [BitConverter]::GetBytes([int]$size).CopyTo($buf, 0)
-    [BitConverter]::GetBytes([int]$Id).CopyTo($buf, 4)
-    [BitConverter]::GetBytes([int]$Type).CopyTo($buf, 8)
-    [Array]::Copy($bodyBytes, 0, $buf, 12, $bodyBytes.Length)
-    $Stream.Write($buf, 0, $buf.Length)
-    $Stream.Flush()
-}
-
-function Receive-RconPacket {
-    param([System.IO.Stream] $Stream)
-    $sizeBytes = Read-Exact -Stream $Stream -Count 4
-    $size = [BitConverter]::ToInt32($sizeBytes, 0)
-    $rest = Read-Exact -Stream $Stream -Count $size
-    $id = [BitConverter]::ToInt32($rest, 0)
-    $type = [BitConverter]::ToInt32($rest, 4)
-    $bodyLen = $size - 10
-    $body = if ($bodyLen -gt 0) { [System.Text.Encoding]::ASCII.GetString($rest, 8, $bodyLen) } else { "" }
-    return [PSCustomObject]@{ Id = $id; Type = $type; Body = $body }
-}
-
-# Send one command and return its full response. Factorio fragments responses
-# over ~4 KB across multiple packets, so after the first packet (allowed up to
-# 1.5 s for the server to compute) we keep reading until the stream goes idle.
-function Invoke-RconCommand {
-    param([System.IO.Stream] $Stream, [string] $CommandText)
-    Send-RconPacket -Stream $Stream -Id 2 -Type 2 -Body $CommandText
-    $sb = New-Object System.Text.StringBuilder
-    $Stream.ReadTimeout = 1500
-    try {
-        $first = Receive-RconPacket -Stream $Stream
-        [void]$sb.Append($first.Body)
-    } catch [System.IO.IOException] {
-        return ""   # no response (e.g. a statement that printed nothing)
-    }
-    $Stream.ReadTimeout = 200
-    while ($true) {
-        try { [void]$sb.Append((Receive-RconPacket -Stream $Stream).Body) }
-        catch [System.IO.IOException] { break }   # idle => response complete
-    }
-    return $sb.ToString().TrimEnd()
-}
+# RCON transport (Read-Exact / Send / Receive / Invoke-RconCommandDrain) comes
+# from rcon_lib.ps1, dot-sourced above. The console uses the multi-packet drain
+# variant so large pretty-printed tables come back whole.
 
 # ---------------------------------------------------------------------------
 # Translate a REPL line into a console command. Returns $null for a handled
@@ -169,25 +113,15 @@ $helpText = @"
 $proc = $null
 $client = $null
 $stream = $null
-$controlMods = $false
-$modListPath = $null
-$modListBak = $null
-$modListHadOriginal = $false
+$modList = $null
 $preBytes = if (Test-Path $logFile) { (Get-Item $logFile).Length } else { 0 }
 $exitCode = 0
 
 try {
     if ($booting) {
-        $settingsPath = Join-Path $repoRoot ".vscode/settings.json"
-        $settingsJson = (Get-Content $settingsPath -Raw) -replace ',(\s*[}\]])', '$1'
-        $factorio = ($settingsJson | ConvertFrom-Json).'factorio.versions'[0].factorioPath
-        if (-not (Test-Path $factorio)) { Write-Error "Factorio binary not found at $factorio"; exit 2 }
-
-        $launchPath = Join-Path $repoRoot ".vscode/launch.json"
-        $launchNoComments = ((Get-Content $launchPath -Raw) -split "`n" | ForEach-Object { $_ -replace '//.*$', '' }) -join "`n"
-        $launch = ($launchNoComments -replace ',(\s*[}\]])', '$1') | ConvertFrom-Json
-        $modsPathRaw = ($launch.configurations | Where-Object { $_.modsPath } | Select-Object -First 1).modsPath
-        $modsDir = (Resolve-Path ($modsPathRaw -replace [regex]::Escape('${workspaceFolder}'), $repoRoot.Path)).Path
+        $cfg = Resolve-FactorioConfig -RepoRoot $repoRoot.Path
+        $factorio = $cfg.Factorio
+        $modsDir = $cfg.ModsDir
 
         $serverSettings = Join-Path $env:TEMP "factory_solver_console_server_settings.json"
         @'
@@ -203,39 +137,8 @@ try {
 
         Write-Host "console: booting $Scenario  (mods: $(if ($Mods.Count) { $Mods -join ', ' } else { 'dev config unchanged' }))"
 
-        # Mod set control (mirrors smoke_rcon.ps1: backup -> rewrite -> restore).
-        $modListPath = Join-Path $modsDir "mod-list.json"
-        $modListBak = "$modListPath.console-bak"
-        $controlMods = $Mods.Count -gt 0
-        if (Test-Path $modListBak) { Move-Item -Force $modListBak $modListPath }
-        if ($controlMods) {
-            $modListHadOriginal = Test-Path $modListPath
-            $names = New-Object System.Collections.Generic.List[string]
-            if ($modListHadOriginal) {
-                Copy-Item $modListPath $modListBak -Force
-                foreach ($m in (Get-Content $modListPath -Raw | ConvertFrom-Json).mods) { [void]$names.Add($m.name) }
-            }
-            foreach ($m in $Mods) { if (-not $names.Contains($m)) { [void]$names.Add($m) } }
-            # Disk mods absent from the original mod-list.json are auto-enabled by
-            # Factorio; enumerate them (folders with info.json + name_version.zip)
-            # so each is explicitly disabled unless requested. See smoke_rcon.ps1.
-            foreach ($d in Get-ChildItem $modsDir -Directory -ErrorAction SilentlyContinue) {
-                $info = Join-Path $d.FullName "info.json"
-                if (Test-Path $info) {
-                    try { $n = (Get-Content $info -Raw | ConvertFrom-Json).name } catch { $n = $null }
-                    if ($n -and -not $names.Contains($n)) { [void]$names.Add($n) }
-                }
-            }
-            foreach ($z in Get-ChildItem $modsDir -Filter *.zip -ErrorAction SilentlyContinue) {
-                if ($z.BaseName -match '^(.+)_\d+\.\d+\.\d+$' -and -not $names.Contains($Matches[1])) {
-                    [void]$names.Add($Matches[1])
-                }
-            }
-            $entries = foreach ($name in $names) {
-                [PSCustomObject]@{ name = $name; enabled = ($Mods -contains $name) -or ($name -eq 'base') }
-            }
-            ([PSCustomObject]@{ mods = @($entries) } | ConvertTo-Json -Depth 5) | Set-Content -Path $modListPath -Encoding utf8
-        }
+        # Mod set control (shared; -Mods @() leaves the dev config untouched).
+        $modList = Set-ReproducibleModList -ModsDir $modsDir -Mods $Mods -BackupSuffix "console-bak"
 
         $arguments = @(
             "--start-server-load-scenario", $Scenario,
@@ -291,7 +194,7 @@ try {
         if ($Line -eq ":quit" -or $Line -eq ":q") { return "QUIT" }
         if ($Line -eq ":help" -or $Line -eq ":h") { Write-Host $helpText; return }
         if ($Line -match '^:log\s*(.*)$') { Show-Log -Arg $Matches[1].Trim() -PreBytes $preBytes; return }
-        $resp = Invoke-RconCommand -Stream $stream -CommandText (ConvertTo-ConsoleCommand $Line)
+        $resp = Invoke-RconCommandDrain -Stream $stream -CommandText (ConvertTo-ConsoleCommand $Line)
         if ($resp -ne "") { Write-Host $resp }
     }
 
@@ -326,10 +229,7 @@ finally {
         $smokeSave = Join-Path $env:APPDATA "Factorio/saves/$(($Scenario -split '/')[-1]).zip"
         if (Test-Path $smokeSave) { Remove-Item $smokeSave -Force -ErrorAction SilentlyContinue }
     }
-    if ($controlMods) {
-        if (Test-Path $modListBak) { Move-Item -Force $modListBak $modListPath }
-        elseif (-not $modListHadOriginal) { Remove-Item $modListPath -Force -ErrorAction SilentlyContinue }
-    }
+    Restore-ModList -State $modList
 }
 
 exit $exitCode

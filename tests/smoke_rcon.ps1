@@ -50,6 +50,10 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
+# Shared RCON transport / config resolution / mod-list control (also used by
+# tests/explore_chains.ps1 and tests/console.ps1).
+. "$PSScriptRoot/rcon_lib.ps1"
+
 # Normalize -Mods to a clean string array. `powershell -File ... -Mods a,b,c`
 # binds the comma list as a SINGLE string (no split) rather than an array, which
 # would silently leave only base enabled; splitting on commas here makes both
@@ -57,40 +61,16 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Mods = @($Mods | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 # ---------------------------------------------------------------------------
-# Settings / paths (shared shape with tests/smoke.ps1)
+# Settings / paths (Resolve-FactorioConfig is shared with the other launchers)
 # ---------------------------------------------------------------------------
-$settingsPath = Join-Path $repoRoot ".vscode/settings.json"
-if (-not (Test-Path $settingsPath)) {
-    Write-Error "settings.json not found at $settingsPath"
+try {
+    $cfg = Resolve-FactorioConfig -RepoRoot $repoRoot.Path
+} catch {
+    Write-Error $_.Exception.Message
     exit 2
 }
-# Windows PowerShell 5.1's ConvertFrom-Json rejects JSONC trailing commas; strip
-# them first (same workaround as tests/smoke.ps1).
-$settingsJson = (Get-Content $settingsPath -Raw) -replace ',(\s*[}\]])', '$1'
-$settings = $settingsJson | ConvertFrom-Json
-$factorio = $settings.'factorio.versions'[0].factorioPath
-if (-not (Test-Path $factorio)) {
-    Write-Error "Factorio binary not found at $factorio"
-    exit 2
-}
-
-# The mods directory is sourced from .vscode/launch.json's modsPath -- the same
-# value factoriomod-debug uses -- so the smoke stays in lockstep with the
-# debugger config instead of hardcoding "repo parent". launch.json is JSONC, so
-# strip // line comments and trailing commas before parsing.
-$launchPath = Join-Path $repoRoot ".vscode/launch.json"
-if (-not (Test-Path $launchPath)) {
-    Write-Error "launch.json not found at $launchPath"
-    exit 2
-}
-$launchNoComments = ((Get-Content $launchPath -Raw) -split "`n" | ForEach-Object { $_ -replace '//.*$', '' }) -join "`n"
-$launch = ($launchNoComments -replace ',(\s*[}\]])', '$1') | ConvertFrom-Json
-$modsPathRaw = ($launch.configurations | Where-Object { $_.modsPath } | Select-Object -First 1).modsPath
-if (-not $modsPathRaw) {
-    Write-Error "no configuration with a modsPath in launch.json"
-    exit 2
-}
-$modsDir = (Resolve-Path ($modsPathRaw -replace [regex]::Escape('${workspaceFolder}'), $repoRoot.Path)).Path
+$factorio = $cfg.Factorio
+$modsDir = $cfg.ModsDir
 $logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
 
 # A dedicated server wants a server-settings file; the built-in defaults prompt
@@ -116,62 +96,6 @@ Write-Host "smoke_rcon: fixtures = $($Fixtures -join ', ')"
 Write-Host "smoke_rcon: mod set  = $(if ($Mods.Count) { $Mods -join ', ' } else { '(dev config unchanged)' })"
 
 # ---------------------------------------------------------------------------
-# RCON client (Source RCON protocol over TCP, .NET sockets, no dependencies)
-#
-# Packet on the wire (all little-endian, which is what .NET BitConverter emits
-# on x86/x64): int32 size | int32 id | int32 type | body (ASCII) | 0x00 | 0x00.
-# `size` counts everything after itself, i.e. 4 + 4 + len(body) + 2.
-# Types: 3 = auth request, 2 = exec command / auth response, 0 = response value.
-# ---------------------------------------------------------------------------
-function Read-Exact {
-    param([System.IO.Stream] $Stream, [int] $Count)
-    $buf = [byte[]]::new($Count)
-    $off = 0
-    while ($off -lt $Count) {
-        $n = $Stream.Read($buf, $off, $Count - $off)
-        if ($n -le 0) { throw "RCON stream closed mid-packet" }
-        $off += $n
-    }
-    return ,$buf
-}
-
-function Send-RconPacket {
-    param([System.IO.Stream] $Stream, [int] $Id, [int] $Type, [string] $Body)
-    $bodyBytes = [System.Text.Encoding]::ASCII.GetBytes($Body)
-    $size = 10 + $bodyBytes.Length
-    $buf = [byte[]]::new(4 + $size)               # last 2 bytes stay zero = the nulls
-    [BitConverter]::GetBytes([int]$size).CopyTo($buf, 0)
-    [BitConverter]::GetBytes([int]$Id).CopyTo($buf, 4)
-    [BitConverter]::GetBytes([int]$Type).CopyTo($buf, 8)
-    [Array]::Copy($bodyBytes, 0, $buf, 12, $bodyBytes.Length)
-    $Stream.Write($buf, 0, $buf.Length)
-    $Stream.Flush()
-}
-
-function Receive-RconPacket {
-    param([System.IO.Stream] $Stream)
-    $sizeBytes = Read-Exact -Stream $Stream -Count 4
-    $size = [BitConverter]::ToInt32($sizeBytes, 0)
-    $rest = Read-Exact -Stream $Stream -Count $size
-    $id = [BitConverter]::ToInt32($rest, 0)
-    $type = [BitConverter]::ToInt32($rest, 4)
-    $bodyLen = $size - 10
-    $body = if ($bodyLen -gt 0) { [System.Text.Encoding]::ASCII.GetString($rest, 8, $bodyLen) } else { "" }
-    return [PSCustomObject]@{ Id = $id; Type = $type; Body = $body }
-}
-
-# Run a single console command and return its rcon.print output (trimmed).
-# Commands here always wrap their payload in rcon.print(), so a response is
-# expected. Responses are small (a solution name or a solver_state word), so
-# single-packet reads suffice; large multi-packet responses are out of scope.
-function Invoke-RconCommand {
-    param([System.IO.Stream] $Stream, [string] $Command)
-    Send-RconPacket -Stream $Stream -Id 2 -Type 2 -Body $Command
-    $resp = Receive-RconPacket -Stream $Stream
-    return $resp.Body.Trim()
-}
-
-# ---------------------------------------------------------------------------
 # Launch (Steam relaunch + stale lock handling mirror tests/smoke.ps1)
 # ---------------------------------------------------------------------------
 $arguments = @(
@@ -195,56 +119,11 @@ if ((Test-Path $lockFile) -and -not (Get-Process -Name "factorio" -ErrorAction S
     Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 }
 
-# --- Mod set control --------------------------------------------------------
-# Factorio reads enable/disable state from <mod-directory>/mod-list.json. To run
-# a known, reproducible set we rewrite that file (requested mods enabled, the
-# rest disabled) and restore it in the finally block. Because the directory is
-# the shared dev mods folder, the original is backed up to a .smoke-bak sibling;
-# a .smoke-bak left over by a crashed run is restored on startup before we touch
-# anything, so the dev config is never lost. -Mods @() opts out entirely.
-$modListPath = Join-Path $modsDir "mod-list.json"
-$modListBak = "$modListPath.smoke-bak"
-$controlMods = $Mods.Count -gt 0
-$modListHadOriginal = $false
-
-if (Test-Path $modListBak) {
-    Write-Host "smoke_rcon: restoring mod-list.json from a prior run's backup"
-    Move-Item -Force $modListBak $modListPath
-}
-
-if ($controlMods) {
-    $modListHadOriginal = Test-Path $modListPath
-    $names = New-Object System.Collections.Generic.List[string]
-    if ($modListHadOriginal) {
-        Copy-Item $modListPath $modListBak -Force
-        foreach ($m in (Get-Content $modListPath -Raw | ConvertFrom-Json).mods) { [void]$names.Add($m.name) }
-    }
-    # Ensure requested mods appear even if absent from the dev config.
-    foreach ($m in $Mods) { if (-not $names.Contains($m)) { [void]$names.Add($m) } }
-    # Close the gap: a mod present on disk but absent from the original
-    # mod-list.json is auto-enabled by Factorio (mods it doesn't find listed
-    # default to enabled). Enumerate disk mods -- folders with an info.json and
-    # name_version.zip archives -- so each gets an explicit entry and is disabled
-    # unless requested, keeping the set reproducible.
-    foreach ($d in Get-ChildItem $modsDir -Directory -ErrorAction SilentlyContinue) {
-        $info = Join-Path $d.FullName "info.json"
-        if (Test-Path $info) {
-            try { $n = (Get-Content $info -Raw | ConvertFrom-Json).name } catch { $n = $null }
-            if ($n -and -not $names.Contains($n)) { [void]$names.Add($n) }
-        }
-    }
-    foreach ($z in Get-ChildItem $modsDir -Filter *.zip -ErrorAction SilentlyContinue) {
-        if ($z.BaseName -match '^(.+)_\d+\.\d+\.\d+$' -and -not $names.Contains($Matches[1])) {
-            [void]$names.Add($Matches[1])
-        }
-    }
-    # base is core and always loads; force it enabled regardless of -Mods.
-    $entries = foreach ($name in $names) {
-        [PSCustomObject]@{ name = $name; enabled = ($Mods -contains $name) -or ($name -eq 'base') }
-    }
-    ([PSCustomObject]@{ mods = @($entries) } | ConvertTo-Json -Depth 5) |
-        Set-Content -Path $modListPath -Encoding utf8
-}
+# --- Mod set control (rewrite mod-list.json, restore in finally) ------------
+# Shared with the other launchers; -Mods @() opts out and leaves the dev config
+# untouched. A .smoke-bak left over by a crashed run is restored first.
+$modList = Set-ReproducibleModList -ModsDir $modsDir -Mods $Mods -BackupSuffix "smoke-bak" `
+    -RestoreMessage "smoke_rcon: restoring mod-list.json from a prior run's backup"
 
 $proc = Start-Process -FilePath $factorio -ArgumentList $arguments -PassThru -NoNewWindow
 
@@ -494,13 +373,7 @@ finally {
     if (Test-Path $smokeSave) { Remove-Item $smokeSave -Force -ErrorAction SilentlyContinue }
 
     # Restore the dev mod-list.json we rewrote for this run.
-    if ($controlMods) {
-        if (Test-Path $modListBak) {
-            Move-Item -Force $modListBak $modListPath
-        } elseif (-not $modListHadOriginal) {
-            Remove-Item $modListPath -Force -ErrorAction SilentlyContinue
-        }
-    }
+    Restore-ModList -State $modList
 }
 
 exit $exitCode

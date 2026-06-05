@@ -82,20 +82,18 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
-$settingsPath = Join-Path $repoRoot ".vscode/settings.json"
-if (-not (Test-Path $settingsPath)) { Write-Error "settings.json not found at $settingsPath"; exit 2 }
-$settingsJson = (Get-Content $settingsPath -Raw) -replace ',(\s*[}\]])', '$1'
-$settings = $settingsJson | ConvertFrom-Json
-$factorio = $settings.'factorio.versions'[0].factorioPath
-if (-not (Test-Path $factorio)) { Write-Error "Factorio binary not found at $factorio"; exit 2 }
+# Shared RCON transport / config resolution / mod-list control (also used by
+# tests/smoke_rcon.ps1 and tests/console.ps1).
+. "$PSScriptRoot/rcon_lib.ps1"
 
-$launchPath = Join-Path $repoRoot ".vscode/launch.json"
-if (-not (Test-Path $launchPath)) { Write-Error "launch.json not found at $launchPath"; exit 2 }
-$launchNoComments = ((Get-Content $launchPath -Raw) -split "`n" | ForEach-Object { $_ -replace '//.*$', '' }) -join "`n"
-$launch = ($launchNoComments -replace ',(\s*[}\]])', '$1') | ConvertFrom-Json
-$modsPathRaw = ($launch.configurations | Where-Object { $_.modsPath } | Select-Object -First 1).modsPath
-if (-not $modsPathRaw) { Write-Error "no configuration with a modsPath in launch.json"; exit 2 }
-$modsDir = (Resolve-Path ($modsPathRaw -replace [regex]::Escape('${workspaceFolder}'), $repoRoot.Path)).Path
+try {
+    $cfg = Resolve-FactorioConfig -RepoRoot $repoRoot.Path
+} catch {
+    Write-Error $_.Exception.Message
+    exit 2
+}
+$factorio = $cfg.Factorio
+$modsDir = $cfg.ModsDir
 $logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
 # Factorio writes helpers.write_file output under script-output. The producer
 # (explore_emit) dumps one problem per chain into explore_problems/ here; phase 2
@@ -168,46 +166,6 @@ Write-Host "explore: rcon     = 127.0.0.1:$RconPort"
 Write-Host "explore: seeds    = $StartSeed .. $($StartSeed + $Seeds - 1)  (hops=$Hops)"
 Write-Host "explore: mod set  = $($Mods -join ', ')"
 Write-Host "explore: hit log  = $HitLog"
-
-# --- RCON client (Source RCON over TCP; copied from smoke_rcon.ps1) ----------
-function Read-Exact {
-    param([System.IO.Stream] $Stream, [int] $Count)
-    $buf = [byte[]]::new($Count); $off = 0
-    while ($off -lt $Count) {
-        $n = $Stream.Read($buf, $off, $Count - $off)
-        if ($n -le 0) { throw "RCON stream closed mid-packet" }
-        $off += $n
-    }
-    return ,$buf
-}
-function Send-RconPacket {
-    param([System.IO.Stream] $Stream, [int] $Id, [int] $Type, [string] $Body)
-    $bodyBytes = [System.Text.Encoding]::ASCII.GetBytes($Body)
-    $size = 10 + $bodyBytes.Length
-    $buf = [byte[]]::new(4 + $size)
-    [BitConverter]::GetBytes([int]$size).CopyTo($buf, 0)
-    [BitConverter]::GetBytes([int]$Id).CopyTo($buf, 4)
-    [BitConverter]::GetBytes([int]$Type).CopyTo($buf, 8)
-    [Array]::Copy($bodyBytes, 0, $buf, 12, $bodyBytes.Length)
-    $Stream.Write($buf, 0, $buf.Length); $Stream.Flush()
-}
-function Receive-RconPacket {
-    param([System.IO.Stream] $Stream)
-    $sizeBytes = Read-Exact -Stream $Stream -Count 4
-    $size = [BitConverter]::ToInt32($sizeBytes, 0)
-    $rest = Read-Exact -Stream $Stream -Count $size
-    $id = [BitConverter]::ToInt32($rest, 0)
-    $type = [BitConverter]::ToInt32($rest, 4)
-    $bodyLen = $size - 10
-    $body = if ($bodyLen -gt 0) { [System.Text.Encoding]::ASCII.GetString($rest, 8, $bodyLen) } else { "" }
-    return [PSCustomObject]@{ Id = $id; Type = $type; Body = $body }
-}
-function Invoke-RconCommand {
-    param([System.IO.Stream] $Stream, [string] $Command)
-    Send-RconPacket -Stream $Stream -Id 2 -Type 2 -Body $Command
-    $resp = Receive-RconPacket -Stream $Stream
-    return $resp.Body.Trim()
-}
 
 # --- Result classification (shared by serial sweep and parallel phase 2) ------
 # A status line is one of: <<HIT (undesirable solution, any subclass), ERROR,
@@ -355,37 +313,10 @@ if ((Test-Path $lockFile) -and -not (Get-Process -Name "factorio" -ErrorAction S
 }
 
 # --- Mod set control (rewrite mod-list.json, restore in finally) -------------
-$modListPath = Join-Path $modsDir "mod-list.json"
-$modListBak = "$modListPath.explore-bak"
-$modListHadOriginal = $false
-if (Test-Path $modListBak) {
-    Write-Host "explore: restoring mod-list.json from a prior run's backup"
-    Move-Item -Force $modListBak $modListPath
-}
-$modListHadOriginal = Test-Path $modListPath
-$names = New-Object System.Collections.Generic.List[string]
-if ($modListHadOriginal) {
-    Copy-Item $modListPath $modListBak -Force
-    foreach ($m in (Get-Content $modListPath -Raw | ConvertFrom-Json).mods) { [void]$names.Add($m.name) }
-}
-foreach ($m in $Mods) { if (-not $names.Contains($m)) { [void]$names.Add($m) } }
-foreach ($d in Get-ChildItem $modsDir -Directory -ErrorAction SilentlyContinue) {
-    $info = Join-Path $d.FullName "info.json"
-    if (Test-Path $info) {
-        try { $n = (Get-Content $info -Raw | ConvertFrom-Json).name } catch { $n = $null }
-        if ($n -and -not $names.Contains($n)) { [void]$names.Add($n) }
-    }
-}
-foreach ($z in Get-ChildItem $modsDir -Filter *.zip -ErrorAction SilentlyContinue) {
-    if ($z.BaseName -match '^(.+)_\d+\.\d+\.\d+$' -and -not $names.Contains($Matches[1])) {
-        [void]$names.Add($Matches[1])
-    }
-}
-$entries = foreach ($name in $names) {
-    [PSCustomObject]@{ name = $name; enabled = ($Mods -contains $name) -or ($name -eq 'base') }
-}
-([PSCustomObject]@{ mods = @($entries) } | ConvertTo-Json -Depth 5) |
-    Set-Content -Path $modListPath -Encoding utf8
+# Shared with the other launchers. The explorer always controls the mod set (the
+# default -Mods is the full pyanodon/quality set, never empty).
+$modList = Set-ReproducibleModList -ModsDir $modsDir -Mods $Mods -BackupSuffix "explore-bak" `
+    -RestoreMessage "explore: restoring mod-list.json from a prior run's backup"
 
 $proc = Start-Process -FilePath $factorio -ArgumentList $arguments -PassThru -NoNewWindow
 $client = $null; $stream = $null; $exitCode = 1
@@ -591,11 +522,7 @@ finally {
     $smokeSave = Join-Path $env:APPDATA "Factorio/saves/smoke_rcon.zip"
     if (Test-Path $smokeSave) { Remove-Item $smokeSave -Force -ErrorAction SilentlyContinue }
 
-    if (Test-Path $modListBak) {
-        Move-Item -Force $modListBak $modListPath
-    } elseif (-not $modListHadOriginal) {
-        Remove-Item $modListPath -Force -ErrorAction SilentlyContinue
-    }
+    Restore-ModList -State $modList
 }
 
 exit $exitCode

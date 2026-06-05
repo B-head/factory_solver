@@ -74,6 +74,7 @@ require "tests/headless_env"
 local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 local ed = require "tests/explore_detect"
+local problem_dump = require "tests/problem_dump"
 
 local DUMP_VARS = os.getenv("SWEEP_VARS") == "1"
 
@@ -102,12 +103,17 @@ if arg[3] and not mode_flag then
 end
 
 -- ---- load the dumped problem ------------------------------------------------
-local chunk, load_err = loadfile(path)
-if not chunk then die("load " .. path .. ": " .. tostring(load_err), 1) end
-local ok_load, prob = pcall(chunk)
-if not ok_load or type(prob) ~= "table" or type(prob.meta) ~= "table" then
-    die("malformed problem file: " .. path, 1)
+-- Shared loader (problem_dump) with tests/solve_problem.lua; the die() wording
+-- and exit code 1 are this driver's own.
+local prob, kind, detail = problem_dump.load_problem(path)
+if not prob then
+    if kind == "load" then
+        die("load " .. path .. ": " .. tostring(detail), 1)
+    else
+        die("malformed problem file: " .. path, 1)
+    end
 end
+prob = assert(prob) -- die() above exits on nil; narrows prob for the closures below
 local meta = prob.meta
 
 -- ---- helpers ----------------------------------------------------------------
@@ -130,8 +136,7 @@ local function build_problem()
     if not ok then die("create_problem raised: " .. tostring(problem), 1) end
     if RECIPE_EPS then
         for key, term in pairs(problem.primals) do
-            if (key:sub(1, 7) == "recipe/" or key:sub(1, 15) == "virtual_recipe/")
-                and not key:find("|bridge|", 1, true) then
+            if ed.is_recipe(key) then
                 term.cost = term.cost + RECIPE_EPS
             end
         end
@@ -155,18 +160,12 @@ local function override_cost(problem, substr, cost)
     return matched
 end
 
--- Drive the IPM exactly as tests/solve_problem.lua does: solve() advances one
--- step per call, "ready" -> "calculating" -> terminal.
+-- Drive the IPM exactly as tests/solve_problem.lua does (shared via problem_dump):
+-- solve() advances one step per call, "ready" -> "calculating" -> terminal. The
+-- die() wording on a raised solve is this driver's own.
 local function solve(problem)
-    local state, iteration, vars = "ready", nil, nil
-    local steps = 0
-    repeat
-        local ok, s, it, v = pcall(linear_programming.solve, problem, state, iteration, vars,
-            meta.tolerance, meta.iterate_limit)
-        if not ok then die("solve raised: " .. tostring(s), 1) end
-        state, iteration, vars = s, it, v
-        steps = steps + 1
-    until (state ~= "ready" and state ~= "calculating") or steps > meta.step_cap
+    local state, steps, vars, err = problem_dump.solve_dumped(linear_programming, problem, meta)
+    if err then die("solve raised: " .. err, 1) end
     return state, steps, vars
 end
 
@@ -183,14 +182,7 @@ end
 -- the same park threshold detect() uses so the two stay consistent.
 local function dump_vars(vars)
     if not vars or not vars.x then return end
-    local max_x = 0
-    for k, v in pairs(vars.x) do
-        if (k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/")
-            and not k:find("|bridge|", 1, true) and math.abs(v) > max_x then
-            max_x = math.abs(v)
-        end
-    end
-    local thresh = math.max(ed.PARK_ABS, max_x * ed.PARK_REL)
+    local thresh = ed.park_threshold(vars)
     local keys = {}
     for k, v in pairs(vars.x) do
         if math.abs(v) >= thresh then keys[#keys + 1] = k end
@@ -211,8 +203,7 @@ local function recipe_stats(vars)
     local sum, max = 0, 0
     if vars and vars.x then
         for k, v in pairs(vars.x) do
-            if (k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/")
-                and not k:find("|bridge|", 1, true) then
+            if ed.is_recipe(k) then
                 local a = math.abs(v)
                 sum = sum + a
                 if a > max then max = a end
@@ -235,14 +226,7 @@ local function measure(vars)
         rsum = 0, rmax = 0, n_recipe = 0, n_recipe_active = 0,
     }
     if not (vars and vars.x) then return m end
-    local maxr = 0
-    for k, v in pairs(vars.x) do
-        if (k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/")
-            and not k:find("|bridge|", 1, true) and math.abs(v) > maxr then
-            maxr = math.abs(v)
-        end
-    end
-    local th = math.max(ed.PARK_ABS, maxr * ed.PARK_REL)
+    local th = ed.park_threshold(vars)
     for k, v in pairs(vars.x) do
         local a = math.abs(v)
         if k:find("|shortage_source|", 1, true) then
@@ -257,8 +241,7 @@ local function measure(vars)
             m.elastic = m.elastic + a; if a > th then m.n_elastic = m.n_elastic + 1 end
         elseif k:find("slack%", 1, true) then
             m.slack = m.slack + a
-        elseif (k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/")
-            and not k:find("|bridge|", 1, true) then
+        elseif ed.is_recipe(k) then
             m.rsum = m.rsum + a; if a > m.rmax then m.rmax = a end
             m.n_recipe = m.n_recipe + 1
             if a > th then m.n_recipe_active = m.n_recipe_active + 1 end
