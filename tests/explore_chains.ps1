@@ -2,19 +2,34 @@
 #
 # Boots Factorio as a dedicated server with the factory_solver/smoke_rcon
 # scenario (control.lua registers BOTH the smoke driver and the chain explorer
-# there), enables a pyanodon mod set, then drives manage/chain_explorer.lua over
+# there), enables a pyanodon mod set, then drives tests/chain_explorer.lua over
 # RCON: for each seed it builds a random connected recipe chain, pins the seed
 # recipe, solves it through the real pre_solve -> create_problem -> IPM path, and
 # reports whether the solution is "undesirable" (solver_state != finished, or a
 # large fraction of recipe variables parked near zero).
 #
+# Two modes (Option A producer/consumer split):
+#   * DEFAULT (parallel): phase 1 boots Factorio ONCE and dumps each generated
+#     chain to script-output/explore_problems/*.lua (generation + normalization
+#     only -- no solve) via remote.call explore_emit; phase 2 quits Factorio and
+#     solves the dumped problems with a pool of standalone `lua` workers
+#     (tests/solve_problem.lua) in parallel across cores. The IPM solve is the
+#     dominant cost and is Factorio-free, so this is much faster than serial.
+#   * -Serial: the original single-boot in-engine RCON solve sweep (remote.call
+#     explore). Use when `lua` isn't available, or to cross-check that parallel
+#     and in-engine produce identical result lines.
+# Both produce the same status lines; "<<HIT" marks undesirable solutions, each
+# reproducible by re-running its seed.
+#
 # This shares the RCON transport / launch / mod-list machinery with
 # tests/smoke_rcon.ps1; it is a separate file so the smoke gate stays a clean
-# pass/fail and this stays an open-ended explorer. Lines ending in "<<HIT" are
-# the undesirable solutions; each is reproducible by re-running its seed.
+# pass/fail and this stays an open-ended explorer.
 #
 # Usage:
-#   pwsh tests/explore_chains.ps1                 # 30 seeds, pyanodon full set
+#   pwsh tests/explore_chains.ps1                 # 30 seeds, pyanodon, pipelined parallel
+#   pwsh tests/explore_chains.ps1 -Workers 12     # cap the worker pool
+#   pwsh tests/explore_chains.ps1 -ReuseProblems  # re-solve the last run's dumped chains (no Factorio boot)
+#   pwsh tests/explore_chains.ps1 -Serial         # in-engine solve (no lua pool)
 #   pwsh tests/explore_chains.ps1 -Seeds 100 -StartSeed 1 -Hops 16
 #   pwsh tests/explore_chains.ps1 -Mods base,flib,factory_solver,space-age  # different mod set
 
@@ -36,7 +51,32 @@ param(
     # Quality recycling mode: enable the quality mod, fill machine module slots
     # with quality modules, and target a high-quality item (drives the
     # upgrade-and-recycle loop -- this mod's USP and the hardest case for the IPM).
-    [switch] $Quality
+    [switch] $Quality,
+    # Default mode is the 2-phase producer/consumer split: phase 1 boots Factorio
+    # once and dumps each generated chain to script-output as a loadable problem
+    # file (generation + normalization only, no solve); phase 2 quits Factorio and
+    # solves the dumped problems with a pool of standalone `lua` workers in
+    # parallel across cores (the IPM solve is the dominant cost and is Factorio-
+    # free). -Serial keeps the original single-boot in-engine RCON solve sweep
+    # (useful when `lua` is not on PATH, or to cross-check parity with parallel).
+    [switch] $Serial,
+    # Parallel worker count for the solve pool. Defaults to every logical core.
+    # Note the trade-off in the pipelined default mode: Factorio's single
+    # generation thread runs concurrently with the workers, so maxing this out
+    # oversubscribes the CPU and can slow generation (the serial bottleneck). It is
+    # unambiguously best in -ReuseProblems mode, where no Factorio competes. Lower
+    # it (e.g. cores-2) if generation throughput matters more than the solve tail.
+    [int] $Workers = ([Environment]::ProcessorCount),
+    # Standalone Lua interpreter that runs tests/solve_problem.lua. Defaults to the
+    # known install location, falling back to whatever `lua` is on PATH.
+    [string] $LuaExe = "",
+    # Re-solve the problem files left in script-output by a previous run WITHOUT
+    # booting Factorio or regenerating. The dumped chains are deterministic for a
+    # (modset, seed, config) set, so this is the fast path when iterating on the
+    # solver against a fixed problem set: it skips the serial boot+generation floor
+    # (~the slow part) and runs only the parallel solve. Mutually exclusive with
+    # -Serial. Errors if no cached problems exist (run once without it first).
+    [switch] $ReuseProblems
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,6 +97,33 @@ $modsPathRaw = ($launch.configurations | Where-Object { $_.modsPath } | Select-O
 if (-not $modsPathRaw) { Write-Error "no configuration with a modsPath in launch.json"; exit 2 }
 $modsDir = (Resolve-Path ($modsPathRaw -replace [regex]::Escape('${workspaceFolder}'), $repoRoot.Path)).Path
 $logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
+# Factorio writes helpers.write_file output under script-output. The producer
+# (explore_emit) dumps one problem per chain into explore_problems/ here; phase 2
+# globs this directory and feeds the files to the lua worker pool.
+$scriptOutputDir = Join-Path $env:APPDATA "Factorio/script-output/explore_problems"
+
+if ($ReuseProblems -and $Serial) {
+    Write-Error "-ReuseProblems and -Serial are mutually exclusive (reuse re-solves dumped files with the lua pool; serial solves in-engine)."
+    exit 2
+}
+
+# Resolve the standalone Lua interpreter for the worker pool (any non-serial mode).
+if (-not $Serial) {
+    if (-not $LuaExe) {
+        $defaultLua = Join-Path $env:LOCALAPPDATA "Programs/Lua/bin/lua.exe"
+        if (Test-Path $defaultLua) {
+            $LuaExe = $defaultLua
+        } else {
+            $onPath = Get-Command lua -ErrorAction SilentlyContinue
+            if ($onPath) { $LuaExe = $onPath.Source }
+        }
+    }
+    if (-not $LuaExe -or -not (Test-Path $LuaExe)) {
+        Write-Error "Lua interpreter not found (looked for -LuaExe, $env:LOCALAPPDATA\Programs\Lua\bin\lua.exe, and 'lua' on PATH). Pass -LuaExe <path>, or use -Serial to solve in-engine."
+        exit 2
+    }
+    if ($Workers -lt 1) { $Workers = 1 }
+}
 
 # Default mod set: base + flib + factory_solver + every pyanodon mod on disk
 # (graphics packs included; they are dependencies of the content mods).
@@ -140,6 +207,133 @@ function Invoke-RconCommand {
     Send-RconPacket -Stream $Stream -Id 2 -Type 2 -Body $Command
     $resp = Receive-RconPacket -Stream $Stream
     return $resp.Body.Trim()
+}
+
+# --- Result classification (shared by serial sweep and parallel phase 2) ------
+# A status line is one of: <<HIT (undesirable solution, any subclass), ERROR,
+# ~park (note only), or a clean finished/other line. Mirrors the original inline
+# block so both paths colour, log, and tally identically.
+function Add-Result {
+    param(
+        [string] $Line,
+        [System.Collections.Generic.List[string]] $Hits,
+        [ref] $Errors,
+        [ref] $Finished,
+        [string] $HitLog
+    )
+    if ($Line -match '<<HIT') {
+        Write-Host "  $Line" -ForegroundColor Yellow
+        $Hits.Add($Line); $Line | Out-File -FilePath $HitLog -Append -Encoding utf8
+    } elseif ($Line -match '^ERROR') {
+        Write-Host "  $Line" -ForegroundColor Red
+        $Errors.Value++; $Line | Out-File -FilePath $HitLog -Append -Encoding utf8
+    } elseif ($Line -match '~park') {
+        Write-Host "  $Line" -ForegroundColor DarkYellow
+        $Line | Out-File -FilePath $HitLog -Append -Encoding utf8
+    } else {
+        Write-Host "  $Line"
+        if ($Line -match 'state=finished') { $Finished.Value++ }
+    }
+}
+
+# --- Worker pool primitives ---------------------------------------------------
+# Solve each dumped problem file in its own `lua tests/solve_problem.lua <file>`
+# process, keeping at most $Workers running at once (PS 5.1-compatible: a simple
+# Start-Process throttle, no ForEach-Object -Parallel). A pool is a small state
+# bag so the SAME engine serves two callers: the pipelined default feeds it one
+# file at a time while Factorio keeps generating (overlap), and Invoke-WorkerPool
+# / reuse mode feed it a whole batch. Each worker prints one status line captured
+# to a temp file.
+function New-SolvePool {
+    param([string] $LuaExe, [string] $WorkDir, [int] $Workers)
+    [PSCustomObject]@{
+        LuaExe  = $LuaExe
+        WorkDir = $WorkDir
+        Workers = $Workers
+        Queue   = (New-Object System.Collections.Queue)
+        Running = (New-Object System.Collections.Generic.List[object])
+        Done    = 0
+    }
+}
+
+# One non-blocking tick: launch queued files up to the worker cap, reap any that
+# finished, and RETURN their status lines (so the caller can classify them as
+# they complete). Returns an empty list when nothing finished this tick.
+function Step-SolvePool {
+    param([PSCustomObject] $Pool)
+    $new = New-Object System.Collections.Generic.List[string]
+    while ($Pool.Running.Count -lt $Pool.Workers -and $Pool.Queue.Count -gt 0) {
+        $f = [string]$Pool.Queue.Dequeue()
+        $outFile = [System.IO.Path]::GetTempFileName()
+        $p = Start-Process -FilePath $Pool.LuaExe `
+            -ArgumentList @('tests/solve_problem.lua', $f) `
+            -WorkingDirectory $Pool.WorkDir -NoNewWindow -PassThru `
+            -RedirectStandardOutput $outFile
+        [void]$Pool.Running.Add([PSCustomObject]@{ Proc = $p; Out = $outFile })
+    }
+    for ($i = $Pool.Running.Count - 1; $i -ge 0; $i--) {
+        $r = $Pool.Running[$i]
+        if ($r.Proc.HasExited) {
+            $txt = Get-Content $r.Out -Raw -ErrorAction SilentlyContinue
+            if ($txt) {
+                foreach ($ln in ($txt -split "`r?`n")) {
+                    if ($ln.Trim()) { [void]$new.Add($ln.Trim()) }
+                }
+            }
+            Remove-Item $r.Out -Force -ErrorAction SilentlyContinue
+            $Pool.Running.RemoveAt($i)
+            $Pool.Done++
+        }
+    }
+    return , $new
+}
+
+# Batch driver: enqueue every file, drain to completion, return all status lines.
+# Used by reuse mode (and any all-at-once caller).
+function Invoke-WorkerPool {
+    param([string[]] $Files, [string] $LuaExe, [string] $WorkDir, [int] $Workers)
+    $pool = New-SolvePool -LuaExe $LuaExe -WorkDir $WorkDir -Workers $Workers
+    foreach ($f in $Files) { [void]$pool.Queue.Enqueue($f) }
+    $results = New-Object System.Collections.Generic.List[string]
+    $total = $Files.Count
+    while ($pool.Queue.Count -gt 0 -or $pool.Running.Count -gt 0) {
+        $lines = Step-SolvePool -Pool $pool
+        foreach ($ln in $lines) { [void]$results.Add($ln) }
+        if ($lines.Count -eq 0) { Start-Sleep -Milliseconds 50 }
+        Write-Host -NoNewline "`r  solving $($pool.Done)/$total ...   "
+    }
+    Write-Host ""
+    return , $results
+}
+
+# --- Reuse mode: re-solve the last run's dumped problems, no Factorio ----------
+# The problem files are deterministic for a (modset, seed, config) set, so once a
+# normal run has dumped them, the solver can be re-run against that exact set
+# without booting Factorio or regenerating -- skipping the serial boot+generation
+# floor and leaving only the parallel solve. This is the iterate-on-the-solver
+# fast path. It exits before any Factorio / mod-list machinery is touched.
+if ($ReuseProblems) {
+    $problemFiles = @(Get-ChildItem (Join-Path $scriptOutputDir '*.lua') -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.FullName })
+    if ($problemFiles.Count -eq 0) {
+        Write-Error "no cached problem files in $scriptOutputDir -- run once without -ReuseProblems to generate them."
+        exit 2
+    }
+    Write-Host "explore: reuse mode -- re-solving $($problemFiles.Count) cached problems with $Workers workers (no Factorio boot)"
+    "# explore reuse run $(Get-Date -Format o)  cached=$($problemFiles.Count)" | Out-File -FilePath $HitLog -Append -Encoding utf8
+    $hits = New-Object System.Collections.Generic.List[string]
+    $errors = 0; $finished = 0
+    $lines = Invoke-WorkerPool -Files $problemFiles -LuaExe $LuaExe -WorkDir $repoRoot.Path -Workers $Workers
+    foreach ($ln in $lines) {
+        Add-Result -Line $ln -Hits $hits -Errors ([ref]$errors) -Finished ([ref]$finished) -HitLog $HitLog
+    }
+    Write-Host "`nexplore: reuse done. $($hits.Count) HIT, $errors ERROR, $finished clean-finished of $($problemFiles.Count) solved"
+    if ($hits.Count -gt 0) {
+        Write-Host "explore: HITs (reproduce with the same seed):"
+        foreach ($h in $hits) { Write-Host "  $h" }
+    }
+    Write-Host "explore: full log appended to $HitLog"
+    exit 0
 }
 
 # --- Launch (mirrors smoke_rcon.ps1) -----------------------------------------
@@ -273,6 +467,22 @@ try {
             @{mode = 'both'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = $Hops }         # control
         )
     }
+    # Default (pipelined parallel): explore_emit dumps one problem file per chain
+    # while the solve pool chews through already-dumped files concurrently --
+    # generation (Factorio, ~1 core) and solving (the workers) overlap, so the
+    # solve hides under the serial generation instead of running after it. -Serial
+    # solves in-engine via explore. Clear stale dumps first either way.
+    if (-not $Serial) {
+        if (Test-Path $scriptOutputDir) {
+            Remove-Item (Join-Path $scriptOutputDir '*.lua') -Force -ErrorAction SilentlyContinue
+        } else {
+            New-Item -ItemType Directory -Force -Path $scriptOutputDir | Out-Null
+        }
+    }
+    $remoteFn = if ($Serial) { 'explore' } else { 'explore_emit' }
+    $pool = if ($Serial) { $null } else { New-SolvePool -LuaExe $LuaExe -WorkDir $repoRoot.Path -Workers $Workers }
+    $emitted = 0
+
     foreach ($cfg in $configs) {
         $tgt = if ($cfg.target) { $cfg.target } else { 'recipe' }
         $cls = if ($cfg.closure) { $cfg.closure } else { 'on' }
@@ -284,27 +494,79 @@ try {
         for ($i = 0; $i -lt $Seeds; $i++) {
             $s = $StartSeed + $i
             if ($proc.HasExited) { throw "factorio exited mid-run" }
+            # Thread-budget gate (pipelined mode): treat Factorio's generation as
+            # one of the $Workers concurrent compute slots. When the solve pool is
+            # full, PAUSE emitting and reap until a worker frees a slot, then resume
+            # -- so the generation thread only ever runs against at most $Workers-1
+            # solves and the total never oversubscribes the CPU, yet a freed slot is
+            # reused immediately. This is what makes a full-core $Workers safe in
+            # pipelined mode. (Generation rate-limits anyway, so this seldom blocks;
+            # it mainly caps the transient peaks that would otherwise hit $Workers+1.)
+            if (-not $Serial) {
+                while ($pool.Running.Count -ge $Workers) {
+                    foreach ($ln in (Step-SolvePool -Pool $pool)) {
+                        Add-Result -Line $ln -Hits $hits -Errors ([ref]$errors) -Finished ([ref]$finished) -HitLog $HitLog
+                    }
+                    if ($pool.Running.Count -ge $Workers) { Start-Sleep -Milliseconds 20 }
+                }
+            }
             $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);init=$ini;void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual);target=$tgt;closure=$cls"
             if ($sr) { $exploreArgs += ";seedrecipe=$sr" }
-            $cmd = "/silent-command rcon.print(remote.call('$iface','explore','$exploreArgs'))"
+            $cmd = "/silent-command rcon.print(remote.call('$iface','$remoteFn','$exploreArgs'))"
             $r = Invoke-RconCommand -Stream $stream -Command $cmd
-            if ($r -match '<<HIT') {
-                Write-Host "  $r" -ForegroundColor Yellow
-                $hits.Add($r); $r | Out-File -FilePath $HitLog -Append -Encoding utf8
-            } elseif ($r -match '^ERROR') {
-                Write-Host "  $r" -ForegroundColor Red
-                $errors++; $r | Out-File -FilePath $HitLog -Append -Encoding utf8
-            } elseif ($r -match '~park') {
-                Write-Host "  $r" -ForegroundColor DarkYellow
-                $r | Out-File -FilePath $HitLog -Append -Encoding utf8
+            if ($Serial) {
+                Add-Result -Line $r -Hits $hits -Errors ([ref]$errors) -Finished ([ref]$finished) -HitLog $HitLog
             } else {
-                Write-Host "  $r"
-                if ($r -match 'state=finished') { $finished++ }
+                # Generation ack: emit (file dumped -> enqueue for the pool), SKIPPED,
+                # or ERROR. The latter two are terminal -- no file to solve. The emit
+                # ack carries the tag, which is exactly the dumped file's stem.
+                if ($r -match '^ERROR') {
+                    Write-Host "  $r" -ForegroundColor Red
+                    $errors++; $r | Out-File -FilePath $HitLog -Append -Encoding utf8
+                } elseif ($r -match 'SKIPPED') {
+                    Write-Host "  $r" -ForegroundColor DarkYellow
+                    $r | Out-File -FilePath $HitLog -Append -Encoding utf8
+                } elseif ($r -match 'tag=(\S+)') {
+                    [void]$pool.Queue.Enqueue((Join-Path $scriptOutputDir ($Matches[1] + '.lua')))
+                    $emitted++
+                    Write-Host "  $r"
+                } else {
+                    Write-Host "  $r"
+                }
+                # Overlap: dispatch queued solves and reap finished ones while the
+                # next chain is being generated. Results print/tally as they land.
+                foreach ($ln in (Step-SolvePool -Pool $pool)) {
+                    Add-Result -Line $ln -Hits $hits -Errors ([ref]$errors) -Finished ([ref]$finished) -HitLog $HitLog
+                }
             }
         }
     }
 
-    Write-Host "`nexplore: done. $($hits.Count) HIT, $errors ERROR, $finished clean-finished of $($configs.Count * $Seeds) solves"
+    if ($Serial) {
+        Write-Host "`nexplore: done. $($hits.Count) HIT, $errors ERROR, $finished clean-finished of $($configs.Count * $Seeds) solves"
+    } else {
+        # Generation done -> quit Factorio so its core joins the solve tail, then
+        # drain whatever the overlap hasn't finished (usually just the last few).
+        Write-Host "`nexplore: generation done ($emitted dumped); quitting Factorio and draining solve pool"
+        try { Send-RconPacket -Stream $stream -Id 3 -Type 2 -Body "/quit" } catch {}
+        if ($client) { $client.Dispose(); $client = $null }
+        $stream = $null
+        $waited = 0
+        while (-not $proc.HasExited -and $waited -lt 30) { Start-Sleep -Milliseconds 500; $waited++ }
+        if (-not $proc.HasExited) { $proc.Kill() }
+
+        while ($pool.Queue.Count -gt 0 -or $pool.Running.Count -gt 0) {
+            $lines = Step-SolvePool -Pool $pool
+            foreach ($ln in $lines) {
+                Add-Result -Line $ln -Hits $hits -Errors ([ref]$errors) -Finished ([ref]$finished) -HitLog $HitLog
+            }
+            if ($lines.Count -eq 0) { Start-Sleep -Milliseconds 50 }
+            Write-Host -NoNewline "`r  solving $($pool.Done)/$emitted ...   "
+        }
+        Write-Host ""
+        $skipped = ($configs.Count * $Seeds) - $emitted
+        Write-Host "`nexplore: done. $($hits.Count) HIT, $errors ERROR, $finished clean-finished of $emitted solved ($skipped skipped/errored)"
+    }
     if ($hits.Count -gt 0) {
         Write-Host "explore: HITs (reproduce with the same seed):"
         foreach ($h in $hits) { Write-Host "  $h" }

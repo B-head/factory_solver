@@ -35,6 +35,8 @@ local save = require "manage/save"
 local pre_solve = require "manage/pre_solve"
 local tn = require "manage/typed_name"
 local chain_reachability = require "manage/chain_reachability"
+local create_problem = require "solver/create_problem"
+local ed = require "tests/explore_detect"
 
 local log = fs_log.for_module("chain_explorer")
 
@@ -54,19 +56,9 @@ local universe_cache = {}
 local FORCE_INDEX = 1
 local PLAYER_INDEX = 1
 
--- A recipe variable is "parked" when it sits at the IPM's interior floor rather
--- than carrying real flow. The live solver keeps strictly-interior values near
--- ~1e-11 for a truly-zero variable while active ones are O(1)+, so a threshold
--- relative to the chain's largest recipe value (with an absolute floor) cleanly
--- separates the two without assuming a fixed solution scale.
-local PARK_REL = 1e-6
-local PARK_ABS = 1e-9
--- Cheat mass (shortage_source/elastic) above this flags a TRUE undesirable
--- solution. Slack values ride near the IPM floor (~1e-11) when inactive.
-local CHEAT_EPS = 1e-6
--- park fraction (excluding pyvoid) at/above this earns a "~park" note -- worth a
--- look, but usually an alternative path on a branchy chain, so not a HIT.
-local PARK_NOTE_FRACTION = 0.5
+-- detect() + format_result() and their park/cheat thresholds live in the pure
+-- tests/explore_detect module (ed), so the standalone headless worker can
+-- reproduce this explorer's output verbatim. M.detect below delegates to it.
 
 ---@param recipe_proto LuaRecipePrototype
 ---@param prefer_modules boolean? Prefer a machine WITH module slots (needed so
@@ -736,100 +728,14 @@ end
 ---Observed when a producer/consumer intermediate is pinned: create_problem routes
 ---the pinned amount to |surplus_sink| and never opens a |final_sink|, so the LP
 ---makes the material only to throw it away.
+---Delegates to the pure tests/explore_detect module so the in-engine explorer
+---and the standalone headless worker (tests/solve_problem.lua) share one
+---implementation. Kept as M.detect for the existing solve_explicit / detail
+---callers and any external reference.
 ---@param vars PackedVariables?
 ---@return { recipes: integer, near_zero: integer, frac: number, recipes_nv: integer, near_zero_nv: integer, frac_nv: number, cheat: number, active: integer, degenerate: boolean, has_initial: boolean, has_final: boolean, noship: boolean, zeros: string[] }
 function M.detect(vars)
-    if not vars or not vars.x then
-        return { recipes = 0, near_zero = 0, frac = 0, recipes_nv = 0,
-            near_zero_nv = 0, frac_nv = 0, cheat = 0, active = 0, degenerate = false,
-            has_initial = false, has_final = false, noship = false, zeros = {} }
-    end
-
-    -- Count only real production recipes. |bridge| temperature-conversion
-    -- variables (keyed virtual_recipe/|bridge|...) are LP-internal plumbing
-    -- create_problem injects, not recipes the user placed; they park whenever no
-    -- temperature conversion is needed, so excluding them keeps the count about
-    -- the user's chain rather than solver internals.
-    local function is_recipe(k)
-        if k:find("|bridge|", 1, true) then return false end
-        return k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/"
-    end
-    local function is_void(k)
-        return k:find("pyvoid", 1, true) ~= nil
-    end
-
-    local max_x = 0
-    for k, v in pairs(vars.x) do
-        if is_recipe(k) and math.abs(v) > max_x then
-            max_x = math.abs(v)
-        end
-    end
-    local thresh = math.max(PARK_ABS, max_x * PARK_REL)
-
-    local recipes, near_zero = 0, 0
-    local recipes_nv, near_zero_nv = 0, 0
-    local zeros = {}
-    for k, v in pairs(vars.x) do
-        if is_recipe(k) then
-            recipes = recipes + 1
-            local parked = math.abs(v) < thresh
-            if parked then
-                near_zero = near_zero + 1
-                zeros[#zeros + 1] = k:match("^[%w_]+/(.+)/[^/]+$") or k
-            end
-            if not is_void(k) then
-                recipes_nv = recipes_nv + 1
-                if parked then near_zero_nv = near_zero_nv + 1 end
-            end
-        end
-    end
-
-    -- Total mass carried by the penalty escapes (shortage_source / elastic): a
-    -- non-trivial value means the solution leaned on the cheat instead of real
-    -- flow -- the TRUE undesirable signal. The same pass records whether any
-    -- declared external input (|initial_source|) is drawn and whether any product
-    -- leaves the factory (|final_sink|) -- the two halves of the practicality
-    -- criterion. |surplus_sink| deliberately does NOT count as shipping: it is
-    -- penalized over-production (waste), not a delivered product.
-    local cheat = 0
-    local has_initial, has_final = false, false
-    for k, v in pairs(vars.x) do
-        if math.abs(v) > thresh then
-            if k:find("|shortage_source|", 1, true) or k:find("|elastic|", 1, true) then
-                cheat = cheat + math.abs(v)
-            elseif k:find("|initial_source|", 1, true) then
-                has_initial = true
-            elseif k:find("|final_sink|", 1, true) then
-                has_final = true
-            end
-        end
-    end
-
-    -- Real recipes carrying flow. Zero active + cheat>0 == the degenerate
-    -- "target fabricated, nothing built" solution (mass-losing loop / net-
-    -- negative target).
-    local active = recipes - near_zero
-
-    -- Imports something, fabricates nothing, yet ships nothing out: the factory
-    -- produces only to dump it back as surplus. A cheat-free impracticality the
-    -- shortage/elastic gate cannot see.
-    local noship = has_initial and not has_final and cheat <= CHEAT_EPS
-
-    return {
-        recipes = recipes,
-        near_zero = near_zero,
-        frac = recipes > 0 and near_zero / recipes or 0,
-        recipes_nv = recipes_nv,
-        near_zero_nv = near_zero_nv,
-        frac_nv = recipes_nv > 0 and near_zero_nv / recipes_nv or 0,
-        cheat = cheat,
-        active = active,
-        degenerate = cheat > CHEAT_EPS and active == 0,
-        has_initial = has_initial,
-        has_final = has_final,
-        noship = noship,
-        zeros = zeros,
-    }
+    return ed.detect(vars)
 end
 
 ---Build a lookup set ({name = true}) from a list of names.
@@ -948,13 +854,75 @@ local function pick_trap_consumer_target(recipe_names, trapped)
     return nil
 end
 
----RCON entry point. Args string: "seed=N;hops=M;mode=both;void=ex". Builds one
----random chain, solves it, returns a single status line the launcher logs.
----  <<HIT  -> TRUE undesirable solution (non-convergence or cheat>0); investigate.
----  ~park  -> high park fraction (ex-pyvoid); usually a normal alternative, note only.
----@param args_str string?
+---Serialize a flat value (number / boolean / string / array-of-strings) to a
+---loadable Lua literal. The explore ctx is exactly these kinds, so this is all
+---the dumped problem's `meta` field needs -- %.17g keeps numbers lossless and %q
+---keeps strings valid under any escaping, matching create_problem's serializers.
+---@param v any
 ---@return string
-function M.explore(args_str)
+local function lua_literal(v)
+    local t = type(v)
+    if t == "number" then
+        return string.format("%.17g", v)
+    elseif t == "boolean" then
+        return tostring(v)
+    elseif t == "string" then
+        return string.format("%q", v)
+    elseif t == "table" then
+        local parts = {}
+        for _, e in ipairs(v) do parts[#parts + 1] = lua_literal(e) end
+        return "{ " .. table.concat(parts, ", ") .. " }"
+    end
+    return "nil"
+end
+
+---Serialize the explore ctx into a loadable Lua table literal (the problem
+---file's `meta`). Keys are emitted in sorted order so a given chain produces a
+---stable file. The headless worker loadfile()s this back and hands it to
+---ed.format_result unchanged, so the parallel and in-engine result lines match.
+---@param ctx table
+---@return string
+local function serialize_meta(ctx)
+    local keys = {}
+    for k in pairs(ctx) do keys[#keys + 1] = k end
+    table.sort(keys)
+    local parts = {}
+    for _, k in ipairs(keys) do
+        parts[#parts + 1] = string.format("[%q] = %s", k, lua_literal(ctx[k]))
+    end
+    return "{\n    " .. table.concat(parts, ",\n    ") .. ",\n  }"
+end
+
+---A filesystem-safe, collision-free filename stem for one (seed, config) pair.
+---The launcher sweeps the same seed across many configs, so the tag must encode
+---every dimension that distinguishes them (direction / seeding / void / nosrc /
+---pins / quality / target mode / closure / hops / forced seed recipe).
+---@param ctx table
+---@return string
+local function problem_tag(ctx)
+    local parts = {
+        ctx.mode, ctx.init,
+        ctx.exclude_void and "vex" or "vin",
+        ctx.exclude_source_sink and "sex" or "sin",
+        "p" .. ctx.pins,
+        ctx.use_quality and ("q" .. ctx.target_quality) or "noq",
+        "t" .. ctx.target_mode,
+        ctx.do_close and "con" or "coff",
+        "h" .. ctx.hops,
+    }
+    if ctx.seed_override then parts[#parts + 1] = "sr" .. ctx.seed_override end
+    local s = table.concat(parts, "_")
+    return (s:gsub("[^%w_%-]", "-"))
+end
+
+---Generate one random chain and its target constraints, ready to solve. Shared
+---by M.explore (which solves it in-engine) and M.explore_emit (which dumps it to
+---a file for the headless worker pool). Everything here reads prototypes / the
+---force / storage, so it MUST run inside Factorio; the returned constraints +
+---normalized lines are the pure hand-off the solver core consumes.
+---@param args_str string?
+---@return { ok: boolean, message: string?, solution: Solution?, bonuses: ResearchBonuses?, ctx: table? }
+local function build_problem(args_str)
     local params = {}
     for k, v in string.gmatch(args_str or "", "(%w+)=([%w%.%-]+)") do
         params[k] = v
@@ -994,6 +962,7 @@ function M.explore(args_str)
 
     save.init_force_data(FORCE_INDEX)
     save.init_player_data(PLAYER_INDEX)
+    local bonuses = storage.forces[FORCE_INDEX].research_bonuses
 
     -- Research everything so the WHOLE recipe set is enabled. The smoke force
     -- starts with no technologies, so build_chain's `recipe.enabled` filter (and
@@ -1013,16 +982,16 @@ function M.explore(args_str)
         for qname in pairs(prototypes.quality) do
             if qname ~= "quality-unknown" then uq[qname] = true end
         end
-        storage.forces[FORCE_INDEX].research_bonuses.unlocked_qualities = uq
+        bonuses.unlocked_qualities = uq
     end
 
     local ok_build, seed_recipe, order, err, closure =
         pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close, init, seed_override)
     if not ok_build then
-        return string.format("ERROR seed=%d build raised: %s", seed, tostring(seed_recipe))
+        return { ok = false, message = string.format("ERROR seed=%d build raised: %s", seed, tostring(seed_recipe)) }
     end
     if not seed_recipe then
-        return string.format("ERROR seed=%d %s", seed, tostring(err))
+        return { ok = false, message = string.format("ERROR seed=%d %s", seed, tostring(err)) }
     end
 
     local solutions = storage.forces[FORCE_INDEX].solutions
@@ -1043,7 +1012,8 @@ function M.explore(args_str)
         end
     end
     if built == 0 then
-        return string.format("ERROR seed=%d no buildable lines (seed_recipe=%s)", seed, seed_recipe)
+        return { ok = false, message = string.format(
+            "ERROR seed=%d no buildable lines (seed_recipe=%s)", seed, seed_recipe) }
     end
     -- With every technology researched a seeded SCC can be a huge biological /
     -- recycling loop, and the IPM on a several-hundred-recipe sparse system costs
@@ -1052,9 +1022,9 @@ function M.explore(args_str)
     -- covers the small/medium loops where the interesting catalysts live.
     local MAX_BUILT = 80
     if built > MAX_BUILT then
-        return string.format(
+        return { ok = false, message = string.format(
             "seed=%d mode=%s init=%s built=%d SKIPPED(chain too large > %d) sr=%s",
-            seed, mode, init, built, MAX_BUILT, seed_recipe)
+            seed, mode, init, built, MAX_BUILT, seed_recipe) }
     end
 
     local target_label = ""
@@ -1166,6 +1136,53 @@ function M.explore(args_str)
         target_label = "pin:" .. table.concat(pin_names, "+")
     end
 
+    -- Hand the generated chain back; the caller solves it (in-engine via
+    -- M.explore, or off-tick via the headless worker pool through M.explore_emit).
+    -- ctx carries everything ed.format_result reads plus the solver knobs the
+    -- worker must match for byte-identical output (tolerance / iterate_limit /
+    -- step_cap mirror pre_solve.forwerd_solve and the in-engine solve loop below).
+    local ctx = {
+        seed = seed,
+        mode = mode,
+        init = init,
+        exclude_void = exclude_void,
+        exclude_source_sink = exclude_source_sink,
+        pins = pins,
+        use_quality = use_quality,
+        target_quality = target_quality,
+        hops = hops,
+        seed_recipe = seed_recipe,
+        built = built,
+        target_label = target_label,
+        do_close = do_close,
+        target_mode = target_mode,
+        seed_override = seed_override,
+        catalysts = (closure and closure.catalysts) or {},
+        trapped_items = (closure and closure.trapped_items) or {},
+        unresolved = (closure and closure.unresolved) or {},
+        closure_added = (closure and closure.added) or 0,
+        closure_closed = (closure and closure.closed) or false,
+        tolerance = acc.tolerance,
+        iterate_limit = 600,
+        step_cap = 600,
+    }
+    return { ok = true, solution = solution, bonuses = bonuses, ctx = ctx }
+end
+
+---RCON entry point. Args string: "seed=N;hops=M;mode=both;void=ex". Builds one
+---random chain, solves it in-engine, and returns the single status line the
+---launcher logs. M.explore_emit dumps the same chain for the parallel worker
+---pool instead of solving here.
+---  <<HIT  -> TRUE undesirable solution (non-convergence or cheat>0); investigate.
+---  ~park  -> high park fraction (ex-pyvoid); usually a normal alternative, note only.
+---@param args_str string?
+---@return string
+function M.explore(args_str)
+    local r = build_problem(args_str)
+    if not r.ok then return assert(r.message) end
+    local solution = assert(r.solution)
+    local ctx = assert(r.ctx)
+
     -- Solve to a terminal state synchronously (forwerd_solve advances one IPM
     -- step per call, same state machine the on_tick pump drives).
     solution.solver_state = "ready"
@@ -1175,100 +1192,62 @@ function M.explore(args_str)
         local ok, solve_err = pcall(pre_solve.forwerd_solve, force_data, solution)
         if not ok then
             return string.format("ERROR seed=%d solve raised: %s (seed_recipe=%s built=%d)",
-                seed, tostring(solve_err), seed_recipe, built)
+                ctx.seed, tostring(solve_err), ctx.seed_recipe, ctx.built)
         end
         steps = steps + 1
         -- Bounded by MAX_BUILT above, so a step is cheap; this just caps a
         -- non-converging case (reported as not-finished, a HIT) rather than
-        -- spinning. 600 leaves ample headroom over typical convergence (<200).
-        if steps > 600 then
+        -- spinning. step_cap leaves ample headroom over typical convergence (<200).
+        if steps > ctx.step_cap then
             break
         end
     end
 
-    local d = M.detect(solution.raw_variables)
-    local converged = solution.solver_state == "finished"
-    -- HIT covers both impracticality families: the cheat gate (shortage/elastic
-    -- fabricated or relaxed the target) and the noship gate (imports but ships
-    -- nothing -- a cheat-free degeneracy the old gate could not see).
-    local true_hit = (not converged) or d.cheat > CHEAT_EPS or d.noship
-    local park_note = d.frac_nv >= PARK_NOTE_FRACTION
+    local d = ed.detect(solution.raw_variables)
     log.info("explore seed=%d mode=%s void=%s hops=%d state=%s cheat=%.4g noship=%s frac_nv=%.2f",
-        seed, mode, exclude_void and "ex" or "in", hops, solution.solver_state, d.cheat,
-        tostring(d.noship), d.frac_nv)
+        ctx.seed, ctx.mode, ctx.exclude_void and "ex" or "in", ctx.hops, solution.solver_state,
+        d.cheat, tostring(d.noship), d.frac_nv)
+    return ed.format_result(ctx, solution.solver_state, steps, d)
+end
 
-    -- HIT subclasses, in order of sharpness: DEGEN (cheat>0, zero recipes run --
-    -- target conjured, nothing built); NOSHIP (cheat=0 but no |final_sink| -- a
-    -- factory that imports and runs yet voids all output); plain HIT (a partial
-    -- shortage with some real flow). All carry "<<HIT" so the launcher matches.
-    local cats = (closure and closure.catalysts) or {}
-    local tag = ""
-    if true_hit then
-        if d.degenerate then
-            tag = "  <<HIT DEGEN"
-        elseif d.cheat <= CHEAT_EPS and d.noship then
-            tag = "  <<HIT NOSHIP"
-        else
-            tag = "  <<HIT"
-        end
-        -- A cheat sitting on top of a genuine catalyst is a SOLVER finding (the LP
-        -- fabricated a material downstream of the catalyst instead of importing
-        -- the catalyst), not the generator-incompleteness dead end that an
-        -- unclosed-but-universe-reachable material is. Mark it so it is not
-        -- dismissed with the ordinary unclosed cheats.
-        if d.cheat > CHEAT_EPS and #cats > 0 then
-            tag = tag .. " CATALYST"
-        end
-    elseif park_note then
-        tag = "  ~park"
-    end
-    local parked = ""
-    if (true_hit or park_note) and #d.zeros > 0 then
-        table.sort(d.zeros)
-        parked = " parked={" .. table.concat(d.zeros, ",") .. "}"
+---RCON entry point for the producer/consumer split. Builds the same chain as
+---M.explore but, instead of solving, dumps { meta, constraints, normalized_lines }
+---to script-output/explore_problems/<tag>.lua as loadable Lua, so a pool of
+---standalone `lua tests/solve_problem.lua <file>` workers can solve them in
+---parallel off the Factorio tick (the dominant IPM cost). Returns a one-line ack
+---the launcher logs; skip / error chains write no file and report inline (the
+---same SKIPPED / ERROR messages M.explore would return at this stage).
+---@param args_str string?
+---@return string
+function M.explore_emit(args_str)
+    local r = build_problem(args_str)
+    if not r.ok then return assert(r.message) end
+    local solution = assert(r.solution)
+    local ctx = assert(r.ctx)
+    local bonuses = r.bonuses
+
+    -- Normalization (machine speed / modules / quality decomposition / fuel) is
+    -- the last prototype-reading step; everything downstream is the pure solver
+    -- core. forwerd_solve would otherwise do this internally per solve.
+    local ok_norm, normalized_lines = pcall(
+        pre_solve.to_normalized_production_lines, solution.production_lines, bonuses)
+    if not ok_norm then
+        return string.format("ERROR seed=%d normalize raised: %s (seed_recipe=%s built=%d)",
+            ctx.seed, tostring(normalized_lines), ctx.seed_recipe, ctx.built)
     end
 
-    -- Closure note: how many bootstrap producers the generator had to add, and
-    -- (when it could not bottom the chain out at raw resources) which materials
-    -- stayed unreachable. An unclosed material that IS reachable universe-wide is
-    -- a generator dead end (closure missed a producer the mod set has); one that
-    -- is NOT (a catalyst, reported separately below) is a real import the solver
-    -- must handle. The reachability rework provides this disambiguation.
-    local closure_note = ""
-    if closure then
-        if not do_close then
-            -- closure=off: report the surviving traps (what the netneg target is
-            -- drawn from) rather than a bootstrap-add count.
-            if #closure.trapped_items > 0 then
-                closure_note = " closure=off,trapped={" .. table.concat(closure.trapped_items, ",") .. "}"
-            else
-                closure_note = " closure=off"
-            end
-        elseif not closure.closed and #closure.unresolved > 0 then
-            closure_note = string.format(" closure=add%d,unclosed={%s}",
-                closure.added, table.concat(closure.unresolved, ","))
-        elseif closure.added > 0 then
-            closure_note = string.format(" closure=add%d", closure.added)
-        end
-    end
-    -- Catalysts (unresolved AND universe-unreachable): the materials the solver
-    -- should import via |initial_source| but may instead fabricate downstream.
-    -- Surfaced always when present -- this is the load-bearing signal that a
-    -- cheat here is a solver finding, not a generator artifact.
-    local catalyst_note = ""
-    if #cats > 0 then
-        catalyst_note = " catalyst={" .. table.concat(cats, ",") .. "}"
-    end
+    -- dump_constraints / dump_normalized_lines each emit a self-contained
+    -- `return {...}` chunk; strip the leading `return ` so they nest as field
+    -- values inside the single problem table the worker loadfile()s.
+    local cons_lit = (create_problem.dump_constraints(solution.constraints):gsub("^return ", ""))
+    local lines_lit = (create_problem.dump_normalized_lines(normalized_lines):gsub("^return ", ""))
+    local body = string.format("return {\n  meta = %s,\n  constraints = %s,\n  normalized_lines = %s,\n}\n",
+        serialize_meta(ctx), cons_lit, lines_lit)
 
-    return string.format(
-        "seed=%d mode=%s init=%s void=%s nosrc=%s pins=%d qual=%s hops=%d state=%s built=%d R=%d(act=%d) nz=%d(%.0f%%) Rnv=%d(%.0f%%) cheat=%.4g ship=%s/%s steps=%d sr=%s tgt=%s%s%s%s%s",
-        seed, mode, init, exclude_void and "ex" or "in", exclude_source_sink and "ex" or "in", pins,
-        use_quality and target_quality or "off", hops,
-        tostring(solution.solver_state), built,
-        d.recipes, d.active, d.near_zero, d.frac * 100,
-        d.recipes_nv, d.frac_nv * 100,
-        d.cheat, d.has_initial and "i" or "-", d.has_final and "f" or "-",
-        steps, seed_recipe, target_label, closure_note, catalyst_note, tag, parked)
+    local tag = string.format("seed_%d_%s", ctx.seed, problem_tag(ctx))
+    helpers.write_file("explore_problems/" .. tag .. ".lua", body, false)
+    return string.format("emit seed=%d tag=%s built=%d sr=%s tgt=%s",
+        ctx.seed, tag, ctx.built, ctx.seed_recipe, ctx.target_label)
 end
 
 ---Diagnostic: normalize a single quality-module line and report the slot count,
@@ -1453,6 +1432,7 @@ end
 function M.register()
     remote.add_interface("factory_solver_explore", {
         explore = M.explore,
+        explore_emit = M.explore_emit,
         diag = M.diag,
         detail = M.detail,
         solve_explicit = M.solve_explicit,

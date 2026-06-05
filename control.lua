@@ -29,10 +29,12 @@ if script.level and script.level.mod_name == "factory_solver"
     and script.level.level_name == "smoke_rcon"
 then
     require("manage/smoke_rcon").register()
-    -- Random-chain explorer (manage/chain_explorer.lua) shares this scenario so
+    -- Random-chain explorer (tests/chain_explorer.lua) shares this scenario so
     -- the same launcher mod-set control and RCON transport can drive it; its
     -- interface is separate (factory_solver_explore) from the smoke driver's.
-    require("manage/chain_explorer").register()
+    -- It lives under tests/ (harness-only, never loaded outside this gate), so
+    -- the require is lazy and resolves from the mod root just like manage/*.
+    require("tests/chain_explorer").register()
     -- Headless script context (no __DebugAdapter): default to debug so the RCON
     -- tooling reads back create_problem's debug-tier reproduction data, the same
     -- verbosity a debugger session gets. Trace (the bulky LP internals) stays

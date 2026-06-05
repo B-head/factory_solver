@@ -12,7 +12,7 @@
 --
 -- This module is the pure core of the aligned model: no Factorio runtime
 -- dependency, so it is exercised by tests/cases/chain_reachability.lua. The
--- caller (manage/chain_explorer.lua) normalizes prototype recipes into the shape
+-- caller (tests/chain_explorer.lua) normalizes prototype recipes into the shape
 -- below -- resolving the FLT temperature sentinels and default/max temperatures
 -- against the fluid prototypes -- and queries the result.
 --
