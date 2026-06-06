@@ -780,16 +780,16 @@ local lines_limestone = {
 table.insert(cases, {
     name = "explorer catalyst (fuel-cell-dissolve loop -> limestone) runs the chain without cheating",
     run = function()
-        local x1 = (function()
+        local x1, p1 = (function()
             local problem = cp.create_problem("explorer-limestone-p1",
                 constraints_limestone, lines_limestone)
             local state, vars = harness.solve_to_completion(lp, problem,
                 { tolerance = 1e-6, iterate_limit = 600 })
             harness.assert_eq(state, "finished", "pass 1 solver_state")
-            return vars.x
+            return vars.x, problem.primals
         end)()
 
-        local avoidable = cp.diagnose_avoidable_cheats(x1, lines_limestone)
+        local avoidable = cp.diagnose_avoidable_cheats(x1, p1, lines_limestone)
         harness.assert_true(avoidable["item/limestone/normal"],
             "limestone is diagnosed as an avoidable cheat (its cycle is export-feasible)")
 

@@ -62,4 +62,4 @@ if solve_err then
     os.exit(0)
 end
 
-print(ed.format_result(meta, state, steps, ed.detect(vars)))
+print(ed.format_result(meta, state, steps, ed.detect(vars, problem.primals)))

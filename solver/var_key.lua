@@ -1,6 +1,6 @@
 local tn = require "manage/typed_name"
 
--- Central place that builds and parses LP variable-key strings.
+-- Central place that builds LP variable-key strings.
 --
 -- LP variables are content-addressed by name: independent loops build the same
 -- string and collide by value onto one variable (no registry, no allocation).
@@ -10,8 +10,11 @@ local tn = require "manage/typed_name"
 --
 -- This module does NOT change the representation: every constructor returns the
 -- exact byte string the old inline concatenations produced. It only removes the
--- scatter -- one definition per prefix, and construction paired with its parse
--- inverse so a future row-folding optimisation has a single place to update.
+-- scatter -- one definition per prefix. Building keys is the ONLY job here:
+-- reading the solution back is not done by parsing these strings. Solution
+-- readers classify a variable by its Primal.kind metadata and a production line
+-- by its is_source / is_bridge / is_sink flags, so no prefix is ever sliced off
+-- a key to recover what it means.
 --
 -- Reserved characters: the key namespace uses | % / @ < > as delimiters and
 -- markers. Prototype names are assumed never to contain them; this is unchecked
@@ -94,64 +97,5 @@ function M.pos_slack(dual_variable) return POS_SLACK .. dual_variable end
 ---@param dual_variable string
 ---@return string
 function M.neg_slack(dual_variable) return NEG_SLACK .. dual_variable end
-
---------------------------------------------------------------------------------
--- Parse / predicates. Inverses live beside their constructors so the prefix
--- literals are shared.
---------------------------------------------------------------------------------
-
----True for a |bridge| variable (LP-internal temperature plumbing). The marker
----appears after the "virtual_recipe/" segment, so match by find, not prefix.
----@param key string
----@return boolean
-function M.is_bridge(key)
-    return string.find(key, BRIDGE, 1, true) ~= nil
-end
-
----True for a real / virtual recipe variable, excluding |bridge| plumbing.
----@param key string an LP variable key
----@return boolean
-function M.is_recipe(key)
-    if M.is_bridge(key) then return false end
-    return string.sub(key, 1, 7) == "recipe/" or string.sub(key, 1, 15) == "virtual_recipe/"
-end
-
----Strip the |shortage_source| prefix back to the bare material key, or nil.
----@param key string
----@return string?
-function M.strip_shortage(key)
-    if string.sub(key, 1, #SHORTAGE_SOURCE) == SHORTAGE_SOURCE then
-        return string.sub(key, #SHORTAGE_SOURCE + 1)
-    end
-    return nil
-end
-
----Strip the |elastic||limit| prefix back to the bare material key, or nil. A
----bare |elastic|<dual> without a |limit| body is a constraint relaxation that
----maps to no single material and is intentionally not matched here.
----@param key string
----@return string?
-function M.strip_elastic_limit(key)
-    if string.sub(key, 1, #ELASTIC_LIMIT) == ELASTIC_LIMIT then
-        return string.sub(key, #ELASTIC_LIMIT + 1)
-    end
-    return nil
-end
-
----@param key string
----@return boolean
-function M.has_shortage(key) return string.find(key, SHORTAGE_SOURCE, 1, true) ~= nil end
-
----@param key string
----@return boolean
-function M.has_elastic(key) return string.find(key, ELASTIC, 1, true) ~= nil end
-
----@param key string
----@return boolean
-function M.has_initial(key) return string.find(key, INITIAL_SOURCE, 1, true) ~= nil end
-
----@param key string
----@return boolean
-function M.has_final(key) return string.find(key, FINAL_SINK, 1, true) ~= nil end
 
 return M

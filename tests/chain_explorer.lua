@@ -734,8 +734,8 @@ end
 ---callers and any external reference.
 ---@param vars PackedVariables?
 ---@return { recipes: integer, near_zero: integer, frac: number, recipes_nv: integer, near_zero_nv: integer, frac_nv: number, cheat: number, active: integer, degenerate: boolean, has_initial: boolean, has_final: boolean, noship: boolean, zeros: string[] }
-function M.detect(vars)
-    return ed.detect(vars)
+function M.detect(vars, primals)
+    return ed.detect(vars, primals)
 end
 
 ---Build a lookup set ({name = true}) from a list of names.
@@ -1203,7 +1203,7 @@ function M.explore(args_str)
         end
     end
 
-    local d = ed.detect(solution.raw_variables)
+    local d = ed.detect(solution.raw_variables, solution.problem and solution.problem.primals)
     log.info("explore seed=%d mode=%s void=%s hops=%d state=%s cheat=%.4g noship=%s frac_nv=%.2f",
         ctx.seed, ctx.mode, ctx.exclude_void and "ex" or "in", ctx.hops, solution.solver_state,
         d.cheat, tostring(d.noship), d.frac_nv)
@@ -1418,7 +1418,7 @@ function M.solve_explicit(spec)
         if steps > 1200 then break end
     end
 
-    local d = M.detect(solution.raw_variables)
+    local d = M.detect(solution.raw_variables, solution.problem and solution.problem.primals)
     local headline = string.format(
         "explicit: state=%s built=%d skipped={%s} R=%d(act=%d) cheat=%.4g degenerate=%s steps=%d",
         tostring(solution.solver_state), #built, table.concat(skipped, ","),

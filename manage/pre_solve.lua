@@ -97,9 +97,10 @@ function M.forwerd_solve(force_data, solution)
     -- material) are never diagnosed and keep their |shortage_source| escape hatch.
     if solution.solver_state == "finished"
         and solution.forced_imports == nil
-        and solution.raw_variables then
+        and solution.raw_variables
+        and solution.problem then
         local avoidable = create_problem.diagnose_avoidable_cheats(
-            solution.raw_variables.x, get_normalized())
+            solution.raw_variables.x, solution.problem.primals, get_normalized())
         if next(avoidable) ~= nil then
             solution.forced_imports = avoidable
             solution.reclassify_pending = true

@@ -226,9 +226,9 @@ end
 
 -- Dump the non-parked variable vector (sorted) for diffing across solves. Uses
 -- the same park threshold detect() uses so the two stay consistent.
-local function dump_vars(vars)
+local function dump_vars(vars, primals)
     if not vars or not vars.x then return end
-    local thresh = ed.park_threshold(vars)
+    local thresh = ed.park_threshold(vars, primals)
     local keys = {}
     for k, v in pairs(vars.x) do
         if math.abs(v) >= thresh then keys[#keys + 1] = k end
@@ -245,11 +245,11 @@ end
 -- a reader test whether a cheat DROP is a genuine improvement or just a jump to a
 -- hugely-upscaled solution -- "cheat down" and "recipe flow exploded 100x" can be
 -- the same row. Mirrors detect()'s is_recipe filter so counts stay consistent.
-local function recipe_stats(vars)
+local function recipe_stats(vars, primals)
     local sum, max = 0, 0
     if vars and vars.x then
         for k, v in pairs(vars.x) do
-            if ed.is_recipe(k) then
+            if ed.is_recipe(k, primals) then
                 local a = math.abs(v)
                 sum = sum + a
                 if a > max then max = a end
@@ -265,14 +265,14 @@ end
 -- "cheat" or call any class good/bad. It just reports every quantity so the
 -- caller can decide later which, if any, mean something. Park threshold is the
 -- same recipe-relative floor detect() uses, so "active" counts stay consistent.
-local function measure(vars)
+local function measure(vars, primals)
     local m = {
         shortage = 0, surplus = 0, initial = 0, final = 0, elastic = 0, slack = 0,
         n_shortage = 0, n_surplus = 0, n_initial = 0, n_final = 0, n_elastic = 0,
         rsum = 0, rmax = 0, n_recipe = 0, n_recipe_active = 0,
     }
     if not (vars and vars.x) then return m end
-    local th = ed.park_threshold(vars)
+    local th = ed.park_threshold(vars, primals)
     for k, v in pairs(vars.x) do
         local a = math.abs(v)
         if k:find("|shortage_source|", 1, true) then
@@ -287,7 +287,7 @@ local function measure(vars)
             m.elastic = m.elastic + a; if a > th then m.n_elastic = m.n_elastic + 1 end
         elseif k:find("slack%", 1, true) then
             m.slack = m.slack + a
-        elseif ed.is_recipe(k) then
+        elseif ed.is_recipe(k, primals) then
             m.rsum = m.rsum + a; if a > m.rmax then m.rmax = a end
             m.n_recipe = m.n_recipe + 1
             if a > th then m.n_recipe_active = m.n_recipe_active + 1 end
@@ -353,13 +353,13 @@ if unit_lo == 1 then
 end
 
 local b_state, b_steps, b_vars = solve(base_problem)
-local b_detect = ed.detect(b_vars)
-local b_rsum, b_rmax = recipe_stats(b_vars)
+local b_detect = ed.detect(b_vars, base_problem.primals)
+local b_rsum, b_rmax = recipe_stats(b_vars, base_problem.primals)
 if unit_lo == 1 then
     print("base " .. row_fields(b_state, b_steps, b_detect)
         .. string.format(" Rsum=%.4g Rmax=%.4g", b_rsum, b_rmax))
 end
-if DUMP_VARS then dump_vars(b_vars) end
+if DUMP_VARS then dump_vars(b_vars, base_problem.primals) end
 
 -- ABLATE: leave-one-out cost zeroing. For every primal whose baseline cost is
 -- nonzero (optionally restricted to keys containing the filter substring),
@@ -385,8 +385,8 @@ if pattern == "--ablate" then
         local term = problem.primals[t.key]
         if term then term.cost = 0 end
         local state, steps, vars = solve(problem)
-        local d = ed.detect(vars)
-        local rsum, rmax = recipe_stats(vars)
+        local d = ed.detect(vars, problem.primals)
+        local rsum, rmax = recipe_stats(vars, problem.primals)
         rows[#rows + 1] = {
             key = t.key, cost = t.cost, cheat = d.cheat,
             dcheat = d.cheat - b_detect.cheat, active = d.active, state = state,
@@ -452,7 +452,7 @@ if pattern == "--measure" then
             "n_shortage", "n_surplus", "n_initial", "n_final", "n_elastic",
             "Rsum", "Rmax", "n_recipe", "n_recipe_active", "pinned_recipe_val",
         }, "\t"))
-        emit("(base)", "(base)", "NA", b_state, b_steps, measure(b_vars), pinned_recipe_value(b_vars))
+        emit("(base)", "(base)", "NA", b_state, b_steps, measure(b_vars, base_problem.primals), pinned_recipe_value(b_vars))
     end
     local targets = collect_targets(filter)
     for idx = unit_lo, math.min(#targets, unit_hi) do
@@ -462,7 +462,7 @@ if pattern == "--measure" then
         if term then term.cost = 0 end
         local state, steps, vars = solve(problem)
         emit(t.key, classify(t.key), string.format("%.6g", t.cost), state, steps,
-            measure(vars), pinned_recipe_value(vars))
+            measure(vars, problem.primals), pinned_recipe_value(vars))
     end
     os.exit(0)
 end
@@ -543,7 +543,7 @@ for _, cost in ipairs(values) do
     local problem = build_problem()
     override_cost(problem, pattern, cost)
     local state, steps, vars = solve(problem)
-    local d = ed.detect(vars)
+    local d = ed.detect(vars, problem.primals)
     print(string.format("cost=%-10g %s", cost, row_fields(state, steps, d)))
-    if DUMP_VARS then dump_vars(vars) end
+    if DUMP_VARS then dump_vars(vars, problem.primals) end
 end

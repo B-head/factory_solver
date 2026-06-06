@@ -821,27 +821,27 @@ end
 ---escape hatch. Feed the result back as create_problem's `forced_imports` and
 ---re-solve.
 ---
----`x` is the packed primal map (variable name -> value) from a finished solve.
+---`x` is the packed primal map (variable name -> value) from a finished solve;
+---`primals` is the matching Problem.primals, read for each variable's class.
 ---@param x table<string, number>
+---@param primals table<string, Primal>
 ---@param production_lines NormalizedProductionLine[]
 ---@param epsilon number?  treat |x| below this as zero (default 1e-6)
 ---@return table<string, true> avoidable  material variable names to re-import
-function M.diagnose_avoidable_cheats(x, production_lines, epsilon)
+function M.diagnose_avoidable_cheats(x, primals, production_lines, epsilon)
     epsilon = epsilon or 1e-6
 
-    -- Collect the materials that carry a non-zero cheat, deduped. A shortage is
-    -- keyed by the bare material; an elastic is keyed by the constraint's |limit|
-    -- dual, so strip both prefixes back to the material variable name.
+    -- Collect the materials that carry a non-zero cheat, deduped. Each escape
+    -- variable's Primal records the base material key it stands in for (both
+    -- shortage_source and elastic set .material), so read it off the metadata
+    -- instead of stripping the prefix off the variable name. A bare |elastic|
+    -- without a material maps to no single material and is skipped.
     local cheated = {} ---@type table<string, true>
     for name, value in pairs(x) do
         if math.abs(value) > epsilon then
-            -- A shortage is keyed by the bare material; an elastic by the
-            -- constraint's |limit| dual. strip_* peel both back to the material;
-            -- a bare |elastic|<dual> without a |limit| body maps to no single
-            -- material and returns nil from both, so it is skipped.
-            local material = vk.strip_shortage(name) or vk.strip_elastic_limit(name)
-            if material then
-                cheated[material] = true
+            local p = primals[name]
+            if p and (p.kind == "shortage_source" or p.kind == "elastic") and p.material then
+                cheated[p.material] = true
             end
         end
     end

@@ -10,8 +10,6 @@
 -- delegates, so the HIT taxonomy (DEGEN / NOSHIP / CATALYST / plain HIT) has a
 -- single source of truth shared by the in-engine and headless paths.
 
-local vk = require "solver/var_key"
-
 local M = {}
 
 -- A recipe variable is "parked" when it sits at the IPM's interior floor rather
@@ -33,16 +31,17 @@ local PARK_ABS = M.PARK_ABS
 local CHEAT_EPS = M.CHEAT_EPS
 local PARK_NOTE_FRACTION = M.PARK_NOTE_FRACTION
 
----True for a real production recipe flow variable: a `recipe/` or
----`virtual_recipe/` primal that is NOT a |bridge| temperature-conversion
----variable. |bridge| variables are LP-internal plumbing create_problem injects,
----not recipes the user placed, so they are excluded. Shared by detect() and the
----cost-sweep driver (tests/sweep_cost.lua) so the two agree on what counts as a
----recipe.
+---True for a real production recipe flow variable, read from the Primal's `kind`
+---rather than by parsing the key. recipe and virtual_recipe lines carry kind
+---"recipe"; |bridge| plumbing carries "bridge" and is excluded, so the count
+---stays about the user's chain rather than solver internals. Shared by detect()
+---and the cost-sweep driver (tests/sweep_cost.lua) so the two agree.
 ---@param k string
+---@param primals table<string, Primal>? Variable metadata from the solved Problem.
 ---@return boolean
-function M.is_recipe(k)
-    return vk.is_recipe(k)
+function M.is_recipe(k, primals)
+    local p = primals and primals[k]
+    return p ~= nil and p.kind == "recipe"
 end
 
 ---The park threshold for a solved variable set: a recipe value with |value|
@@ -51,12 +50,13 @@ end
 ---adapts to the solution scale instead of assuming a fixed one. Shared with the
 ---cost-sweep driver so park decisions stay consistent across both readers.
 ---@param vars PackedVariables?
+---@param primals table<string, Primal>? Variable metadata from the solved Problem.
 ---@return number
-function M.park_threshold(vars)
+function M.park_threshold(vars, primals)
     local max_x = 0
     if vars and vars.x then
         for k, v in pairs(vars.x) do
-            if M.is_recipe(k) and math.abs(v) > max_x then
+            if M.is_recipe(k, primals) and math.abs(v) > max_x then
                 max_x = math.abs(v)
             end
         end
@@ -83,13 +83,15 @@ end
 ---the pinned amount to |surplus_sink| and never opens a |final_sink|, so the LP
 ---makes the material only to throw it away.
 ---@param vars PackedVariables?
+---@param primals table<string, Primal>? Variable metadata from the solved Problem; classifies each key by kind (recipe / shortage_source / elastic / initial_source / final_sink / ...).
 ---@return { recipes: integer, near_zero: integer, frac: number, recipes_nv: integer, near_zero_nv: integer, frac_nv: number, cheat: number, active: integer, degenerate: boolean, has_initial: boolean, has_final: boolean, noship: boolean, zeros: string[] }
-function M.detect(vars)
+function M.detect(vars, primals)
     if not vars or not vars.x then
         return { recipes = 0, near_zero = 0, frac = 0, recipes_nv = 0,
             near_zero_nv = 0, frac_nv = 0, cheat = 0, active = 0, degenerate = false,
             has_initial = false, has_final = false, noship = false, zeros = {} }
     end
+    primals = primals or {}
 
     -- Count only real production recipes. |bridge| temperature-conversion
     -- variables (keyed virtual_recipe/|bridge|...) are LP-internal plumbing
@@ -97,12 +99,12 @@ function M.detect(vars)
     -- temperature conversion is needed, so excluding them keeps the count about
     -- the user's chain rather than solver internals. M.is_recipe is the shared
     -- predicate; is_void is pyvoid-specific and stays local to this taxonomy.
-    local is_recipe = M.is_recipe
+    local function is_recipe(k) return M.is_recipe(k, primals) end
     local function is_void(k)
         return k:find("pyvoid", 1, true) ~= nil
     end
 
-    local thresh = M.park_threshold(vars)
+    local thresh = M.park_threshold(vars, primals)
 
     local recipes, near_zero = 0, 0
     local recipes_nv, near_zero_nv = 0, 0
@@ -133,11 +135,12 @@ function M.detect(vars)
     local has_initial, has_final = false, false
     for k, v in pairs(vars.x) do
         if math.abs(v) > thresh then
-            if vk.has_shortage(k) or vk.has_elastic(k) then
+            local kind = primals[k] and primals[k].kind
+            if kind == "shortage_source" or kind == "elastic" then
                 cheat = cheat + math.abs(v)
-            elseif vk.has_initial(k) then
+            elseif kind == "initial_source" then
                 has_initial = true
-            elseif vk.has_final(k) then
+            elseif kind == "final_sink" then
                 has_final = true
             end
         end

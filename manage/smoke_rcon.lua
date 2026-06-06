@@ -647,11 +647,11 @@ function M.check_catalyst_reclassify()
     end
 
     local x = solution.raw_variables and solution.raw_variables.x or {}
+    local primals = solution.problem and solution.problem.primals or {}
     local cheat = 0
     for k, v in pairs(x) do
-        if math.abs(v) > 1e-6
-            and (string.find(k, "|shortage_source|", 1, true)
-                or string.find(k, "|elastic|", 1, true)) then
+        local p = primals[k]
+        if math.abs(v) > 1e-6 and p and (p.kind == "shortage_source" or p.kind == "elastic") then
             cheat = cheat + math.abs(v)
         end
     end

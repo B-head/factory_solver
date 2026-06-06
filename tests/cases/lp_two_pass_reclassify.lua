@@ -45,7 +45,7 @@ local function solve(name, constraints, lines, forced)
     local state, vars = harness.solve_to_completion(lp, problem,
         { tolerance = 1e-6, iterate_limit = 600 })
     harness.assert_eq(state, "finished", name .. " solver_state")
-    return vars.x
+    return vars.x, problem.primals
 end
 
 local function cheat_mass(x)
@@ -97,7 +97,7 @@ table.insert(cases, {
 
         -- Pass 1: target is trapped in the cycle (unreachable) and fabricating it
         -- (1024 / unit) undercuts the 2000-raw real chain, so the LP cheats.
-        local x1 = solve("avoidable-p1", constraints, lines, nil)
+        local x1, p1 = solve("avoidable-p1", constraints, lines, nil)
         harness.assert_true(cheat_mass(x1) > 0.1,
             "pass 1 fabricates the target (got cheat " .. cheat_mass(x1) .. ")")
 
@@ -106,7 +106,7 @@ table.insert(cases, {
         -- cheats `mid` (0.5 mid at 1024 makes 1 target via r2, cheaper than
         -- fabricating 1 target directly) -- so assert the set is non-empty rather
         -- than naming one.
-        local avoidable = cp.diagnose_avoidable_cheats(x1, lines) or {}
+        local avoidable = cp.diagnose_avoidable_cheats(x1, p1, lines) or {}
         harness.assert_true(#set_keys(avoidable) > 0,
             "a cheated cycle material is diagnosed as avoidable (export-feasible)")
 
@@ -139,11 +139,11 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 1 },
         }
 
-        local x1 = solve("unavoidable-p1", constraints, lines, nil)
+        local x1, p1 = solve("unavoidable-p1", constraints, lines, nil)
         harness.assert_true((x1["|shortage_source|item/loop/normal"] or 0) > 0.1,
             "pass 1 fabricates loop via shortage")
 
-        local avoidable = cp.diagnose_avoidable_cheats(x1, lines)
+        local avoidable = cp.diagnose_avoidable_cheats(x1, p1, lines)
         harness.assert_true(not avoidable["item/loop/normal"],
             "loop is NOT diagnosed as avoidable (no flow produces it). got: " ..
             table.concat(set_keys(avoidable), ", "))
@@ -172,11 +172,11 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 0.5 },
         }
 
-        local x1 = solve("grow-p1", constraints, lines, nil)
+        local x1, p1 = solve("grow-p1", constraints, lines, nil)
         harness.assert_near(cheat_mass(x1), 0, 1e-3,
             "the grow loop closes via real recipes with no cheat (got " .. cheat_mass(x1) .. ")")
 
-        local avoidable = cp.diagnose_avoidable_cheats(x1, lines)
+        local avoidable = cp.diagnose_avoidable_cheats(x1, p1, lines)
         harness.assert_eq(#set_keys(avoidable), 0,
             "nothing to reclassify -- no cheat to diagnose (got: " ..
             table.concat(set_keys(avoidable), ", ") .. ")")

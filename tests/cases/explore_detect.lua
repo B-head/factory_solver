@@ -8,8 +8,18 @@
 local harness = require "tests/harness"
 local ed = require "tests/explore_detect"
 
--- A PackedVariables-shaped value: only .x matters to detect().
-local function vars(x) return { x = x } end
+-- Build the (vars, primals) pair detect() reads: x holds the solved values,
+-- primals holds each variable's kind so detect classifies by metadata, not by
+-- parsing the key. Returned as two values so `ed.detect(solved{...})` forwards
+-- both through Lua's multi-return. Entry shape: { key, value, kind }.
+local function solved(entries)
+    local x, primals = {}, {}
+    for _, e in ipairs(entries) do
+        x[e[1]] = e[2]
+        primals[e[1]] = { key = e[1], index = 0, cost = 0, is_result = false, kind = e[3] }
+    end
+    return { x = x }, primals
+end
 
 -- A full ExploreContext with sensible defaults; `over` patches fields per case.
 local function ctx(over)
@@ -42,9 +52,9 @@ table.insert(cases, {
 table.insert(cases, {
     name = "clean finished: two active recipes, no cheat, no HIT",
     run = function()
-        local d = ed.detect(vars({
-            ["recipe/a/normal"] = 1.0,
-            ["recipe/b/normal"] = 2.0,
+        local d = ed.detect(solved({
+            { "recipe/a/normal", 1.0, "recipe" },
+            { "recipe/b/normal", 2.0, "recipe" },
         }))
         harness.assert_eq(d.recipes, 2, "recipes")
         harness.assert_eq(d.active, 2, "active")
@@ -60,10 +70,10 @@ table.insert(cases, {
 table.insert(cases, {
     name = "DEGEN: cheat>0 with zero active recipes (target conjured, nothing built)",
     run = function()
-        local d = ed.detect(vars({
-            ["recipe/loop/normal"] = PARKED,
-            ["item/ash/normal|shortage_source|"] = 0.5,
-            ["item/ash/normal|surplus_sink|"] = 0.5,
+        local d = ed.detect(solved({
+            { "recipe/loop/normal", PARKED, "recipe" },
+            { "|shortage_source|item/ash/normal", 0.5, "shortage_source" },
+            { "|surplus_sink|item/ash/normal", 0.5, "surplus_sink" },
         }))
         harness.assert_eq(d.active, 0, "no active recipe")
         harness.assert_near(d.cheat, 0.5, 1e-9, "cheat mass")
@@ -77,11 +87,11 @@ table.insert(cases, {
 table.insert(cases, {
     name = "CATALYST: partial shortage on a genuine catalyst is tagged",
     run = function()
-        local d = ed.detect(vars({
-            ["recipe/a/normal"] = 1.0,
-            ["recipe/b/normal"] = 1.0,
-            ["recipe/c/normal"] = PARKED,
-            ["item/sb-oxide/normal|shortage_source|"] = 0.75,
+        local d = ed.detect(solved({
+            { "recipe/a/normal", 1.0, "recipe" },
+            { "recipe/b/normal", 1.0, "recipe" },
+            { "recipe/c/normal", PARKED, "recipe" },
+            { "|shortage_source|item/sb-oxide/normal", 0.75, "shortage_source" },
         }))
         harness.assert_eq(d.active, 2, "two active recipes")
         harness.assert_near(d.cheat, 0.75, 1e-9, "cheat mass")
@@ -95,11 +105,11 @@ table.insert(cases, {
 table.insert(cases, {
     name = "NOSHIP: imports + runs but no final_sink (cheat-free impracticality)",
     run = function()
-        local d = ed.detect(vars({
-            ["recipe/a/normal"] = 1.0,
-            ["item/ore/normal|initial_source|"] = 5.0,
+        local d = ed.detect(solved({
+            { "recipe/a/normal", 1.0, "recipe" },
+            { "|initial_source|item/ore/normal", 5.0, "initial_source" },
             -- no |final_sink|; surplus is dumped back, not shipped
-            ["item/mid/normal|surplus_sink|"] = 1.0,
+            { "|surplus_sink|item/mid/normal", 1.0, "surplus_sink" },
         }))
         harness.assert_true(d.has_initial, "draws an import")
         harness.assert_true(d.has_final == false, "ships nothing")
@@ -113,7 +123,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "non-convergence is a plain HIT regardless of cheat",
     run = function()
-        local d = ed.detect(vars({ ["recipe/a/normal"] = 1.0 }))
+        local d = ed.detect(solved({ { "recipe/a/normal", 1.0, "recipe" } }))
         local line = ed.format_result(ctx(), "unfinished", 600, d)
         harness.assert_true(line:find("<<HIT", 1, true) ~= nil, "HIT on non-finished state")
         harness.assert_true(line:find("state=unfinished", 1, true) ~= nil, "state shown")
@@ -123,7 +133,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "format_result: closure=off surfaces surviving traps",
     run = function()
-        local d = ed.detect(vars({ ["recipe/a/normal"] = 1.0 }))
+        local d = ed.detect(solved({ { "recipe/a/normal", 1.0, "recipe" } }))
         local line = ed.format_result(
             ctx({ do_close = false, trapped_items = { "pu-238", "ash" } }), "finished", 5, d)
         harness.assert_true(line:find("closure=off,trapped={ash,pu-238}", 1, true) ~= nil
