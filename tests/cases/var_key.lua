@@ -60,7 +60,7 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "recipe / bridge / source / sink predicates",
+    name = "recipe / bridge predicates",
     run = function()
         harness.assert_true(vk.is_recipe("recipe/iron-smelting/normal"), "recipe/ is a recipe")
         harness.assert_true(vk.is_recipe("virtual_recipe/foo/normal"), "virtual_recipe/ is a recipe")
@@ -71,10 +71,6 @@ table.insert(cases, {
         harness.assert_true(vk.is_bridge(bridge_key), "bridge key detected")
         harness.assert_true(not vk.is_recipe(bridge_key), "bridge is not a counted recipe")
         harness.assert_true(not vk.is_bridge("recipe/x/normal"), "plain recipe is not a bridge")
-
-        harness.assert_true(vk.is_source_recipe_name("<source>item/iron-plate"), "source recipe name")
-        harness.assert_true(vk.is_sink_recipe_name("<sink>item/iron-plate"), "sink recipe name")
-        harness.assert_true(not vk.is_source_recipe_name("iron-smelting"), "plain recipe name not source")
     end,
 })
 
@@ -88,27 +84,6 @@ table.insert(cases, {
         harness.assert_true(vk.strip_shortage("item/x/normal") == nil, "strip_shortage non-match")
         harness.assert_true(vk.strip_elastic_limit(vk.elastic("|other|x")) == nil,
             "bare elastic is not an elastic_limit")
-    end,
-})
-
-table.insert(cases, {
-    name = "bare_fluid_limit aggregates only temperature-carrying fluids",
-    run = function()
-        harness.assert_eq(vk.bare_fluid_limit("fluid/steam@[165,165]"), "|limit|fluid/steam",
-            "temperature fluid -> bare limit dual")
-        harness.assert_eq(vk.bare_fluid_limit("fluid/steam@[15,1000]"), "|limit|fluid/steam",
-            "range fluid -> same bare limit dual")
-        harness.assert_true(vk.bare_fluid_limit("fluid/water") == nil, "bare fluid has nothing to aggregate")
-        harness.assert_true(vk.bare_fluid_limit("item/x/normal") == nil, "non-fluid returns nil")
-    end,
-})
-
-table.insert(cases, {
-    name = "source_cost_kind classifies material strings",
-    run = function()
-        harness.assert_eq(vk.source_cost_kind("virtual_material/<heat>/normal"), "heat", "heat tier")
-        harness.assert_eq(vk.source_cost_kind("fluid/steam@[165,165]"), "fluid", "fluid tier")
-        harness.assert_eq(vk.source_cost_kind("item/iron-plate/normal"), "item", "item tier")
     end,
 })
 

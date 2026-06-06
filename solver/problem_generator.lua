@@ -12,11 +12,15 @@ local vk = require "solver/var_key"
 ---@field inactive_recipe_variables table<string, true>? Recipe variables omitted from the LP because they are not connected to any user Constraint; populated by create_problem.
 local M = {}
 
+---@alias PrimalKind "recipe"|"bridge"|"surplus_sink"|"final_sink"|"initial_source"|"shortage_source"|"elastic"|"slack"
+
 ---@class Primal
 ---@field key string
 ---@field index integer
 ---@field cost number
 ---@field is_result boolean
+---@field kind PrimalKind? Variable class; builders set it so solution readers classify without parsing the key.
+---@field material string? For an escape variable, the base material variable key it stands in for.
 
 ---@class Dual
 ---@field key string
@@ -52,7 +56,9 @@ end
 ---@param primal_variable string
 ---@param cost number
 ---@param is_result boolean? If ture, variables are included in the output of the solution.
-function M:add_objective(primal_variable, cost, is_result)
+---@param kind PrimalKind? Variable class recorded on the Primal so solution readers classify without parsing the key. Builders (create_problem, slack) always pass it; low-level test fixtures may omit it.
+---@param material string? For an escape variable (shortage/elastic/source/sink), the base material variable key it stands in for, recorded so diagnose maps it back without parsing.
+function M:add_objective(primal_variable, cost, is_result, kind, material)
     assert(
         not self.primals[primal_variable],
         "Already added a primal variable with the same name."
@@ -63,6 +69,8 @@ function M:add_objective(primal_variable, cost, is_result)
         index = self.primal_length,
         cost = cost,
         is_result = is_result or false,
+        kind = kind,
+        material = material,
     }
 end
 
@@ -108,7 +116,7 @@ end
 function M:add_upper_limit_constraint(dual_variable, limit)
     local slack_key = vk.pos_slack(dual_variable)
     M.add_equivalence_constraint(self, dual_variable, limit)
-    M.add_objective(self, slack_key, 0, false)
+    M.add_objective(self, slack_key, 0, false, "slack")
     M.add_subject_term(self, slack_key, dual_variable, 1)
     return slack_key
 end
@@ -120,7 +128,7 @@ end
 function M:add_lower_limit_constraint(dual_variable, limit)
     local slack_key = vk.neg_slack(dual_variable)
     M.add_equivalence_constraint(self, dual_variable, limit)
-    M.add_objective(self, slack_key, 0, false)
+    M.add_objective(self, slack_key, 0, false, "slack")
     M.add_subject_term(self, slack_key, dual_variable, -1)
     return slack_key
 end

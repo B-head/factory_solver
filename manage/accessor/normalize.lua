@@ -141,6 +141,20 @@ function M.normalize_production_line(line, bonuses)
         end
     end
 
+    -- Propagate the source/sink class from the VirtualRecipe so create_problem
+    -- and report read it as a flag instead of parsing the "<source>"/"<sink>"
+    -- prefix off the prototype name. LuaRecipePrototype rejects unknown-key
+    -- indexing at the C++ layer (same gate as pollution_per_craft above), so
+    -- guard the read on the VirtualRecipe branch.
+    local is_source, is_sink
+    ---@diagnostic disable-next-line: undefined-field
+    if recipe.object_name ~= "LuaRecipePrototype" then
+        ---@diagnostic disable-next-line: undefined-field
+        is_source = recipe.is_source or nil
+        ---@diagnostic disable-next-line: undefined-field
+        is_sink = recipe.is_sink or nil
+    end
+
     ---@type NormalizedProductionLine
     local normalized_line = {
         recipe_typed_name = line.recipe_typed_name,
@@ -150,6 +164,8 @@ function M.normalize_production_line(line, bonuses)
         fuel_burnt_result = fuel_burnt_result,
         power_per_second = power,
         pollution_per_second = pollution,
+        is_source = is_source,
+        is_sink = is_sink,
     }
     return normalized_line, effectivity
 end

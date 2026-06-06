@@ -31,14 +31,6 @@ local NEG_SLACK = "%negative_slack%"
 -- A bare |elastic| sits on a |limit| dual, so the composite a constraint
 -- relaxation carries is |elastic||limit|<material>.
 local ELASTIC_LIMIT = ELASTIC .. LIMIT
--- Recipe-prototype-name markers (NOT LP key prefixes): manage/virtual.lua writes
--- these into the virtual_recipe's `name` field, so they are matched against
--- recipe_typed_name.name, not against the LP variable name.
-local SOURCE_RECIPE = "<source>"
-local SINK_RECIPE = "<sink>"
--- Material-kind discriminators for source-cost tiering.
-local HEAT_MATERIAL = "virtual_material/<heat>/"
-local FLUID_MATERIAL = "fluid/"
 
 local M = {}
 
@@ -124,37 +116,6 @@ function M.is_recipe(key)
     return string.sub(key, 1, 7) == "recipe/" or string.sub(key, 1, 15) == "virtual_recipe/"
 end
 
----True when a recipe PROTOTYPE NAME (recipe_typed_name.name, not the LP key) is
----a user-placed infinite-source virtual recipe.
----@param recipe_name string
----@return boolean
-function M.is_source_recipe_name(recipe_name)
-    return string.sub(recipe_name, 1, #SOURCE_RECIPE) == SOURCE_RECIPE
-end
-
----True when a recipe PROTOTYPE NAME is an infinite-sink virtual recipe.
----@param recipe_name string
----@return boolean
-function M.is_sink_recipe_name(recipe_name)
-    return string.sub(recipe_name, 1, #SINK_RECIPE) == SINK_RECIPE
-end
-
----Map a temperature-carrying fluid variable to the bare-fluid aggregation
----|limit| dual ("fluid/steam@[165,165]" -> "|limit|fluid/steam"). Returns nil
----for non-fluids and for already-bare fluid names (no aggregation to do).
----@param variable_name string
----@return string?
-function M.bare_fluid_limit(variable_name)
-    if string.sub(variable_name, 1, #FLUID_MATERIAL) ~= FLUID_MATERIAL then
-        return nil
-    end
-    local at = string.find(variable_name, "@", #FLUID_MATERIAL + 1, true)
-    if not at then
-        return nil
-    end
-    return LIMIT .. string.sub(variable_name, 1, at - 1)
-end
-
 ---Strip the |shortage_source| prefix back to the bare material key, or nil.
 ---@param key string
 ---@return string?
@@ -175,20 +136,6 @@ function M.strip_elastic_limit(key)
         return string.sub(key, #ELASTIC_LIMIT + 1)
     end
     return nil
-end
-
----Source-cost tier of a material variable: heat / fluid / everything else.
----The cost VALUES stay in create_problem; this only classifies the string.
----@param variable_name string
----@return "heat"|"fluid"|"item"
-function M.source_cost_kind(variable_name)
-    if string.sub(variable_name, 1, #HEAT_MATERIAL) == HEAT_MATERIAL then
-        return "heat"
-    elseif string.sub(variable_name, 1, #FLUID_MATERIAL) == FLUID_MATERIAL then
-        return "fluid"
-    else
-        return "item"
-    end
 end
 
 ---@param key string

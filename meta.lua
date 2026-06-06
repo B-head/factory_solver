@@ -183,6 +183,9 @@ __factory_solver__storage = {}
 ---@field fuel_burnt_result NormalizedAmount?
 ---@field power_per_second number
 ---@field pollution_per_second number
+---@field is_bridge boolean? Temperature bridge injected by create_temperature_bridges (LP-internal plumbing, not a user recipe).
+---@field is_source boolean? User-placed infinite-source virtual recipe; propagated from VirtualRecipe so readers need not parse the "<source>" name prefix.
+---@field is_sink boolean? Infinite-sink virtual recipe; propagated from VirtualRecipe so readers need not parse the "<sink>" name prefix.
 
 ---@class NormalizedAmount
 ---@field type "item"|"fluid"|"virtual_material"

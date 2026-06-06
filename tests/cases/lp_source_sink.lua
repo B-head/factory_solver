@@ -9,8 +9,10 @@
 --               so it out-competes the automatic |surplus_sink| (elastic_cost)
 --               for absorbing byproduct surplus.
 --
--- create_problem detects these by the "<source>" / "<sink>" recipe-name prefix,
--- so the fixtures only need to name the virtual recipes accordingly.
+-- create_problem detects these by the is_source / is_sink flags that normalize
+-- propagates from the VirtualRecipe in-game; headless fixtures set them directly
+-- via the `line` helper's opts, so the <source>/<sink> names stay only as
+-- human-readable labels.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
@@ -21,13 +23,19 @@ local function item(name, amount)
 end
 
 ---@param recipe_type "recipe"|"virtual_recipe"
-local function line(recipe_type, recipe_name, products, ingredients)
+---@param opts { is_source: boolean?, is_sink: boolean? }?
+local function line(recipe_type, recipe_name, products, ingredients, opts)
+    opts = opts or {}
     return {
         recipe_typed_name = { type = recipe_type, name = recipe_name, quality = "normal" },
         products = products,
         ingredients = ingredients,
         power_per_second = 0,
         pollution_per_second = 0,
+        -- Set explicitly because headless fixtures skip normalize, which is what
+        -- propagates these from the VirtualRecipe in-game.
+        is_source = opts.is_source,
+        is_sink = opts.is_sink,
     }
 end
 
@@ -60,7 +68,7 @@ table.insert(cases, {
     name = "source alone satisfies demand",
     run = function()
         local state, vars = solve(
-            { line("virtual_recipe", "<source>item/plate", { item("plate", 1) }, {}) },
+            { line("virtual_recipe", "<source>item/plate", { item("plate", 1) }, {}, { is_source = true }) },
             { demand("plate", 10) })
 
         harness.assert_eq(state, "finished", "solver_state")
@@ -78,7 +86,7 @@ table.insert(cases, {
         local state, vars = solve(
             {
                 line("recipe", "smelt", { item("plate", 1) }, { item("ore", 2) }),
-                line("virtual_recipe", "<source>item/plate", { item("plate", 1) }, {}),
+                line("virtual_recipe", "<source>item/plate", { item("plate", 1) }, {}, { is_source = true }),
             },
             { demand("plate", 10) })
 
@@ -100,7 +108,7 @@ table.insert(cases, {
         local state, vars = solve(
             {
                 line("recipe", "smelt", { item("plate", 2) }, { item("ore", 1) }),
-                line("virtual_recipe", "<source>item/plate", { item("plate", 1) }, {}),
+                line("virtual_recipe", "<source>item/plate", { item("plate", 1) }, {}, { is_source = true }),
             },
             { demand("plate", 10) })
 
@@ -122,7 +130,7 @@ table.insert(cases, {
         local state, vars = solve(
             {
                 line("recipe", "react", { item("B", 1), item("C", 3) }, { item("A", 1) }),
-                line("virtual_recipe", "<sink>item/C", {}, { item("C", 1) }),
+                line("virtual_recipe", "<sink>item/C", {}, { item("C", 1) }, { is_sink = true }),
             },
             { demand("B", 10) })
 

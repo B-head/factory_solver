@@ -66,9 +66,9 @@ function M.get_total_amounts(bonuses, solution)
         -- uncanceled -> the material lands in Initial Ingredients (it came from
         -- outside). A sink only consumes, so dropping it leaves the upstream
         -- production uncanceled -> the material lands in Final Products (it left
-        -- the factory). Detected by the same name prefix create_problem uses.
-        local rname = n.recipe_typed_name.name
-        if vk.is_source_recipe_name(rname) or vk.is_sink_recipe_name(rname) then
+        -- the factory). Read from the is_source/is_sink flags propagated onto the
+        -- normalized line, not by parsing the prototype name.
+        if n.is_source or n.is_sink then
             goto continue_line
         end
 
