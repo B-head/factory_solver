@@ -83,6 +83,52 @@ local function die(msg, code)
     os.exit(code or 2)
 end
 
+-- ---- shard flags ------------------------------------------------------------
+-- Two flags orthogonal to the positional `<file> <mode> [<filter>]` grammar keep
+-- this worker a pure single-shot box the shell can fan out (tests/sweep_fanout.sh):
+--   --list-units    print how many leave-one-out targets this file has, then exit
+--                   (the shell uses the count to carve index ranges); no solving.
+--   --units <m-n>   process only sorted-target indices m..n (1-based, inclusive).
+--                   `m-` is open-ended; a bare `m` is the single index m.
+-- A heavy problem whose --ablate/--measure takes minutes is thus split into
+-- (file, range) work items that run on separate cores instead of pinning one.
+-- Both flags are stripped from `arg` here so the positional parse below is intact.
+local list_units = false
+local unit_lo, unit_hi = 1, math.huge ---@type number, number
+do
+    local positional = {}
+    local i = 1
+    while arg[i] ~= nil do
+        local a = arg[i]
+        local range = nil
+        if a == "--list-units" then
+            list_units = true
+        elseif a == "--units" then
+            i = i + 1
+            range = arg[i]
+        elseif a:sub(1, 8) == "--units=" then
+            range = a:sub(9)
+        else
+            positional[#positional + 1] = a
+        end
+        if range then
+            local lo, hi = range:match("^(%d+)%-(%d+)$")
+            if lo then
+                unit_lo, unit_hi = tonumber(lo) or 1, tonumber(hi) or math.huge
+            elseif range:match("^%d+%-$") then
+                unit_lo, unit_hi = tonumber(range:match("^(%d+)%-$")) or 1, math.huge
+            elseif range:match("^%d+$") then
+                unit_lo = tonumber(range) or 1; unit_hi = unit_lo
+            else
+                die("bad --units range '" .. tostring(range) .. "' (expected m-n, m-, or m)")
+            end
+        end
+        i = i + 1
+    end
+    local n0 = #arg
+    for k = 1, n0 do arg[k] = positional[k] end -- nil-fills the tail = clean positional argv
+end
+
 -- ---- args -------------------------------------------------------------------
 local path = arg[1]
 if not path then
@@ -270,16 +316,49 @@ local function pinned_recipe_value(vars)
 end
 
 -- ---- baseline ---------------------------------------------------------------
-print("# problem: " .. path)
-print("# seed=" .. tostring(meta.seed) .. " sr=" .. tostring(meta.seed_recipe)
-    .. " tgt=" .. tostring(meta.target_label))
-
 local base_problem = build_problem()
+
+-- The leave-one-out targets (nonzero-cost primals, optional filter) in a STABLE
+-- sorted-by-key order, so a --units index range means the same thing in the
+-- --list-units planning pass and in every sharded run of the same file.
+local function collect_targets(filter)
+    local targets = {}
+    for key, term in pairs(base_problem.primals) do
+        if term.cost ~= 0 and (not filter or string.find(key, filter, 1, true)) then
+            targets[#targets + 1] = { key = key, cost = term.cost }
+        end
+    end
+    table.sort(targets, function(a, b) return a.key < b.key end)
+    return targets
+end
+
+-- --list-units: report the target count and exit WITHOUT solving -- the shell
+-- carves (file, index-range) work items from it. Filter (arg[3]) honours the same
+-- substring the --ablate/--measure modes accept, so the count matches what they
+-- would process.
+if list_units then
+    print(#collect_targets(arg[3]))
+    os.exit(0)
+end
+
+-- On a sharded run (--units with lo>1) the human preamble and the baseline row
+-- are suppressed so concatenated shard output stays clean; the baseline SOLVE
+-- still runs (every shard needs b_detect/b_vars for --ablate's dcheat and for the
+-- --measure (base) row when it owns index 1). Non-sharded runs have lo==1, so
+-- their output is unchanged.
+if unit_lo == 1 then
+    print("# problem: " .. path)
+    print("# seed=" .. tostring(meta.seed) .. " sr=" .. tostring(meta.seed_recipe)
+        .. " tgt=" .. tostring(meta.target_label))
+end
+
 local b_state, b_steps, b_vars = solve(base_problem)
 local b_detect = ed.detect(b_vars)
 local b_rsum, b_rmax = recipe_stats(b_vars)
-print("base " .. row_fields(b_state, b_steps, b_detect)
-    .. string.format(" Rsum=%.4g Rmax=%.4g", b_rsum, b_rmax))
+if unit_lo == 1 then
+    print("base " .. row_fields(b_state, b_steps, b_detect)
+        .. string.format(" Rsum=%.4g Rmax=%.4g", b_rsum, b_rmax))
+end
 if DUMP_VARS then dump_vars(b_vars) end
 
 -- ABLATE: leave-one-out cost zeroing. For every primal whose baseline cost is
@@ -291,17 +370,17 @@ if DUMP_VARS then dump_vars(b_vars) end
 -- Rows are sorted by |dcheat| so the terms that matter float to the top.
 if pattern == "--ablate" then
     local filter = arg[3] -- optional substring; nil => every nonzero-cost var
-    local targets = {}
-    for key, term in pairs(base_problem.primals) do
-        if term.cost ~= 0 and (not filter or string.find(key, filter, 1, true)) then
-            targets[#targets + 1] = { key = key, cost = term.cost }
-        end
+    local targets = collect_targets(filter)
+    -- Preamble only on the first shard (lo==1) -- a sharded run concatenates many
+    -- of these and only wants it once.
+    if unit_lo == 1 then
+        print(string.format("# ablate: %d nonzero-cost variable(s)%s; base cheat=%.4g active=%d",
+            #targets, filter and (" matching '" .. filter .. "'") or "",
+            b_detect.cheat, b_detect.active))
     end
-    print(string.format("# ablate: %d nonzero-cost variable(s)%s; base cheat=%.4g active=%d",
-        #targets, filter and (" matching '" .. filter .. "'") or "",
-        b_detect.cheat, b_detect.active))
     local rows = {}
-    for _, t in ipairs(targets) do
+    for idx = unit_lo, math.min(#targets, unit_hi) do
+        local t = targets[idx]
         local problem = build_problem()
         local term = problem.primals[t.key]
         if term then term.cost = 0 end
@@ -363,22 +442,21 @@ if pattern == "--measure" then
             pinval == nil and "NA" or string.format("%.6g", pinval),
         }, "\t"))
     end
-    -- header
-    print(table.concat({
-        "file", "ablated", "ablated_class", "ablated_cost", "state", "steps",
-        "sum_shortage", "sum_surplus", "sum_initial", "sum_final", "sum_elastic", "sum_slack",
-        "n_shortage", "n_surplus", "n_initial", "n_final", "n_elastic",
-        "Rsum", "Rmax", "n_recipe", "n_recipe_active", "pinned_recipe_val",
-    }, "\t"))
-    emit("(base)", "(base)", "NA", b_state, b_steps, measure(b_vars), pinned_recipe_value(b_vars))
-    local targets = {}
-    for key, term in pairs(base_problem.primals) do
-        if term.cost ~= 0 and (not filter or string.find(key, filter, 1, true)) then
-            targets[#targets + 1] = { key = key, cost = term.cost }
-        end
+    -- The header and the (base) row are global to a file, so on a sharded run only
+    -- the shard that owns index 1 emits them; concatenated shard output then has a
+    -- single header + base per file. Non-sharded runs (lo==1) emit them as before.
+    if unit_lo == 1 then
+        print(table.concat({
+            "file", "ablated", "ablated_class", "ablated_cost", "state", "steps",
+            "sum_shortage", "sum_surplus", "sum_initial", "sum_final", "sum_elastic", "sum_slack",
+            "n_shortage", "n_surplus", "n_initial", "n_final", "n_elastic",
+            "Rsum", "Rmax", "n_recipe", "n_recipe_active", "pinned_recipe_val",
+        }, "\t"))
+        emit("(base)", "(base)", "NA", b_state, b_steps, measure(b_vars), pinned_recipe_value(b_vars))
     end
-    table.sort(targets, function(a, b) return a.key < b.key end)
-    for _, t in ipairs(targets) do
+    local targets = collect_targets(filter)
+    for idx = unit_lo, math.min(#targets, unit_hi) do
+        local t = targets[idx]
         local problem = build_problem()
         local term = problem.primals[t.key]
         if term then term.cost = 0 end
