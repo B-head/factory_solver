@@ -1,4 +1,5 @@
 local csr_matrix = require "solver/csr_matrix"
+local vk = require "solver/var_key"
 
 ---@class Problem
 ---@field name string
@@ -105,7 +106,7 @@ end
 ---@param limit number
 ---@return string
 function M:add_upper_limit_constraint(dual_variable, limit)
-    local slack_key = "%positive_slack%" .. dual_variable
+    local slack_key = vk.pos_slack(dual_variable)
     M.add_equivalence_constraint(self, dual_variable, limit)
     M.add_objective(self, slack_key, 0, false)
     M.add_subject_term(self, slack_key, dual_variable, 1)
@@ -117,7 +118,7 @@ end
 ---@param limit number
 ---@return string
 function M:add_lower_limit_constraint(dual_variable, limit)
-    local slack_key = "%negative_slack%" .. dual_variable
+    local slack_key = vk.neg_slack(dual_variable)
     M.add_equivalence_constraint(self, dual_variable, limit)
     M.add_objective(self, slack_key, 0, false)
     M.add_subject_term(self, slack_key, dual_variable, -1)

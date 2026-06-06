@@ -71,6 +71,7 @@ local case_files = {
     "fs_log",
     "typed_name_format",
     "number_format",
+    "var_key",
     "lp_fluid_bridge",
     "lp_fluid_constraint",
     "lp_lower_limit",

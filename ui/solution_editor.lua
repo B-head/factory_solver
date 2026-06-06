@@ -6,6 +6,7 @@ local nf = require "manage/number_format"
 local pre_solve = require "manage/pre_solve"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
+local vk = require "solver/var_key"
 local common = require "ui/common"
 local machine_setup = require "ui/machine_setup"
 local quality_variants_adder = require "ui/quality_variants_adder"
@@ -38,7 +39,7 @@ local active_font_color = { 1, 1, 1 }
 local function is_line_inactive(solution, typed_name)
     local set = solution.inactive_recipe_variables
     if not set then return false end
-    local variable_name = string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
+    local variable_name = vk.material(typed_name)
     return set[variable_name] == true
 end
 

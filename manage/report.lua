@@ -2,6 +2,7 @@ local acc = require "manage/accessor"
 local pre_solve = require "manage/pre_solve"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
+local vk = require "solver/var_key"
 
 local M = {}
 
@@ -67,7 +68,7 @@ function M.get_total_amounts(bonuses, solution)
         -- production uncanceled -> the material lands in Final Products (it left
         -- the factory). Detected by the same name prefix create_problem uses.
         local rname = n.recipe_typed_name.name
-        if string.sub(rname, 1, 8) == "<source>" or string.sub(rname, 1, 6) == "<sink>" then
+        if vk.is_source_recipe_name(rname) or vk.is_sink_recipe_name(rname) then
             goto continue_line
         end
 

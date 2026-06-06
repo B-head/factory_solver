@@ -1,6 +1,7 @@
 local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
 local material_cycles = require "solver/material_cycles"
+local vk = require "solver/var_key"
 local fs_log = require "fs_log"
 
 local log = fs_log.for_module("solver.create_problem")
@@ -29,24 +30,22 @@ local target_cost = 2 ^ 20
 ---@param variable_name string
 ---@return number
 local function source_cost_for(variable_name)
-    if string.sub(variable_name, 1, 24) == "virtual_material/<heat>/" then
+    local kind = vk.source_cost_kind(variable_name)
+    if kind == "heat" then
         return source_cost_heat
-    elseif string.sub(variable_name, 1, 6) == "fluid/" then
+    elseif kind == "fluid" then
         return source_cost_fluid
     else
         return source_cost_item
     end
 end
 
-local bridge_prefix = "|bridge|"
-local source_prefix = "<source>"
-
 local M = {}
 
 ---@param line NormalizedProductionLine
 ---@return boolean
 local function is_bridge_line(line)
-    return string.sub(line.recipe_typed_name.name, 1, #bridge_prefix) == bridge_prefix
+    return vk.is_bridge(line.recipe_typed_name.name)
 end
 
 ---A user-placed infinite source virtual recipe (manage/virtual.lua). It has no
@@ -60,7 +59,7 @@ end
 ---@param line NormalizedProductionLine
 ---@return boolean
 local function is_source_line(line)
-    return string.sub(line.recipe_typed_name.name, 1, #source_prefix) == source_prefix
+    return vk.is_source_recipe_name(line.recipe_typed_name.name)
 end
 
 ---Iterate every ingredient consumed by the line: real recipe ingredients first,
@@ -105,25 +104,6 @@ local function each_product(line)
             return i, line.fuel_burnt_result
         end
     end, nil, 0
-end
-
----For a temperature-suffixed fluid variable name ("fluid/<X>@T" / "fluid/<X>@[lo,hi]"),
----return the bare-fluid limit dual name ("|limit|fluid/<X>") so constraints on a
----temperature-agnostic fluid pick can aggregate flow across every variant.
----Constraints on temperature-specific variants keep going through their own
----"|limit|fluid/<X>@..." dual, untouched. Returns nil for non-fluid variables and
----for already-bare fluid names (no aggregation to do).
----@param variable_name string
----@return string?
-local function bare_fluid_limit_dual(variable_name)
-    if string.sub(variable_name, 1, 6) ~= "fluid/" then
-        return nil
-    end
-    local at = string.find(variable_name, "@", 7, true)
-    if not at then
-        return nil
-    end
-    return "|limit|" .. string.sub(variable_name, 1, at - 1)
 end
 
 ---For every (product_range Rp, ingredient_range Ri) pair found in the production
@@ -198,8 +178,7 @@ function M.create_temperature_bridges(production_lines)
                     local subset = imin <= pmin and pmax <= imax
                     local same = pmin == imin and pmax == imax
                     if subset and not same then
-                        local bridge_name = string.format("%sfluid/%s@[%g,%g]->[%g,%g]",
-                            bridge_prefix, fluid_name, pmin, pmax, imin, imax)
+                        local bridge_name = vk.bridge(fluid_name, pmin, pmax, imin, imax)
                         ---@type NormalizedProductionLine
                         local bridge_line = {
                             recipe_typed_name = {
@@ -341,8 +320,8 @@ function M.compute_active_lines(all_lines, constraints)
     local function touch_material(material_var)
         if seen_materials[material_var] then return end
         seen_materials[material_var] = true
-        link(material_var, "|limit|" .. material_var)
-        local bare_limit = bare_fluid_limit_dual(material_var)
+        link(material_var, vk.limit(material_var))
+        local bare_limit = vk.bare_fluid_limit(material_var)
         if bare_limit then
             link(material_var, bare_limit)
         end
@@ -356,8 +335,8 @@ function M.compute_active_lines(all_lines, constraints)
         for _, value in each_product(line) do
             local material_var = tn.typed_name_to_variable_name(value)
             link(recipe_var, material_var)
-            link(recipe_var, "|limit|" .. material_var)
-            local bare_limit = bare_fluid_limit_dual(material_var)
+            link(recipe_var, vk.limit(material_var))
+            local bare_limit = vk.bare_fluid_limit(material_var)
             if bare_limit and not bridge then
                 link(recipe_var, bare_limit)
             end
@@ -369,14 +348,14 @@ function M.compute_active_lines(all_lines, constraints)
             touch_material(material_var)
         end
         if not bridge then
-            link(recipe_var, "|limit|" .. recipe_var)
+            link(recipe_var, vk.limit(recipe_var))
         end
     end
 
     local visited = {} ---@type table<string, true>
     local queue = {} ---@type string[]
     for _, c in ipairs(constraints) do
-        local anchor = "|limit|" .. tn.typed_name_to_variable_name(c)
+        local anchor = vk.limit(tn.typed_name_to_variable_name(c))
         if not visited[anchor] then
             visited[anchor] = true
             queue[#queue + 1] = anchor
@@ -636,13 +615,13 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
 
             local amount = value.amount_per_second
             problem:add_subject_term(objective_name, constraint_name, amount)
-            problem:add_subject_term(objective_name, "|limit|" .. constraint_name, amount)
+            problem:add_subject_term(objective_name, vk.limit(constraint_name), amount)
 
             -- Skip bridges from the bare-fluid aggregation: a bridge re-labels
             -- single-T flow as range-T (or vice versa) without creating any new
             -- fluid, so counting both the boiler's steam@165 product and the
             -- bridge's steam@[15,1000] product would double the bare-fluid total.
-            local bare_limit = bare_fluid_limit_dual(constraint_name)
+            local bare_limit = vk.bare_fluid_limit(constraint_name)
             if bare_limit and not bridge then
                 problem:add_subject_term(objective_name, bare_limit, amount)
             end
@@ -668,7 +647,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
                 recipe_cost = source_cost_for(tn.typed_name_to_variable_name(line.products[1]))
             end
             problem:add_objective(objective_name, recipe_cost, true)
-            problem:add_subject_term(objective_name, "|limit|" .. objective_name, 1)
+            problem:add_subject_term(objective_name, vk.limit(objective_name), 1)
         end
         ::continue_line::
     end
@@ -694,7 +673,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         -- producer/consumer). Underproduction is still relaxed by the
         -- shortage_source / initial_source escape hatches added below.
         if not bridge_target_variables[constraint_name] then
-            local elastic_name = "|surplus_sink|" .. constraint_name
+            local elastic_name = vk.surplus_sink(constraint_name)
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, -1)
         end
@@ -710,7 +689,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         -- range-constrained chain straight out instead of through its consumer.
         if constrained_materials[constraint_name]
             and not bridge_target_variables[constraint_name] then
-            local final_name = "|final_sink|" .. constraint_name
+            local final_name = vk.final_sink(constraint_name)
             problem:add_objective(final_name, slack_cost)
             problem:add_subject_term(final_name, constraint_name, -1)
         end
@@ -724,12 +703,12 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         -- external input behind the slack-vs-source distinction. source_cost
         -- is far below elastic_cost so the shortage gate is unaffected.
         if deficits[constraint_name] then
-            local slack_name = "|initial_source|" .. constraint_name
+            local slack_name = vk.initial_source(constraint_name)
             problem:add_objective(slack_name, source_cost_for(constraint_name))
             problem:add_subject_term(slack_name, constraint_name, 1)
-            problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
+            problem:add_subject_term(slack_name, vk.limit(constraint_name), 1)
 
-            local bare_limit = bare_fluid_limit_dual(constraint_name)
+            local bare_limit = vk.bare_fluid_limit(constraint_name)
             if bare_limit then
                 problem:add_subject_term(slack_name, bare_limit, 1)
             end
@@ -742,12 +721,12 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- stuck in dead-end cycles that the deficit heuristic did not
             -- catch (mass-losing loops with no external input) keep the
             -- escape hatch — otherwise the LP can only return all-zero.
-            local elastic_name = "|shortage_source|" .. constraint_name
+            local elastic_name = vk.shortage_source(constraint_name)
             problem:add_objective(elastic_name, elastic_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
-            problem:add_subject_term(elastic_name, "|limit|" .. constraint_name, 1)
+            problem:add_subject_term(elastic_name, vk.limit(constraint_name), 1)
 
-            local bare_limit = bare_fluid_limit_dual(constraint_name)
+            local bare_limit = vk.bare_fluid_limit(constraint_name)
             if bare_limit then
                 problem:add_subject_term(elastic_name, bare_limit, 1)
             end
@@ -758,7 +737,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     for constraint_name, _ in pairs(included_products) do
         problem:add_equivalence_constraint(constraint_name, 0)
 
-        local slack_name = "|final_sink|" .. constraint_name
+        local slack_name = vk.final_sink(constraint_name)
         problem:add_objective(slack_name, slack_cost)
         problem:add_subject_term(slack_name, constraint_name, -1)
     end
@@ -766,19 +745,19 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     for constraint_name, _ in pairs(included_ingresients) do
         problem:add_equivalence_constraint(constraint_name, 0)
 
-        local slack_name = "|initial_source|" .. constraint_name
+        local slack_name = vk.initial_source(constraint_name)
         problem:add_objective(slack_name, source_cost_for(constraint_name))
         problem:add_subject_term(slack_name, constraint_name, 1)
-        problem:add_subject_term(slack_name, "|limit|" .. constraint_name, 1)
+        problem:add_subject_term(slack_name, vk.limit(constraint_name), 1)
 
-        local bare_limit = bare_fluid_limit_dual(constraint_name)
+        local bare_limit = vk.bare_fluid_limit(constraint_name)
         if bare_limit then
             problem:add_subject_term(slack_name, bare_limit, 1)
         end
     end
 
     for _, constraint in ipairs(constraints) do
-        local constraint_name = "|limit|" .. tn.typed_name_to_variable_name(constraint)
+        local constraint_name = vk.limit(tn.typed_name_to_variable_name(constraint))
         local limit = constraint.limit_amount_per_second
 
         if constraint.limit_type == "upper" then
@@ -795,13 +774,13 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- `lower` by activating the elastic and parking every recipe
             -- at zero (observed on Fulgora with electromagnetic-science-
             -- pack lower=0.5). Mirrors the target_cost slack on `upper`.
-            local elastic_name = "|elastic|" .. constraint_name
+            local elastic_name = vk.elastic(constraint_name)
             problem:add_objective(elastic_name, target_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
         elseif constraint.limit_type == "equal" then
             problem:add_equivalence_constraint(constraint_name, limit)
 
-            local elastic_name = "|elastic|" .. constraint_name
+            local elastic_name = vk.elastic(constraint_name)
             problem:add_objective(elastic_name, target_cost)
             problem:add_subject_term(elastic_name, constraint_name, 1)
         else
@@ -811,10 +790,6 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
 
     return problem
 end
-
-local shortage_prefix = "|shortage_source|"
-local elastic_prefix = "|elastic|"
-local elastic_limit_prefix = "|elastic||limit|"
 
 ---Diagnose the AVOIDABLE cheats in a converged solve: materials the LP
 ---fabricated through |shortage_source| (or relaxed a constraint on via
@@ -841,14 +816,13 @@ function M.diagnose_avoidable_cheats(x, production_lines, epsilon)
     local cheated = {} ---@type table<string, true>
     for name, value in pairs(x) do
         if math.abs(value) > epsilon then
-            if string.sub(name, 1, #shortage_prefix) == shortage_prefix then
-                cheated[string.sub(name, #shortage_prefix + 1)] = true
-            elseif string.sub(name, 1, #elastic_limit_prefix) == elastic_limit_prefix then
-                cheated[string.sub(name, #elastic_limit_prefix + 1)] = true
-            elseif string.sub(name, 1, #elastic_prefix) == elastic_prefix then
-                -- |elastic||limit|<m> is handled above; a bare |elastic|<dual>
-                -- with a non-|limit| body is a constraint relaxation we cannot
-                -- map to a single material, so skip it.
+            -- A shortage is keyed by the bare material; an elastic by the
+            -- constraint's |limit| dual. strip_* peel both back to the material;
+            -- a bare |elastic|<dual> without a |limit| body maps to no single
+            -- material and returns nil from both, so it is skipped.
+            local material = vk.strip_shortage(name) or vk.strip_elastic_limit(name)
+            if material then
+                cheated[material] = true
             end
         end
     end

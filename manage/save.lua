@@ -6,6 +6,7 @@ local preset = require "manage/preset"
 local relation = require "manage/relation"
 local tn = require "manage/typed_name"
 local problem_generator = require "solver/problem_generator"
+local vk = require "solver/var_key"
 
 -- See control.lua for why __DebugAdapter is mirrored as a local snapshot.
 local __DebugAdapter = _G["__DebugAdapter"]
@@ -436,7 +437,7 @@ end
 ---@param typed_name TypedName
 ---@return number
 function M.get_quantity_of_machines_required(solution, typed_name)
-    local variable_name = string.format("%s/%s/%s", typed_name.type, typed_name.name, typed_name.quality)
+    local variable_name = vk.material(typed_name)
     local solved = solution.quantity_of_machines_required[variable_name]
     if solved then
         return solved
@@ -464,7 +465,7 @@ function M.is_line_done(solution, recipe_typed_name)
     if not set then
         return false
     end
-    local key = string.format("%s/%s/%s", recipe_typed_name.type, recipe_typed_name.name, recipe_typed_name.quality)
+    local key = vk.material(recipe_typed_name)
     return set[key] == true
 end
 
@@ -472,7 +473,7 @@ end
 ---@param recipe_typed_name TypedName
 ---@param done boolean
 function M.set_line_done(solution, recipe_typed_name, done)
-    local key = string.format("%s/%s/%s", recipe_typed_name.type, recipe_typed_name.name, recipe_typed_name.quality)
+    local key = vk.material(recipe_typed_name)
     local set = solution.done_lines
     if not set then
         set = {}

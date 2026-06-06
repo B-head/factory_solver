@@ -10,6 +10,8 @@
 -- delegates, so the HIT taxonomy (DEGEN / NOSHIP / CATALYST / plain HIT) has a
 -- single source of truth shared by the in-engine and headless paths.
 
+local vk = require "solver/var_key"
+
 local M = {}
 
 -- A recipe variable is "parked" when it sits at the IPM's interior floor rather
@@ -40,8 +42,7 @@ local PARK_NOTE_FRACTION = M.PARK_NOTE_FRACTION
 ---@param k string
 ---@return boolean
 function M.is_recipe(k)
-    if k:find("|bridge|", 1, true) then return false end
-    return k:sub(1, 7) == "recipe/" or k:sub(1, 15) == "virtual_recipe/"
+    return vk.is_recipe(k)
 end
 
 ---The park threshold for a solved variable set: a recipe value with |value|
@@ -132,11 +133,11 @@ function M.detect(vars)
     local has_initial, has_final = false, false
     for k, v in pairs(vars.x) do
         if math.abs(v) > thresh then
-            if k:find("|shortage_source|", 1, true) or k:find("|elastic|", 1, true) then
+            if vk.has_shortage(k) or vk.has_elastic(k) then
                 cheat = cheat + math.abs(v)
-            elseif k:find("|initial_source|", 1, true) then
+            elseif vk.has_initial(k) then
                 has_initial = true
-            elseif k:find("|final_sink|", 1, true) then
+            elseif vk.has_final(k) then
                 has_final = true
             end
         end
