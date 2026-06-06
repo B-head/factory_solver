@@ -81,18 +81,18 @@ table.insert(cases, {
     end,
 })
 
--- Scenario 2: two recipes make B from A at the same 1:1 ratio but different
--- per-line throughput -- convert-fast does 2 A -> 2 B per line, convert-slow
--- does 1 A -> 1 B. Reaching 10 B/s takes 5 fast lines or 10 slow lines. The
--- objective is indifferent (no machine-count cost), so the optimum is
--- degenerate and the IPM splits the flow; both recipes carry positive flow.
--- (The removed legacy cost actually preferred the *slow* recipe here -- more
--- lines, lower per-line cost summed larger in magnitude -- which is the
--- opposite of what a machine-count objective would want. Recorded so a future
--- machine-count cost, which should collapse this onto convert-fast, changes
--- the assertion visibly.)
+-- Scenario 2: two recipes make B from A at the same 1:1 material ratio but
+-- different per-line throughput -- convert-fast does 2 A -> 2 B per line,
+-- convert-slow does 1 A -> 1 B. Reaching 10 B/s takes 5 fast lines or 10 slow
+-- lines, consuming 10 A either way, so source_cost (material efficiency) is
+-- indifferent. recipe_epsilon breaks the tie: it costs the same tiny amount per
+-- line, so 5 fast lines (activity 5) beat 10 slow lines (activity 10) and the
+-- LP collapses onto convert-fast -- the fewer-machine solution a machine-count
+-- objective would want. (Before recipe_epsilon this optimum was degenerate and
+-- the IPM split flow across both recipes; this scenario was recorded to
+-- anticipate exactly this collapse.)
 table.insert(cases, {
-    name = "different craft times: degenerate optimum splits flow (no machine-count cost)",
+    name = "different craft times: recipe_epsilon collapses onto the fewer-line recipe",
     run = function()
         local state, vars = solve(
             {
@@ -105,9 +105,10 @@ table.insert(cases, {
         local fast, slow = rx(vars, "convert-fast"), rx(vars, "convert-slow")
         -- B output must meet the constraint: 2 per fast line + 1 per slow line.
         harness.assert_near(2 * fast + slow, 10, 0.01, "B output meets demand")
-        harness.assert_true(fast > 0.1 and slow > 0.1,
-            string.format("both recipes carry flow (fast=%g slow=%g) -- degenerate, no tie-break",
-                fast, slow))
+        -- recipe_epsilon prefers fewer lines: all demand via convert-fast
+        -- (5 lines for 10 B), convert-slow driven to ~0.
+        harness.assert_near(fast, 5, 0.01, "convert-fast carries the whole demand")
+        harness.assert_near(slow, 0, 0.01, "convert-slow driven to zero")
     end,
 })
 
