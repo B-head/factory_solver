@@ -76,6 +76,17 @@ This mod uses the prefix **`factory_solver_` for underscored identifiers and `fa
 - **`factory_solver_…`** (underscore): GUI style names registered into `data.raw["gui-style"].default`, since style keys use underscores by convention.
 - **No prefix needed**: anything that is *not* a global engine ID — Lua module names under `require`, function names, fields on `storage`, fields on `meta.lua` types, internal table keys. Those are scoped by Lua / by `storage`'s per-mod table and cannot collide with other mods.
 
+## Don't parse LP variable-key strings (hard requirement)
+
+LP variable keys are content-addressed strings built by [solver/var_key.lua](solver/var_key.lua) (e.g. `recipe/iron-plate/normal`, `|shortage_source|fluid/steam@[165,165]`). `var_key` only *builds* them. Never slice a prefix or temperature suffix back off a key to recover what it means — read the attribute from its real source instead: a variable's class from `Primal.kind` / `Primal.material`, a fluid's temperature from the `TypedName` fields, a line's source/sink/bridge role from the `NormalizedProductionLine.is_source` / `is_sink` / `is_bridge` flags.
+
+Why:
+
+- **Tooling can't check the string form.** A mistyped prefix compiles fine and silently creates a variable nobody reads, instead of surfacing as a type or lint error. Reading a typed field does get checked.
+- **It would freeze the internal representation into a codebase-wide contract.** Parsing keys all over the code makes the exact string layout something everything depends on. Keeping reads on the metadata leaves the string an implementation detail of `var_key`, free to change.
+
+Exception: parsing string keys that arrive from *outside* the application — import/export codecs decoding another tool's format, save-file migrations reading an older key layout, etc. There the string *is* the external interface, not our internal representation, so parsing it is the correct (and only) option.
+
 ## Loose conventions (not strictly enforced)
 
 The project hasn't formalised a style guide, but these patterns are pervasive enough that new code should match them unless there's a reason not to:
