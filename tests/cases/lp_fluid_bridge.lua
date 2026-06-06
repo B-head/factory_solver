@@ -209,7 +209,7 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "bridge is not flagged as is_result (not surfaced to UI)",
+    name = "bridge is flagged as is_result (surfaced via quantity_of_machines_required)",
     -- A Constraint is required to keep the chain active after the
     -- compute_active_lines pruning; without one all lines (including
     -- bridges) collapse to inactive and the LP is empty.
@@ -228,10 +228,14 @@ table.insert(cases, {
         }
         local problem = cp.create_problem("bridge-hidden", constraints, lines)
 
+        -- is_result=true so filter_result carries the bridge flow into
+        -- quantity_of_machines_required, where report reads it instead of the
+        -- raw solution. (The UI still never lists bridges -- it iterates
+        -- production_lines, which bridges are not part of.)
         local bridge_key = bridge_primal_key("steam", 165, 15, 1000)
         local primal = problem.primals[bridge_key]
         harness.assert_true(primal ~= nil, "bridge primal exists")
-        harness.assert_eq(primal.is_result, false, "bridge is_result")
+        harness.assert_eq(primal.is_result, true, "bridge is_result")
     end,
 })
 

@@ -654,7 +654,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         end
 
         if bridge then
-            problem:add_objective(objective_name, slack_cost, false, "bridge")
+            problem:add_objective(objective_name, slack_cost, true, "bridge")
         else
             -- A user source recipe is priced at source_cost on its product so
             -- the LP treats it like a declared external input rather than a

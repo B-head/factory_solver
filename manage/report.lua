@@ -2,7 +2,7 @@ local acc = require "manage/accessor"
 local pre_solve = require "manage/pre_solve"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
-local vk = require "solver/var_key"
+local cp = require "solver/create_problem"
 
 local M = {}
 
@@ -140,31 +140,29 @@ function M.get_total_amounts(bonuses, solution)
         ::continue_line::
     end
 
-    -- Temperature bridges are injected by create_problem at solve time and do
-    -- not appear in solution.production_lines, but their flow contributes to
-    -- balancing the LP — without folding them in, a producer's steam@500 and
-    -- a consumer's steam@[15,1000] would each show as a non-zero net entry
-    -- even though the LP has them tied together. Walk the bridge lines stored
-    -- on the Problem and credit/debit each endpoint by its LP-solved flow.
-    if solution.problem and solution.raw_variables then
-        local x = solution.raw_variables.x
-        for _, bridge_line in ipairs(solution.problem.bridges) do
-            local key = tn.typed_name_to_variable_name(bridge_line.recipe_typed_name)
-            local flow = x[key]
-            if flow then
-                for _, ingredient in ipairs(bridge_line.ingredients) do
-                    add(fluid_totals, tn.create_typed_name("fluid", ingredient.name, nil,
-                        ingredient.minimum_temperature,
-                        ingredient.maximum_temperature),
-                        -flow * ingredient.amount_per_second)
-                end
-                for _, product in ipairs(bridge_line.products) do
-                    add(fluid_totals, tn.create_typed_name("fluid", product.name, nil,
-                        product.minimum_temperature,
-                        product.maximum_temperature),
-                        flow * product.amount_per_second)
-                end
-            end
+    -- Temperature bridges are injected by the solver, not placed by the user, so
+    -- they aren't in normalized_lines. They are a pure function of those lines, so
+    -- regenerate them exactly as create_problem does and read each bridge's solved
+    -- flow from quantity_of_machines_required -- the same metadata path the recipe
+    -- lines above use for their machine count, with no raw_variables access. The
+    -- same quality-decomposition shape: re-run the deterministic transform, then
+    -- look the solved value up by recipe key. Folding them in cancels what the LP
+    -- tied together: without it a producer's steam@500 and a consumer's
+    -- steam@[15,1000] would each show as a non-zero net entry even though the
+    -- bridge links them.
+    for _, bridge_line in ipairs(cp.create_temperature_bridges(normalized_lines)) do
+        local flow = save.get_quantity_of_machines_required(solution, bridge_line.recipe_typed_name)
+        for _, ingredient in ipairs(bridge_line.ingredients) do
+            add(fluid_totals, tn.create_typed_name("fluid", ingredient.name, nil,
+                ingredient.minimum_temperature,
+                ingredient.maximum_temperature),
+                -flow * ingredient.amount_per_second)
+        end
+        for _, product in ipairs(bridge_line.products) do
+            add(fluid_totals, tn.create_typed_name("fluid", product.name, nil,
+                product.minimum_temperature,
+                product.maximum_temperature),
+                flow * product.amount_per_second)
         end
     end
 
