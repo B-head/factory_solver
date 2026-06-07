@@ -57,10 +57,14 @@ local meta = prob.meta
 -- the launching shell propagates automatically; --ReuseProblems makes the A/B
 -- comparison a fixed-corpus, solver-only-variable experiment.
 local function env_off(name) return os.getenv(name) == "0" end
+-- surplus_sink_gating is the lone DEFAULT-OFF probe (it is not shipped): turned
+-- on only when CP_SURPLUS_SINK_GATING="1", mirroring create_problem's polarity.
+local function env_on(name) return os.getenv(name) == "1" end
 local cp_options = {
     deficit_seeding = not env_off("CP_DEFICIT_SEEDING"),
     catalyst_closure = not env_off("CP_CATALYST_CLOSURE"),
     reachability_gating = not env_off("CP_REACHABILITY_GATING"),
+    surplus_sink_gating = env_on("CP_SURPLUS_SINK_GATING"),
 }
 
 local ok_cp, problem = pcall(create_problem.create_problem, "explore",

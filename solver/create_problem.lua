@@ -370,6 +370,79 @@ function M.compute_reachable_materials(production_lines, extra_seeds)
     return reachable
 end
 
+---Backward dual of compute_reachable_materials: the set of materials whose
+---surplus can be drained, for free, to a zero-cost terminal sink. Seeds with the
+---materials that own a free |final_sink| -- pure products (produced, never
+---consumed) and any caller-supplied `extra_seeds` (the constrained / pinned
+---materials, which also get a free final_sink) -- then fires recipes BACKWARD:
+---a line all of whose products are already drainable lets every one of its
+---ingredients drain through it (run the recipe, its outputs leave for free), so
+---those ingredients become drainable too. A zero-product line (a user `<sink>`
+---virtual recipe) fires vacuously, which is correct -- it IS a free drain.
+---
+---Research only: the sink-side analogue of reachability gating. An A/B sweep
+---(project_sink_side_reachability_gating) showed gating |surplus_sink| on this
+---is NOT solution-preserving -- topological drainability is not economical
+---drainability, because draining a material's surplus down its consumer chain
+---costs the consumers' own inputs, which may be dearer than just dumping it. So
+---surplus_sink stays unconditional in shipped builds; this exists to reproduce
+---that measurement, never wired on in-engine.
+---@param production_lines NormalizedProductionLine[]
+---@param extra_seeds table<string, true>?
+---@return table<string, true> drainable
+function M.compute_drainable_materials(production_lines, extra_seeds)
+    local has_producer = {} ---@type table<string, true>
+    local has_consumer = {} ---@type table<string, true>
+    for _, line in ipairs(production_lines) do
+        for _, product in each_product(line) do
+            has_producer[tn.typed_name_to_variable_name(product)] = true
+        end
+        for _, ingredient in each_ingredient(line) do
+            has_consumer[tn.typed_name_to_variable_name(ingredient)] = true
+        end
+    end
+
+    local drainable = {} ---@type table<string, true>
+    for name in pairs(has_producer) do
+        if not has_consumer[name] then
+            drainable[name] = true
+        end
+    end
+    if extra_seeds then
+        for name in pairs(extra_seeds) do
+            drainable[name] = true
+        end
+    end
+
+    local fired = {} ---@type table<integer, true>
+    repeat
+        local changed = false
+        for i, line in ipairs(production_lines) do
+            if not fired[i] then
+                local all_products_drainable = true
+                for _, product in each_product(line) do
+                    if not drainable[tn.typed_name_to_variable_name(product)] then
+                        all_products_drainable = false
+                        break
+                    end
+                end
+                if all_products_drainable then
+                    fired[i] = true
+                    for _, ingredient in each_ingredient(line) do
+                        local name = tn.typed_name_to_variable_name(ingredient)
+                        if not drainable[name] then
+                            drainable[name] = true
+                            changed = true
+                        end
+                    end
+                end
+            end
+        end
+    until not changed
+
+    return drainable
+end
+
 ---Compute the set of recipes whose LP variables are connected (via shared
 ---material flows or recipe limit duals) to at least one user Constraint.
 ---Lines outside this set would only contribute negative-cost slack to the LP
@@ -590,6 +663,7 @@ end
 ---@field deficit_seeding boolean?      Default true. Seed find_deficit_materials' raw deficits as |initial_source| cycle entry points. Off: skip that seeding.
 ---@field catalyst_closure boolean?     Default true. Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. Off: skip the loop.
 ---@field reachability_gating boolean?  Default true. Gate |shortage_source| on un-reachability (reachable materials must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|.
+---@field surplus_sink_gating boolean?   Default FALSE -- this is NOT shipped behaviour, a research probe (project_sink_side_reachability_gating). When on, gate |surplus_sink| on drainability (the backward dual of reachability): a material that can shed surplus to a free terminal sink loses its penalised over-production escape. Measured to change ~21% of the corpus and break convergence on a few, so it ships OFF; the switch only exists to reproduce that A/B. Off (default): every produced+consumed non-bridge material gets a |surplus_sink|.
 
 ---Create linear programming problems.
 ---@param solution_name string
@@ -607,6 +681,10 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     local opt_deficit_seeding = options.deficit_seeding ~= false
     local opt_catalyst_closure = options.catalyst_closure ~= false
     local opt_reachability_gating = options.reachability_gating ~= false
+    -- Research probe; unlike the three above it defaults OFF (the shipped build
+    -- never gates surplus_sink), so only an explicit `true` from the headless
+    -- worker turns it on.
+    local opt_surplus_sink_gating = options.surplus_sink_gating == true
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -715,6 +793,15 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         reachable = M.compute_reachable_materials(all_lines, deficits)
     end
 
+    -- Sink-side dual of the reachability gate (research probe; off unless the
+    -- worker turns it on). A material that can drain its surplus to a free
+    -- terminal sink does not also need the penalised |surplus_sink|; one that is
+    -- stuck does. Seed with the pinned/constrained materials (they own a free
+    -- |final_sink| like the pure products the BFS already seeds itself).
+    local drainable = opt_surplus_sink_gating
+        and M.compute_drainable_materials(all_lines, constrained_materials)
+        or {}
+
     local included_products, included_ingresients = {}, {} ---@type table<string, true>, table<string, true>
     for i, line in ipairs(all_lines) do
         if not active_line_indices[i] then
@@ -806,7 +893,8 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         -- point variable (which keeps its own surplus_sink as a category-1
         -- producer/consumer). Underproduction is still relaxed by the
         -- shortage_source / initial_source escape hatches added below.
-        if not bridge_target_variables[constraint_name] then
+        if not bridge_target_variables[constraint_name]
+            and not (opt_surplus_sink_gating and drainable[constraint_name]) then
             local elastic_name = vk.surplus_sink(constraint_name)
             problem:add_objective(elastic_name, elastic_cost, false, "surplus_sink", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, -1)
