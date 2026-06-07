@@ -52,6 +52,23 @@ local target_cost = 2 ^ 20
 -- tests/cases/lp_scale_invariance.lua.
 local recipe_epsilon = 2 ^ -10
 
+-- When true, an internal material that is provably never over-produced gets an
+-- equality balance with NO |surplus_sink|. The safe cases are the "clean
+-- pass-through intermediate": every producer emits it as that producer's sole
+-- product (so it is never a by-product), no constraint forces a producer to run
+-- (so it can't be pushed past its consumers), it is reachable, not a deficit /
+-- cycle seed, not user-constrained, and not a bridge-target range variable. At
+-- the optimum such a material already carries zero surplus (over-producing only
+-- wastes raw input priced at source_cost), so dropping the sink leaves the
+-- solution unchanged -- it just turns the row into a pure producer/consumer
+-- doubleton that solver/substitution.lua can fold out, shrinking the LP. Flip to
+-- false to restore the unconditional surplus_sink on every internal material.
+--
+-- Multi-product recipes (notably the quality-decomposition cascade, the mod's
+-- core quality-recycling case) keep their surplus_sink: their by-product tiers
+-- are genuinely over-produced, so those rows are deliberately NOT folded.
+local omit_safe_surplus_sink = true
+
 ---Source-cost tier of a material, read from the typed value's own fields rather
 ---than by parsing its variable-name string.
 ---@param value NormalizedAmount|TypedName
@@ -589,6 +606,37 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         constrained_materials[tn.typed_name_to_variable_name(c)] = true
     end
 
+    -- Recipes a constraint forces to run at or above a floor (lower / equal on
+    -- the recipe itself). Such a recipe can be pushed past its consumers, so any
+    -- material it produces may legitimately over-produce -- those materials must
+    -- keep their surplus_sink. Upper constraints only cap a recipe, never force
+    -- it, so they don't count.
+    local forced_recipes = {} ---@type table<string, true>
+    for _, c in ipairs(constraints) do
+        if c.type == "recipe" and (c.limit_type == "lower" or c.limit_type == "equal") then
+            forced_recipes[tn.typed_name_to_variable_name(c)] = true
+        end
+    end
+
+    -- Per-material flags driving the safe surplus_sink omission below.
+    -- co_produced: some active producer emits the material alongside other
+    -- products (a by-product), so it can be over-produced. forced_producer: some
+    -- active producer of the material is a forced recipe. Both disqualify the
+    -- material from the equality balance.
+    local co_produced = {} ---@type table<string, true>
+    local forced_producer = {} ---@type table<string, true>
+    for i, line in ipairs(all_lines) do
+        if active_line_indices[i] and not is_bridge_line(line) then
+            local product_count = #line.products + (line.fuel_burnt_result and 1 or 0)
+            local line_forced = forced_recipes[tn.typed_name_to_variable_name(line.recipe_typed_name)]
+            for _, value in each_product(line) do
+                local material = tn.typed_name_to_variable_name(value)
+                if product_count > 1 then co_produced[material] = true end
+                if line_forced then forced_producer[material] = true end
+            end
+        end
+    end
+
     -- Identify cycle materials that need external supply and seed reachability
     -- with them, so the |initial_source| we add downstream behaves like a raw
     -- input. Filter to materials not already reachable through the open
@@ -642,6 +690,23 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         if not pick then break end
         deficits[pick] = true
         reachable = M.compute_reachable_materials(all_lines, deficits)
+    end
+
+    ---An internal (produced + consumed in-set) material whose balance can safely
+    ---drop the |surplus_sink| and become an equality: it is provably never
+    ---over-produced at the optimum, so the solution is unchanged and the row
+    ---turns into a foldable doubleton. Defined here, after deficits / reachable
+    ---are finalised, so the closure captures those locals. See
+    ---omit_safe_surplus_sink.
+    ---@param material string
+    ---@return boolean
+    local function balance_is_surplus_free(material)
+        return omit_safe_surplus_sink
+            and not co_produced[material]
+            and not forced_producer[material]
+            and not constrained_materials[material]
+            and not deficits[material]
+            and reachable[material] == true
     end
 
     local included_products, included_ingresients = {}, {} ---@type table<string, true>, table<string, true>
@@ -715,7 +780,12 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         -- point variable (which keeps its own surplus_sink as a category-1
         -- producer/consumer). Underproduction is still relaxed by the
         -- shortage_source / initial_source escape hatches added below.
-        if not bridge_target_variables[constraint_name] then
+        -- A provably surplus-free internal material also gets no surplus_sink:
+        -- its balance becomes a pure producer/consumer equality (foldable by
+        -- solver/substitution.lua) and, because the optimum already carries zero
+        -- surplus here, the solution is unchanged. See balance_is_surplus_free.
+        if not bridge_target_variables[constraint_name]
+            and not balance_is_surplus_free(constraint_name) then
             local elastic_name = vk.surplus_sink(constraint_name)
             problem:add_objective(elastic_name, elastic_cost, false, "surplus_sink", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, -1)

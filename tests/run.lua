@@ -102,6 +102,7 @@ local case_files = {
     "lp_two_pass_reclassify",
     "chain_reachability",
     "explore_detect",
+    "lp_substitution",
 }
 
 local total, passed, failed = 0, 0, 0

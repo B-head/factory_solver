@@ -2,8 +2,17 @@ local flib_table = require "__flib__/table"
 local acc = require "manage/accessor"
 local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
+local substitution = require "solver/substitution"
 
 local iterate_limit = 600
+
+-- Proportional row reduction: fold provably surplus-free producer/consumer
+-- doubletons out of the LP before the IPM solves it, then reconstruct the
+-- eliminated variables. The IPM works on the smaller reduced problem; the full
+-- problem stays the canonical variable space that filter_result / diagnose /
+-- report read. Flip to false to solve the full problem directly (immediate
+-- rollback to the pre-substitution behaviour). See solver/substitution.lua.
+local substitution_enabled = true
 
 local M = {}
 
@@ -65,6 +74,21 @@ function M.forwerd_solve(force_data, solution)
         -- (which see solution, not problem) can gray out isolated lines without
         -- reaching through solution.problem (which is nil after migrations).
         solution.inactive_recipe_variables = solution.problem.inactive_recipe_variables
+
+        -- Fold proportional doubletons out once per "ready" rebuild. The reduced
+        -- problem (and its reconstruction map) ride on solution.problem so they
+        -- persist across the per-tick "calculating" IPM steps; the IPM never
+        -- re-reduces. Stored as plain tables -- the reduced Problem gets its
+        -- metatable re-attached on load alongside solution.problem (see
+        -- manage/save.lua resetup_force_data_metatable).
+        if substitution_enabled then
+            local reduced, reconstruction = substitution.reduce(solution.problem)
+            solution.problem.reduced = reduced
+            solution.problem.reconstruction = reconstruction
+        else
+            solution.problem.reduced = nil
+            solution.problem.reconstruction = nil
+        end
         -- raw_variables intentionally preserved across re-prepares: constraint
         -- and line edits change b (and sometimes the variable set), but recipe
         -- x values from the previous converged solve are near the new optimum
@@ -75,14 +99,29 @@ function M.forwerd_solve(force_data, solution)
 
     local problem = assert(solution.problem)
 
-    solution.solver_state, solution.solver_iteration, solution.raw_variables = linear_programming.solve(
-        problem,
+    -- Solve the reduced problem when one was built; otherwise the full problem.
+    -- solution.raw_variables is kept in FULL variable-key space: the reduced
+    -- problem's keys are a subset of the full keys, so make_*_variables warm-
+    -- starts straight from it (the eliminated keys are simply ignored), and
+    -- unfold() turns the reduced result back into full space (filling each
+    -- eliminated x via x_elim = k * x_rep) so filter_result / diagnose / report
+    -- below all see the complete variable set.
+    local solve_problem = problem.reduced or problem
+    local state, iteration, raw = linear_programming.solve(
+        solve_problem,
         solution.solver_state,
         solution.solver_iteration,
         solution.raw_variables,
         acc.tolerance,
         iterate_limit
     )
+    solution.solver_state = state
+    solution.solver_iteration = iteration
+    if problem.reconstruction then
+        solution.raw_variables = substitution.unfold(raw, problem.reconstruction)
+    else
+        solution.raw_variables = raw
+    end
 
     solution.quantity_of_machines_required = problem:filter_result(solution.raw_variables)
 

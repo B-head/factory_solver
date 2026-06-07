@@ -277,6 +277,13 @@ function M.resetup_force_data_metatable(force_data)
         for _, solution in pairs(force_data.solutions) do
             if solution.problem then
                 problem_generator.setup_metatable(solution.problem)
+                -- The reduced problem (proportional row reduction) is a second
+                -- Problem riding on solution.problem; it needs its metatable
+                -- re-attached too so a solve resumed after load can call its
+                -- generate_* / make_* methods.
+                if solution.problem.reduced then
+                    problem_generator.setup_metatable(solution.problem.reduced)
+                end
             end
         end
     end

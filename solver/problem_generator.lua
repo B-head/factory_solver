@@ -10,6 +10,8 @@ local vk = require "solver/var_key"
 ---@field subject_terms number[][]
 ---@field bridges NormalizedProductionLine[] Temperature bridges injected by create_problem; populated externally after construction.
 ---@field inactive_recipe_variables table<string, true>? Recipe variables omitted from the LP because they are not connected to any user Constraint; populated by create_problem.
+---@field reduced Problem? Proportional row reduction (solver\substitution.lua): the smaller problem the IPM actually solves, built once per "ready" rebuild in manage\pre_solve.lua. nil when substitution is disabled.
+---@field reconstruction Reconstruction? Companion to `reduced`: maps each folded-out variable back to k * x_rep so the reduced solution unfolds into full variable space.
 local M = {}
 
 ---@alias PrimalKind "recipe"|"bridge"|"surplus_sink"|"final_sink"|"initial_source"|"shortage_source"|"elastic"|"slack"

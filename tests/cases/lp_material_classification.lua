@@ -7,14 +7,20 @@
 --
 -- Roles (create_problem.lua, the included_products / included_ingredients
 -- pass):
---   produced AND consumed  -> |surplus_sink| (+ |shortage_source| if it is
---                             a cycle material not reachable from raw input)
+--   produced AND consumed  -> equality balance, NO |surplus_sink| when the
+--                             material is provably surplus-free (every producer
+--                             emits it as its sole product, unconstrained,
+--                             reachable, not a deficit/cycle seed); otherwise
+--                             -> |surplus_sink| (+ |shortage_source| if it is
+--                             a cycle material not reachable from raw input).
+--                             See balance_is_surplus_free / omit_safe_surplus_sink.
 --   product only           -> |final_sink|
 --   ingredient only        -> |initial_source| at source_cost
 --
 -- Fixture chain: raw -[r1]-> mid -[r2]-> final + byprod, with `final` pinned.
 --   raw    : ingredient only      -> initial_source
---   mid    : produced + consumed  -> surplus_sink (reachable, so NO shortage)
+--   mid    : produced + consumed, single-product producer r1, reachable,
+--            unconstrained -> surplus-free equality, NO surplus_sink
 --   final  : product only         -> final_sink
 --   byprod : product only         -> final_sink
 
@@ -59,10 +65,13 @@ table.insert(cases, {
         harness.assert_true(not has("|final_sink|item/raw/normal"), "raw is not a final product")
         harness.assert_true(not has("|surplus_sink|item/raw/normal"), "raw is not an intermediate")
 
-        -- mid: produced + consumed -> surplus_sink, and NOT a initial_source /
-        -- final_sink. Reachable from raw, so the cycle escape hatch
-        -- |shortage_source| must NOT be added.
-        harness.assert_true(has("|surplus_sink|item/mid/normal"), "mid -> surplus_sink")
+        -- mid: produced + consumed, but a clean pass-through intermediate
+        -- (its only producer r1 emits it as r1's sole product, it is reachable,
+        -- unconstrained, and not a deficit). So it is provably surplus-free and
+        -- gets an equality balance with NO surplus_sink -- and no initial_source
+        -- / final_sink / shortage_source either.
+        harness.assert_true(not has("|surplus_sink|item/mid/normal"),
+            "mid is a clean pass-through intermediate -> equality balance, no surplus_sink")
         harness.assert_true(not has("|shortage_source|item/mid/normal"),
             "mid is reachable from raw, so no shortage_source escape hatch")
         harness.assert_true(not has("|initial_source|item/mid/normal"),
@@ -86,8 +95,9 @@ table.insert(cases, {
         harness.assert_near(vars.x["recipe/r1/normal"], 5, 0.05, "r1 rate")
         harness.assert_near(vars.x["recipe/r2/normal"], 5, 0.05, "r2 rate")
         harness.assert_near(vars.x["|initial_source|item/raw/normal"], 5, 0.05, "raw drawn")
-        harness.assert_near(vars.x["|surplus_sink|item/mid/normal"], 0, 0.05,
-            "mid balances exactly -- no surplus")
+        -- mid has no surplus_sink variable at all now; its equality balance
+        -- (r1 == r2) enforces exactly the no-surplus condition the old
+        -- surplus_sink ~= 0 assertion checked for.
         harness.assert_near(vars.x["|final_sink|item/final/normal"], 5, 0.05, "final output")
         harness.assert_near(vars.x["|final_sink|item/byprod/normal"], 5, 0.05, "byprod output")
     end,

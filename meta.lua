@@ -175,6 +175,14 @@ __factory_solver__storage = {}
 ---@field y table<string, number>
 ---@field s table<string, number>
 
+---Reconstruction map produced by solver\substitution.lua when proportional
+---doubleton rows are folded out of the LP. eliminated[k] = { rep, k } means the
+---folded variable k equals k * x_rep; unfold resolves chains transitively. order
+---records the elimination sequence for deterministic replay / inspection.
+---@class Reconstruction
+---@field eliminated table<string, { rep: string, k: number }>
+---@field order string[]
+
 ---@class NormalizedProductionLine
 ---@field recipe_typed_name TypedName
 ---@field products NormalizedAmount[]
