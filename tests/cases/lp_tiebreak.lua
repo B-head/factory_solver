@@ -112,24 +112,41 @@ table.insert(cases, {
     end,
 })
 
--- Scenario 3: two byte-identical 1 A -> 1 B recipes. There is no information
--- to distinguish them, so the only sensible behaviour is a symmetric split.
--- The IPM's analytic-centre solution gives exactly that (5 / 5).
+-- Scenario 3: two byte-identical 1 A -> 1 B recipes. There is no *material*
+-- information to distinguish them, so source_cost is indifferent and the optimal
+-- face is degenerate -- the IPM would otherwise return its analytic-centre split
+-- (5 / 5). The per-recipe recipe_epsilon jitter (a deterministic hash of each
+-- recipe's variable key, see create_problem.lua) gives the two copies fractionally
+-- different epsilons, collapsing the face to a single canonical vertex: the LP
+-- routes the whole demand through one copy and drives the other to zero. The
+-- choice is arbitrary but reproducible -- same problem, same winner, every solve
+-- and on every client (the jitter is a pure function of the key, not RNG).
 table.insert(cases, {
-    name = "identical copies: symmetric split is the only sensible solution",
+    name = "identical copies: epsilon jitter picks one canonical copy, deterministically",
     run = function()
-        local state, vars = solve(
-            {
-                line("convert-a", { item("B", 1) }, { item("A", 1) }),
-                line("convert-b", { item("B", 1) }, { item("A", 1) }),
-            },
-            { demand("B", 10) })
+        local lines = {
+            line("convert-a", { item("B", 1) }, { item("A", 1) }),
+            line("convert-b", { item("B", 1) }, { item("A", 1) }),
+        }
+        local state, vars = solve(lines, { demand("B", 10) })
 
         harness.assert_eq(state, "finished", "solver_state")
         local a, b = rx(vars, "convert-a"), rx(vars, "convert-b")
         harness.assert_near(a + b, 10, 0.01, "combined output meets demand")
-        harness.assert_near(a, b, 0.01,
-            string.format("copies split symmetrically (a=%g b=%g)", a, b))
+        -- Canonical, not split: one copy carries the bulk of the load while the
+        -- other is driven toward zero (it parks at a small IPM residual rather
+        -- than exactly 0 -- the same dust the recipe_epsilon note documents -- so
+        -- the bar is "decisively broken", not "exactly 10/0").
+        local hi, lo = math.max(a, b), math.min(a, b)
+        harness.assert_true(hi >= 9.5,
+            string.format("one copy carries the demand (a=%g b=%g)", a, b))
+        harness.assert_true(lo <= 0.5,
+            string.format("the other copy is driven toward zero (a=%g b=%g)", a, b))
+
+        -- Reproducible: re-solving picks the same winner, not a coin flip.
+        local _, vars2 = solve(lines, { demand("B", 10) })
+        harness.assert_near(rx(vars2, "convert-a"), a, 1e-9, "convert-a stable across solves")
+        harness.assert_near(rx(vars2, "convert-b"), b, 1e-9, "convert-b stable across solves")
     end,
 })
 

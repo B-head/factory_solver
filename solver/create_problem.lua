@@ -52,6 +52,55 @@ local target_cost = 2 ^ 20
 -- tests/cases/lp_scale_invariance.lua.
 local recipe_epsilon = 2 ^ -10
 
+-- Per-recipe tie-break jitter. The flat recipe_epsilon above collapses futile
+-- activity, but it leaves genuine ties degenerate: when several recipes are
+-- equally good (identical conversion ratios, or whole equivalent sub-chains) the
+-- optimal face stays multi-dimensional and the interior-point method returns its
+-- analytic centre -- flow split across the tied recipes. The same problem can
+-- then yield a different split under a different presolve formulation (the
+-- degeneracy divergence noted in project_proportional_row_reduction). Perturbing
+-- each recipe's epsilon by a tiny recipe-specific amount shrinks that face to a
+-- single vertex, so the LP has one canonical optimum independent of formulation.
+--
+-- The perturbation is a *pure deterministic hash of the variable key*, never RNG.
+-- This matters twice over:
+--   * Multiplayer: the cost feeds storage (the solution), so it must be
+--     bit-identical on every client. A pure function of the key has no seed, no
+--     generator state, and no table-iteration-order dependence, so it cannot
+--     desync. (game.create_random_generator would instead need a persisted seed
+--     AND a deterministic recipe ordering to map draws onto recipes.)
+--   * Cross-interpreter: the headless suite runs on both PUC-Lua and LuaJIT and
+--     must agree. Every intermediate in key_unit_hash stays < 2^53, so the
+--     arithmetic is exact in IEEE-754 double on either VM (no overflow divergence).
+--
+-- jitter_strength keeps the perturbation a small fraction of recipe_epsilon: big
+-- enough to separate tied optima past the IPM's relative tolerance (~1e-6),
+-- small enough that it never competes with the flat epsilon's futile-collapse
+-- or, one tier up, with source_cost's material-efficiency tie-break. At 2^-4 an
+-- effective epsilon lands in [2^-10, 2^-10 + 2^-14) ~= [9.8e-4, 1.03e-3): still
+-- inside the empirically safe 1e-4..1e-2 epsilon window, still ~600x below
+-- source_cost = 1, and the ~6% relative spread between two recipes clears IPM
+-- tolerance. It cannot flip the flat epsilon's activity ranking either -- the
+-- gaps there are factors (5 vs 10 lines), which a <=1 jitter can never invert.
+local jitter_strength = 2 ^ -4
+
+---Deterministic [0,1) hash of a variable key. FNV-1a-style polynomial over the
+---bytes, reduced mod 2^28 each step so that h * prime + byte stays < 2^48 (<<
+---2^53), i.e. exact in IEEE-754 double on every conforming Lua VM. Pure: no RNG,
+---no os/time, no table order -- safe to feed storage under lockstep. Collisions
+---(two recipes sharing an epsilon) only leave that one pair mutually degenerate,
+---which is harmless for a tie-break.
+---@param key string variable key (the recipe's content-addressed name)
+---@return number jitter in [0, 1)
+local function key_unit_hash(key)
+    local modulus = 2 ^ 28
+    local h = 2166136261 % modulus
+    for i = 1, #key do
+        h = (h * 1000003 + string.byte(key, i)) % modulus
+    end
+    return h / modulus
+end
+
 ---Source-cost tier of a material, read from the typed value's own fields rather
 ---than by parsing its variable-name string.
 ---@param value NormalizedAmount|TypedName
@@ -679,15 +728,35 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         end
 
         if bridge then
-            problem:add_objective(objective_name, slack_cost, true, "bridge")
+            -- A bridge only re-labels one fluid temperature range as another; it
+            -- creates no material, so it carries no base cost (a bridge hop must
+            -- stay free relative to source/elastic, or the LP would skip a needed
+            -- temperature conversion). But when several bridges can route the same
+            -- fluid they are all cost-0 and the LP is indifferent between them --
+            -- a degenerate face whose free dimension lives entirely on the bridge
+            -- variables. The interior-point method picks its analytic centre cold,
+            -- so the realized bridge flows drift across warm-started re-solves
+            -- (the seed26-class "temperature plumbing wobble": measured ~0.29 wide
+            -- on the explorer corpus, three orders above the recipe wobble). The
+            -- recipe jitter above cannot reach it -- bridges take neither the base
+            -- epsilon nor that jitter. So give each bridge the SAME deterministic
+            -- key-hash jitter, WITHOUT the recipe_epsilon base: a distinct
+            -- infinitesimal cost in [0, 2^-14) that picks one canonical routing
+            -- without pricing the hop. Still ~four orders below source_cost, so it
+            -- never tips a real decision or makes the LP skip a bridge.
+            local bridge_cost = slack_cost + recipe_epsilon * jitter_strength * key_unit_hash(objective_name)
+            problem:add_objective(objective_name, bridge_cost, true, "bridge")
         else
             -- A user source recipe is priced at source_cost on its product so
             -- the LP treats it like a declared external input rather than a
             -- free fountain. Sinks (and every other virtual recipe) stay at
             -- slack_cost = 0.
-            local recipe_cost = recipe_epsilon
+            -- Flat epsilon plus a per-recipe hash jitter (both inside the
+            -- recipe_epsilon tier) so genuinely tied recipes resolve to one
+            -- canonical vertex instead of an analytic-centre split.
+            local recipe_cost = recipe_epsilon * (1 + jitter_strength * key_unit_hash(objective_name))
             if is_source_line(line) and line.products[1] then
-                recipe_cost = source_cost_of(line.products[1]) + recipe_epsilon
+                recipe_cost = source_cost_of(line.products[1]) + recipe_cost
             end
             problem:add_objective(objective_name, recipe_cost, true, "recipe")
             problem:add_subject_term(objective_name, vk.limit(objective_name), 1)

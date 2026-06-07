@@ -318,6 +318,71 @@ table.insert(cases, {
     end,
 })
 
+-- recipe_epsilon and jitter_strength mirror the constants in
+-- solver/create_problem.lua. A bridge takes slack_cost (0) PLUS a per-bridge
+-- hash jitter -- WITHOUT the recipe_epsilon base -- so several bridges that can
+-- route the same fluid temperature stop being cost-tied and the LP settles on
+-- one canonical routing instead of letting the bridge flows wobble across
+-- re-solves. That wobble is a network-scale degeneracy (corpus-probe-verified on
+-- seed26-class temperature-heavy chains, ~0.29 wide on the bridge variables); it
+-- does NOT reduce to a small fixture, because in a minimal chain every bridge
+-- flow is otherwise pinned to a recipe decision the recipe jitter already breaks.
+-- So this pins the mechanism the corpus probe verified the behaviour of: each
+-- bridge carries a distinct, strictly-positive, sub-epsilon cost. If the bridge
+-- jitter is ever reverted to a bare slack_cost, both costs collapse to 0 and the
+-- distinctness / positivity assertions below fail.
+local bridge_recipe_epsilon = 2 ^ -10
+local bridge_jitter_strength = 2 ^ -4
+local function bridge_key_unit_hash(key)
+    local modulus = 2 ^ 28
+    local h = 2166136261 % modulus
+    for i = 1, #key do
+        h = (h * 1000003 + string.byte(key, i)) % modulus
+    end
+    return h / modulus
+end
+
+table.insert(cases, {
+    name = "bridges carry a distinct sub-epsilon jitter cost (canonical temperature routing)",
+    run = function()
+        local lines = {
+            recipe("boiler-low",  { fluid_single("steam", 165, 1) }, { item("water", 1) }),
+            recipe("boiler-high", { fluid_single("steam", 500, 1) }, { item("water", 1) }),
+            recipe("generator",   { item("power", 1) }, { fluid_range("steam", 15, 1000, 1) }),
+        }
+        local constraints = {
+            { type = "item", name = "power", quality = "normal",
+              limit_type = "equal", limit_amount_per_second = 1 },
+        }
+        local problem = cp.create_problem("bridge-jitter", constraints, lines)
+
+        local k_lo = bridge_primal_key("steam", 165, 15, 1000)
+        local k_hi = bridge_primal_key("steam", 500, 15, 1000)
+        local p_lo, p_hi = problem.primals[k_lo], problem.primals[k_hi]
+        assert(p_lo and p_hi, "both bridge primals exist")
+        local c_lo, c_hi = p_lo.cost, p_hi.cost
+
+        -- Applied, not a bare slack_cost: each bridge is strictly costly.
+        harness.assert_true(c_lo > 0 and c_hi > 0,
+            string.format("bridge jitter applied, not slack_cost 0 (lo=%g hi=%g)", c_lo, c_hi))
+        -- Stays a sub-epsilon nudge, below the recipe base (and four orders below
+        -- source_cost), so it never prices the hop or makes the LP skip a bridge.
+        harness.assert_true(c_lo < bridge_recipe_epsilon and c_hi < bridge_recipe_epsilon,
+            string.format("bridge cost stays in the tie-break tier < recipe_epsilon (lo=%g hi=%g)", c_lo, c_hi))
+        -- Distinct per bridge -- this is what breaks the routing tie.
+        harness.assert_true(math.abs(c_lo - c_hi) > 1e-12,
+            string.format("the two bridges get different costs (lo=%g hi=%g)", c_lo, c_hi))
+        -- Exact deterministic key-hash (pins the formula and its cross-interpreter
+        -- bit-exactness: every intermediate stays < 2^53).
+        harness.assert_near(c_lo,
+            bridge_recipe_epsilon * bridge_jitter_strength * bridge_key_unit_hash(k_lo), 1e-15,
+            "low-temp bridge cost = key-hash jitter")
+        harness.assert_near(c_hi,
+            bridge_recipe_epsilon * bridge_jitter_strength * bridge_key_unit_hash(k_hi), 1e-15,
+            "high-temp bridge cost = key-hash jitter")
+    end,
+})
+
 table.insert(cases, {
     name = "create_problem attaches bridge lines to the resulting Problem",
     run = function()

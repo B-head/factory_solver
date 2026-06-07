@@ -10,6 +10,14 @@ Date: ????
       1.75x. The objective is unchanged; the eliminated flows are reconstructed
       for display after the solve.
   Changes:
+    - When several recipes or fluid-temperature routes are exactly tied, the
+      solver now settles on one canonical solution instead of letting the tied
+      flows drift, so the same factory always gives the same plan and a plan no
+      longer wobbles when you tweak and re-solve it. This mattered most for
+      temperature plumbing (boiler/heat-exchanger steam routed through several
+      equivalent temperature ranges), which previously had no tie-break at all.
+      The choice is a tiny deterministic nudge and never overrides a genuinely
+      better (more material-efficient or fewer-machine) recipe.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.2
 Date: 2026-06-04
