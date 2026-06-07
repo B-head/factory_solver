@@ -405,6 +405,15 @@ try {
             # trapped, trapdown re-targets the end product so the run demands the
             # trapped downstream material. seedrecipe is mod-specific.
             @{mode = 'up'; seedrecipe = 'nuclear-sample'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 8); target = 'trapdown'; closure = 'off' },
+            # Cycle-only chain: grow generously (init=scc guarantees a loop is
+            # present; mode=cycle biases growth toward pulling more loops in), then
+            # post-prune to recipes that lie on a cycle only -- every recipe is a
+            # cycle edge and several distinct cycles typically survive (richer than
+            # a single seeded SCC). closure=on lets a closure producer complete an
+            # open loop before the prune. Pin the seed cycle recipe so the whole
+            # loop structure must run; the cycles' external inputs become LP imports.
+            # The hardest "all loops, no acyclic escape" shape for the IPM.
+            @{mode = 'cycle'; init = 'scc'; void = 'ex'; nosrc = 'ex'; pins = 1; qual = 'off'; hops = ($Hops * 6); closure = 'on'; cycleonly = 'on' },
             @{mode = 'both'; void = 'in'; nosrc = 'in'; pins = 1; qual = 'off'; hops = $Hops }         # control
         )
     }
@@ -429,7 +438,8 @@ try {
         $cls = if ($cfg.closure) { $cfg.closure } else { 'on' }
         $ini = if ($cfg.init) { $cfg.init } else { 'recipe' }
         $sr = if ($cfg.seedrecipe) { $cfg.seedrecipe } else { '' }
-        $banner = "config mode=$($cfg.mode) init=$ini seedrecipe=$sr void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) target=$tgt closure=$cls hops=$($cfg.hops)"
+        $co = if ($cfg.cycleonly) { $cfg.cycleonly } else { 'off' }
+        $banner = "config mode=$($cfg.mode) init=$ini seedrecipe=$sr void=$($cfg.void) nosrc=$($cfg.nosrc) pins=$($cfg.pins) qual=$($cfg.qual) target=$tgt closure=$cls cycleonly=$co hops=$($cfg.hops)"
         Write-Host "`n--- $banner ---"
         "## $banner" | Out-File -FilePath $HitLog -Append -Encoding utf8
         for ($i = 0; $i -lt $Seeds; $i++) {
@@ -451,7 +461,7 @@ try {
                     if ($pool.Running.Count -ge $Workers) { Start-Sleep -Milliseconds 20 }
                 }
             }
-            $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);init=$ini;void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual);target=$tgt;closure=$cls"
+            $exploreArgs = "seed=$s;hops=$($cfg.hops);mode=$($cfg.mode);init=$ini;void=$($cfg.void);nosrc=$($cfg.nosrc);pins=$($cfg.pins);qual=$($cfg.qual);target=$tgt;closure=$cls;cycleonly=$co"
             if ($sr) { $exploreArgs += ";seedrecipe=$sr" }
             $cmd = "/silent-command rcon.print(remote.call('$iface','$remoteFn','$exploreArgs'))"
             $r = Invoke-RconCommand -Stream $stream -Command $cmd

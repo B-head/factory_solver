@@ -246,6 +246,49 @@ local function find_cyclic_sccs(recipe_names)
     return cyclic
 end
 
+---Keep only the recipes of `names` that are an edge of some cycle, dropping every
+---feeder, leaf, and inter-cycle bridge -- the post-process behind cycle-only mode.
+---A recipe is a cycle edge iff it consumes a material AND produces a material that
+---lie in the SAME cyclic SCC of the material graph induced by `names` (it closes a
+---loop, rather than feeding into or draining one). Unlike init=scc -- which seeds
+---ONE catalyst-bearing SCC -- this runs over an already-grown chain, so SEVERAL
+---distinct cycles that growth pulled in all survive together (a multi-cycle
+---cycle-only chain, which is what makes it worth solving). Every edge internal to a
+---cyclic SCC necessarily comes from a kept recipe (both endpoints in the SCC => the
+---recipe satisfies the keep test), so the kept set preserves each SCC's full strong
+---connectivity: one pass is exact, no need to iterate to a fixpoint. The cycles'
+---remaining external inputs become genuine imports the LP must |initial_source|.
+---@param names string[]
+---@return string[] kept Cycle-participating recipes, in their original order.
+local function keep_only_cycle_recipes(names)
+    local cyclic = find_cyclic_sccs(names)
+    -- Map each material inside a cyclic SCC to its component id; materials not on
+    -- any cycle are absent (nil), which the membership test below treats as "not
+    -- a cycle endpoint".
+    local scc_of = {} ---@type table<string, integer>
+    for id, comp in ipairs(cyclic) do
+        for _, m in ipairs(comp) do scc_of[m] = id end
+    end
+    local kept = {}
+    for _, rn in ipairs(names) do
+        local rp = prototypes.recipe[rn]
+        if rp then
+            local consumes_from = {} ---@type table<integer, true> SCC ids this recipe consumes from.
+            for _, ing in ipairs(rp.ingredients) do
+                local id = scc_of[ing.type .. "/" .. ing.name]
+                if id then consumes_from[id] = true end
+            end
+            local is_cycle_edge = false
+            for _, p in ipairs(rp.products) do
+                local id = scc_of[p.type .. "/" .. p.name]
+                if id and consumes_from[id] then is_cycle_edge = true; break end
+            end
+            if is_cycle_edge then kept[#kept + 1] = rn end
+        end
+    end
+    return kept
+end
+
 ---Grow a connected chain from a seed.
 ---@param seed integer
 ---@param hops integer How many growth steps to attempt.
@@ -255,11 +298,12 @@ end
 ---@param do_close boolean? Run ingredient closure (default true). Pass false to keep the chain's natural traps -- mass-losing-loop materials stay unreachable, which is what the netneg target mode wants to provoke a degenerate shortage solution.
 ---@param init string? Seeding strategy: "recipe" (default, random seed recipe) or "scc" (seed with all cycle recipes of a random catalyst-bearing cyclic material SCC; falls back to a random seed when none exists).
 ---@param seed_override string? Force the seed recipe to this name (must be a valid candidate), bypassing the random / SCC pick. Lets a specific finding be reproduced or a known chain be grown deterministically (e.g. nuclear-sample + mode=up to assemble the antimony catalyst chain downstream-first).
+---@param cycle_only boolean? Post-process: after growth + closure, drop every recipe not on a cycle (keep_only_cycle_recipes), leaving a chain in which every recipe is a cycle edge. Several distinct cycles can remain (richer than init=scc's single SCC). Runs last, so a closure-pulled producer that completes an open loop is retained while the acyclic feeders are pruned back out.
 ---@return string? seed_recipe nil on failure.
 ---@return string[]? order Selected recipe names in insertion order (nil on failure).
 ---@return string? err Error message, set when seed_recipe is nil.
 ---@return { added: integer, closed: boolean, unresolved: string[], trapped_items: string[], catalysts: string[] }? closure Ingredient-closure stats; trapped_items = produced-but-unreachable items (the degenerate-shortage targets); catalysts = unresolved materials also unreachable universe-wide (the solver must import these, so a cheat beside one is a real finding, not a generator dead end). nil on failure.
-function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close, init, seed_override)
+function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_close, init, seed_override, cycle_only)
     -- Factorio's create_random_generator maps small seed differences to an
     -- IDENTICAL first draw (verified live: seeds 1/2/3/7/99 all yield 10580),
     -- and warming the generator does not help -- the raw seed barely reaches the
@@ -645,6 +689,27 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
         end
     end
 
+    -- Cycle-only post-process: prune every recipe that is not an edge of some
+    -- cyclic SCC of the SELECTED set, leaving a chain in which every recipe
+    -- participates in a cycle (several distinct cycles may survive -- richer than
+    -- init=scc's single SCC, which is the point: a multi-cycle chain is what is
+    -- worth solving). Runs AFTER closure on purpose -- a producer closure pulled in
+    -- to complete an open loop is kept, while the acyclic feeders closure also
+    -- added get pruned right back out -- and BEFORE the reachability snapshot below,
+    -- so unresolved / trapped / catalysts reflect the pruned chain (the cycles'
+    -- external inputs surface there as the genuine imports the LP must source). If
+    -- the grown chain held no cycle at all, order empties and build_problem reports
+    -- it as a no-buildable-lines skip rather than failing silently.
+    if cycle_only then
+        local kept = keep_only_cycle_recipes(order)
+        selected = {}
+        order = {}
+        for _, n in ipairs(kept) do
+            selected[n] = true
+            order[#order + 1] = n
+        end
+    end
+
     -- Final reachability snapshot, used three ways:
     --   unresolved    = consumed-but-unreachable materials. Closure could not
     --                   bottom these out (no silent cap -- the leftovers are named).
@@ -918,6 +983,7 @@ local function problem_tag(ctx)
         "h" .. ctx.hops,
     }
     if ctx.seed_override then parts[#parts + 1] = "sr" .. ctx.seed_override end
+    if ctx.cycle_only then parts[#parts + 1] = "cyconly" end
     local s = table.concat(parts, "_")
     return (s:gsub("[^%w_%-]", "-"))
 end
@@ -966,6 +1032,11 @@ local function build_problem(args_str)
     -- known chain, e.g. seedrecipe=nuclear-sample;mode=up to pull the antimony
     -- catalyst chain in downstream-first).
     local seed_override = params.seedrecipe
+    -- cycleonly=on post-prunes the grown chain to cycle-participating recipes only
+    -- (every recipe is a cycle edge; several distinct cycles may remain). Pairs
+    -- naturally with high hops (grow enough to pull multiple loops in) and any
+    -- target/init; the cycles' external inputs become LP imports.
+    local cycle_only = params.cycleonly == "on"
 
     save.init_force_data(FORCE_INDEX)
     save.init_player_data(PLAYER_INDEX)
@@ -993,7 +1064,7 @@ local function build_problem(args_str)
     end
 
     local ok_build, seed_recipe, order, err, closure =
-        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close, init, seed_override)
+        pcall(M.build_chain, seed, hops, mode, exclude_void, exclude_source_sink, do_close, init, seed_override, cycle_only)
     if not ok_build then
         return { ok = false, message = string.format("ERROR seed=%d build raised: %s", seed, tostring(seed_recipe)) }
     end
@@ -1019,6 +1090,14 @@ local function build_problem(args_str)
         end
     end
     if built == 0 then
+        -- Under cycle_only an empty chain just means the grown graph held no cycle
+        -- to keep -- an expected, uninteresting outcome, not an error. Report it as
+        -- a SKIP so it does not colour the run red or inflate the error tally.
+        if cycle_only then
+            return { ok = false, message = string.format(
+                "seed=%d mode=%s init=%s SKIPPED(cycle_only: no cycle in grown chain) sr=%s",
+                seed, mode, init, seed_recipe) }
+        end
         return { ok = false, message = string.format(
             "ERROR seed=%d no buildable lines (seed_recipe=%s)", seed, seed_recipe) }
     end
@@ -1164,6 +1243,7 @@ local function build_problem(args_str)
         do_close = do_close,
         target_mode = target_mode,
         seed_override = seed_override,
+        cycle_only = cycle_only,
         catalysts = (closure and closure.catalysts) or {},
         trapped_items = (closure and closure.trapped_items) or {},
         unresolved = (closure and closure.unresolved) or {},
