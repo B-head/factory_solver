@@ -275,10 +275,17 @@ function M.build_chain(seed, hops, mode, exclude_void, exclude_source_sink, do_c
 
     -- fs-test-* are factory_solver's own data_test debug recipes (not real game
     -- content); *-pyvoid are pyanodon's waste/disposal recipes a usable factory
-    -- chain rarely includes. Both are filtered out (pyvoid only when requested)
-    -- so the chain reflects recipes a user would actually place.
+    -- chain rarely includes; *barrel* recipes are a self-closing fill/empty round
+    -- trip. All filtered out (pyvoid only when requested) so the chain reflects
+    -- recipes a user would actually place along a real transformation path.
     local function allowed(name)
         if name:find("^fs%-test") then return false end
+        -- Barrel fill <-> empty recipes form a net-zero futile cycle (fluid +
+        -- empty-barrel <-> filled-barrel) that closes on itself independently of
+        -- the seed chain: growth that hooks a barreled fluid pulls in the whole
+        -- barrel round-trip as a disconnected component contributing nothing to
+        -- the target. Drop them so the chain stays a real transformation path.
+        if name:find("barrel", 1, true) then return false end
         if exclude_void and name:find("pyvoid", 1, true) then return false end
         return true
     end
