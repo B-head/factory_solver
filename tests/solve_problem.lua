@@ -46,8 +46,25 @@ if not prob then
 end
 
 local meta = prob.meta
+
+-- Research ablation switches for create_problem's cycle-material escape-hatch
+-- preprocessing (the produced-AND-consumed branch). Each env var defaults to ON
+-- (the shipped behaviour); set it to "0" to disable that ONE mechanism and
+-- re-solve the SAME dumped corpus, isolating its effect. env vars are read here
+-- -- the Factorio-free worker -- because create_problem itself runs in-engine
+-- where os is stripped and the lockstep path forbids non-deterministic reads.
+-- explore_chains.ps1 launches these workers as child processes, so a CP_* set in
+-- the launching shell propagates automatically; --ReuseProblems makes the A/B
+-- comparison a fixed-corpus, solver-only-variable experiment.
+local function env_off(name) return os.getenv(name) == "0" end
+local cp_options = {
+    deficit_seeding = not env_off("CP_DEFICIT_SEEDING"),
+    catalyst_closure = not env_off("CP_CATALYST_CLOSURE"),
+    reachability_gating = not env_off("CP_REACHABILITY_GATING"),
+}
+
 local ok_cp, problem = pcall(create_problem.create_problem, "explore",
-    prob.constraints, prob.normalized_lines)
+    prob.constraints, prob.normalized_lines, nil, cp_options)
 if not ok_cp then
     print("ERROR seed=" .. tostring(meta.seed) .. " create_problem raised: " .. tostring(problem))
     os.exit(0)

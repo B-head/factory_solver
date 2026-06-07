@@ -579,14 +579,34 @@ function M.dump_constraints(constraints)
     return table.concat(out, "\n")
 end
 
+---Research-only switches for the produced-AND-consumed (cycle-material) escape
+---hatch preprocessing. Every field defaults to its current shipped behaviour
+---(on) when nil; only the standalone headless solve worker (tests/solve_problem)
+---sets them, from env vars, to ablate one mechanism at a time on a fixed corpus.
+---NEVER read from os.getenv in here -- create_problem runs in-engine under the
+---Factorio sandbox (os stripped) and on the deterministic-lockstep path, so the
+---toggles must arrive as an argument, decided by the Factorio-free caller.
+---@class CreateProblemOptions
+---@field deficit_seeding boolean?      Default true. Seed find_deficit_materials' raw deficits as |initial_source| cycle entry points. Off: skip that seeding.
+---@field catalyst_closure boolean?     Default true. Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. Off: skip the loop.
+---@field reachability_gating boolean?  Default true. Gate |shortage_source| on un-reachability (reachable materials must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|.
+
 ---Create linear programming problems.
 ---@param solution_name string
 ---@param constraints Constraint[]
 ---@param production_lines NormalizedProductionLine[]
 ---@param forced_imports table<string, true>?  Material variable names to seed as |initial_source| imports when unreachable (in addition to the heuristic deficits). The diagnose-then-reclassify pass fills this with the AVOIDABLE cheats from a first solve (see M.diagnose_avoidable_cheats). nil leaves behaviour unchanged.
+---@param options CreateProblemOptions?  Research ablation switches for the cycle-material escape-hatch preprocessing; nil (the in-engine default) leaves every mechanism on.
 ---@return Problem
-function M.create_problem(solution_name, constraints, production_lines, forced_imports)
+function M.create_problem(solution_name, constraints, production_lines, forced_imports, options)
     local problem = problem_generator.new(solution_name)
+
+    -- Ablation switches (all default ON; only the headless research worker flips
+    -- them). Read once here so the gated sites below stay readable.
+    options = options or {}
+    local opt_deficit_seeding = options.deficit_seeding ~= false
+    local opt_catalyst_closure = options.catalyst_closure ~= false
+    local opt_reachability_gating = options.reachability_gating ~= false
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -646,8 +666,10 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     local pre_reachable = M.compute_reachable_materials(all_lines)
     local raw_deficits, _, seed_candidates = material_cycles.find_deficit_materials(all_lines)
     local deficits = {} ---@type table<string, true>
-    for name in pairs(raw_deficits) do
-        if not pre_reachable[name] then deficits[name] = true end
+    if opt_deficit_seeding then
+        for name in pairs(raw_deficits) do
+            if not pre_reachable[name] then deficits[name] = true end
+        end
     end
 
     -- Diagnose-then-reclassify imports. A first solve found these materials
@@ -680,7 +702,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- cascade's downstream tiers become reachable on their own and are never
     -- seeded). Cases that already reach their whole chain skip this loop
     -- entirely -- there is nothing left unreachable to pick.
-    while true do
+    while opt_catalyst_closure do
         local pick = nil
         for name in pairs(seed_candidates) do
             if not reachable[name] and not deficits[name]
@@ -824,7 +846,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             if bare_limit then
                 problem:add_subject_term(slack_name, bare_limit, 1)
             end
-        elseif not reachable[constraint_name] then
+        elseif not (opt_reachability_gating and reachable[constraint_name]) then
             -- |shortage_source| is gated on reachability: materials reachable
             -- from raw inputs (or promoted deficits) must run their producer
             -- chain. Without this gating the LP would pay elastic_cost to
@@ -833,6 +855,9 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- stuck in dead-end cycles that the deficit heuristic did not
             -- catch (mass-losing loops with no external input) keep the
             -- escape hatch — otherwise the LP can only return all-zero.
+            -- Research ablation: opt_reachability_gating=false un-gates this so
+            -- every non-deficit produced+consumed material gets the hatch (the
+            -- original pre-gating behaviour), to measure what the gate prevents.
             local elastic_name = vk.shortage_source(constraint_name)
             problem:add_objective(elastic_name, elastic_cost, false, "shortage_source", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, 1)
