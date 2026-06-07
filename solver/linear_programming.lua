@@ -342,10 +342,11 @@ local function certify_zeros(x, s, A, AT, b, primal, denom, length, tolerance)
 end
 
 ---Uses a primal-dual interior point method (long-step path-following). One
----Cholesky factorisation of A·D²·Aᵀ per iteration drives a single Newton
----step; if it produces NaN (the unpivoted decomposition cannot recover from
----a zero pivot when active inequality constraints make A·D²·Aᵀ near-
----singular) the solve is retried with a fat ε·I regularisation.
+---Cholesky factorisation of A·D²·Aᵀ per iteration drives a single Newton step.
+---Modified-Cholesky pivot flooring (in csr_matrix) keeps a cancelled pivot from
+---dividing to NaN; if the near-singular A·D²·Aᵀ still overflows large L entries
+---to inf the solve is retried with a fat ε·I regularisation (see the two-layer
+---note at the Newton system below).
 ---@param problem Problem Problems to solve.
 ---@param solver_state SolverState
 ---@param iteration integer? The IPM iteration count carried across calls; meaningful only while solver_state == "calculating".
@@ -516,19 +517,25 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     local sic = hmul(hpow(s, -1), duality_gap - barrier)
     local aug = A * (SX * -dual + sic) - primal
 
-    -- Cholesky stability: the unpivoted decomposition in
-    -- csr_matrix.cholesky_decomposition cannot recover from a zero pivot. As
-    -- the IPM approaches the optimum, active constraints pin one of x_i or
-    -- s_i at the boundary clamp 2⁻⁵² while the partner stays moderate, so
-    -- D²_ii spans ~2¹⁰⁴ orders of magnitude. Round-off cancellation in the
-    -- resulting near-singular A·D²·Aᵀ can drive a pivot to 0; that pivot
-    -- propagates inf/NaN through the substitution back-end (clamp does not
-    -- catch NaN). The two-tier strategy keeps the well-conditioned majority
-    -- bias-free: first try with no regularisation, and only fall back to a
-    -- fat ε·I on detected NaN. The fat ε is intentionally large -- the
-    -- retry path only fires after the bias-free solve already failed, so
-    -- trading some precision for a non-poisoned iteration is the right side
-    -- of the trade.
+    -- Cholesky stability is handled in two COMPLEMENTARY layers, because the
+    -- near-singular A·D²·Aᵀ has two distinct round-off failure modes (as the IPM
+    -- nears the optimum, active constraints pin one of x_i / s_i at the 2⁻⁵²
+    -- clamp while the partner stays moderate, so D²_ii spans ~2¹⁰⁴ orders of
+    -- magnitude):
+    --   * Zero / negative pivots from cancellation -- handled inside
+    --     csr_matrix.cholesky_decomposition by the modified-Cholesky pivot floor,
+    --     so a cancelled pivot can no longer divide to inf/NaN, independent of
+    --     the column order the pivots are visited in.
+    --   * Pivots floored small but carrying a large numerator still yield large L
+    --     entries whose Schur sums can OVERFLOW to ±inf -- which the pivot floor
+    --     cannot prevent. This is caught here by retrying with a fat ε·I, whose
+    --     larger diagonal shrinks the L entries back below the overflow threshold.
+    -- So the retry is NOT made redundant by the pivot floor: on the pyanodon
+    -- random-chain corpus it still fires and rescues tens of iterations even at
+    -- the 1e-7 default tolerance (the overflow mode the floor does not address),
+    -- with zero residual failures below 1e-10. The two-tier shape keeps the
+    -- well-conditioned majority bias-free: try unregularised first, fall back to
+    -- the fat ε·I only on detected NaN.
     local function solve_step(reg_epsilon)
         local P = A * SX * AT
         if reg_epsilon > 0 then
