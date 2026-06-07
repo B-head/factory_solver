@@ -13,7 +13,7 @@ M.second_per_tick = 60
 ---effectively zero against its gross throughput (see accessor.is_negligible /
 ---number_format.is_negligible). Lives here as a shared numeric epsilon next to
 ---is_nan / is_infinite; re-exported as `accessor.tolerance`.
-M.tolerance = (10 ^ -6) / 2
+M.tolerance = 10 ^ -7
 
 ---@type table<TimeScale, number>
 M.scale_per_second = {
