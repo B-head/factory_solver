@@ -14,6 +14,27 @@ local metatable = { __index = M }
 
 local int_max = 2147483647
 
+-- Modified-Cholesky pivot floor (Gill-Murray style), applied PER-PIVOT relative
+-- to the magnitude of the quantities being differenced. cholesky_decomposition
+-- factors the LP normal equations P = A·D²·Aᵀ, which is positive semidefinite in
+-- exact arithmetic but, as the interior-point iterate nears the boundary, has D²
+-- spanning ~2¹⁰⁴ orders of magnitude. Round-off cancellation then drives a
+-- true-small pivot to zero or slightly negative, the unpivoted elimination
+-- divides by it, and NaN poisons the whole factorisation -- reported downstream
+-- as a "singular" solve. Worse, which pivot tips depends on the column ORDER, so
+-- on a borderline problem the outcome flips with create_problem's pairs()
+-- iteration order (deterministic in the Factorio VM, but a genuine per-problem
+-- fragility). Flooring each pivot d_y = P_yy - sum at δ_y = rel · max(P_yy, sum)
+-- nudges the factorisation back to positive-definite. The floor is per-pivot, not
+-- a single global scale, precisely because P's diagonal range is enormous: a
+-- global δ = rel · max|P_ii| would lift the small-coefficient rows' legitimate
+-- small pivots and break well-posed subsystems (observed as the 10¹⁰-range
+-- lp_extreme_coefficients fixture failing). Relative to each pivot's own scale,
+-- a well-conditioned pivot sits far above δ_y and is untouched; only a pivot that
+-- has cancelled down into its own round-off is lifted. Tuned on the pyanodon
+-- random-chain corpus (tests/sweep_tolerance.lua); see solver/linear_programming.
+local cholesky_pivot_floor_rel = 2 ^ -52
+
 ---Setup metatable.
 ---@param self CsrMatrix
 ---@return CsrMatrix
@@ -673,7 +694,25 @@ function M.cholesky_decomposition(symmetric_matrix)
                     oc = (m < me) and origin_column_indexes[m] or int_max
                 end
 
-                diagonal[dt] = ov - sum
+                local pivot = ov - sum
+                -- Floor the pivot relative to the magnitude of the two
+                -- quantities being differenced (the original diagonal `ov` and
+                -- the Schur sum). When ov ≈ sum the subtraction cancels away all
+                -- significance and the result is round-off noise that can land at
+                -- 0 or slightly negative; left alone it reaches the
+                -- (ov - sum) / diagonal[x] divisions above as 0 / a negative and
+                -- emits inf/NaN, poisoning the factorisation. The floor is
+                -- PER-PIVOT relative (not a single global scale) so it adapts to
+                -- the LP normal equations' huge diagonal range: a small-
+                -- coefficient row keeps a correspondingly tiny floor and its
+                -- legitimate small pivot survives, while only a pivot that has
+                -- cancelled down into its own round-off is lifted. The absolute
+                -- guard keeps the floor > 0 for an all-zero (ov = sum = 0) row.
+                local scale = (ov > sum) and ov or sum
+                local floor = scale * cholesky_pivot_floor_rel
+                if floor <= 0 then floor = 2 ^ -522 end
+                if pivot < floor then pivot = floor end
+                diagonal[dt] = pivot
                 dt = dt + 1
                 break
             end
