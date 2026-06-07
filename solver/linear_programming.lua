@@ -18,6 +18,33 @@ local machine_lower_epsilon = (2 ^ -52) -- (2 ^ -511)
 local step_fraction = 0.99
 local centering_sigma = 0.1
 
+-- Dual-certified zero purification. The IPM converges to the analytic centre of
+-- the optimal face, so a variable that is exactly 0 in the true optimum parks at
+-- the interior-point "dust" residual x ~ mu/s instead of 0 (see the
+-- recipe_epsilon note in create_problem.lua). Complementary slackness gives a
+-- scale-free certificate for which residuals are provably zero: at the optimum
+-- x_i*s_i = 0 with s_i >= 0, so a converged variable whose reduced cost s_i
+-- dominates its value x_i sits on the dual-active (nonbasic) side and belongs at
+-- 0, while a genuinely basic variable has s_i -> 0 (x_i > s_i) and is left alone.
+--
+-- Snapping a certified zero to exactly 0 is not free, though: it shifts A·x by
+-- x_i times that variable's constraint column, and a tiny x_i on a large
+-- coefficient can move A·x far more than x_i itself. Two outcomes:
+--   * Independent numerical dust (x ~ 1e-10) zeroes out directly -- feasibility
+--     stays within tolerance with no further work.
+--   * "Structural" dust (e.g. a dead-end recycling recipe parked at ~mu/eps that
+--     forms a tiny circulating flow with its surplus_sink partner) is load-
+--     bearing at the analytic centre: zeroing it alone breaks A·x = b by orders
+--     of magnitude more than tolerance. Those are recovered by re-projecting --
+--     a minimum-norm feasibility correction on the remaining FREE variables lets
+--     the partners absorb the freed load while the certified zeros stay 0.
+-- A feasibility-budgeted greedy snap is the safe fallback when the projection is
+-- unusable (singular masked system, or a free variable would go negative). Every
+-- path keeps the final relative primal residual at or below the same tolerance
+-- the convergence test enforces, so purification never reports a solution dirtier
+-- than the solver already promised.
+local purify_zeros = true
+
 local M = {}
 
 ---@param vector CsrMatrix
@@ -136,6 +163,184 @@ local function has_nan(vector)
 end
 
 ---Solve linear programming problems.
+---Feasibility-budgeted greedy snap: the safe fallback path for certify_zeros.
+---Snaps candidate zeros to 0 in ascending feasibility impact (x_i²·‖col_i‖²),
+---admitting each only while the running primal residual stays within budget, so
+---the result never breaches `tolerance`. The residual is tracked incrementally,
+---touching only each snapped column's nonzeros.
+---@param x_list number[] Dense primal values (mutated copy is returned).
+---@param candidates integer[] Candidate variable indices.
+---@param AT CsrMatrix Transposed subject matrix; row i is variable i's column.
+---@param res0 number[] Dense pre-snap primal residual A·x - b.
+---@param budget_sq number Squared absolute residual budget (tolerance·denom)².
+---@param length integer Primal vector length.
+---@return number[] out Primal values with the admitted subset zeroed.
+---@return integer count Number of variables snapped.
+---@return number max_snapped Largest x_i snapped to 0.
+---@return number residual_norm Post-snap absolute residual ‖A·x-b‖.
+local function budgeted_greedy(x_list, candidates, AT, res0, budget_sq, length)
+    local at_values, at_cols, at_ranges = AT.values, AT.column_indexes, AT.row_ranges
+
+    local items = {}
+    for _, i in ipairs(candidates) do
+        local xi = x_list[i]
+        local col_sq = 0
+        for t = at_ranges[i], at_ranges[i + 1] - 1 do
+            local a = at_values[t]
+            col_sq = col_sq + a * a
+        end
+        items[#items + 1] = { i = i, impact = xi * xi * col_sq }
+    end
+    -- Break impact ties by index so the admitted set is a total order independent
+    -- of table.sort's unstable tie handling -- the purified solution must be
+    -- bit-identical across clients (multiplayer lockstep).
+    table.sort(items, function(p, q)
+        if p.impact ~= q.impact then return p.impact < q.impact end
+        return p.i < q.i
+    end)
+
+    local out, res = {}, {}
+    for i = 1, length do out[i] = x_list[i] end
+    for j = 1, #res0 do res[j] = res0[j] end
+    local ss = 0
+    for j = 1, #res do ss = ss + res[j] * res[j] end
+
+    local count, max_snapped = 0, 0
+    for _, it in ipairs(items) do
+        local i = it.i
+        local xi = out[i]
+        local ss_new = ss
+        for t = at_ranges[i], at_ranges[i + 1] - 1 do
+            local old = res[at_cols[t]]
+            local new = old - xi * at_values[t]
+            ss_new = ss_new - old * old + new * new
+        end
+        if ss_new <= budget_sq then
+            for t = at_ranges[i], at_ranges[i + 1] - 1 do
+                local j = at_cols[t]
+                res[j] = res[j] - xi * at_values[t]
+            end
+            ss = ss_new
+            out[i] = 0
+            count = count + 1
+            if xi > max_snapped then max_snapped = xi end
+        end
+    end
+
+    return out, count, max_snapped, math.sqrt(ss)
+end
+
+---Dual-certified zero purification (see the purify_zeros note above). A primal
+---is a *candidate* zero when its reduced cost s_i dominates its value x_i -- the
+---nonbasic side of complementary slackness, scale-free (each variable's own x_i
+---vs its own s_i, no absolute thresholds). The three feasibility-preserving
+---paths -- direct zeroing, re-projection, budgeted greedy fallback -- are
+---described in the purify_zeros note above; every one keeps the returned
+---solution's relative primal residual at or below `tolerance`.
+---@param x CsrMatrix Converged primal variables.
+---@param s CsrMatrix Converged slack (reduced cost = c - Aᵀ·y) variables.
+---@param A CsrMatrix Subject matrix.
+---@param AT CsrMatrix Transposed subject matrix; row i is variable i's constraint column.
+---@param b CsrMatrix Limit vector.
+---@param primal CsrMatrix Pre-snap primal residual A·x - b.
+---@param denom number Relative-residual denominator 1 + ‖b‖.
+---@param length integer Primal vector length (problem.primal_length).
+---@param tolerance number Relative feasibility bound the result must not exceed.
+---@return CsrMatrix #Primal vector with certified zeros snapped to 0.
+---@return integer count Number of variables snapped to exactly 0.
+---@return number max_snapped Largest x_i snapped to 0.
+---@return number residual Post-snap relative primal residual ‖A·x-b‖/denom.
+---@return string mode One of "none" | "direct" | "projection" | "greedy".
+local function certify_zeros(x, s, A, AT, b, primal, denom, length, tolerance)
+    local x_list, s_list = csr_matrix.to_list(x), csr_matrix.to_list(s)
+
+    -- Dual-certified candidates: reduced cost dominates value (nonbasic side).
+    local is_candidate, candidates = {}, {}
+    local max_snapped = 0
+    for i = 1, length do
+        local xi, si = x_list[i] or 0, s_list[i] or 0
+        if xi > 0 and si > xi then
+            is_candidate[i] = true
+            candidates[#candidates + 1] = i
+            if xi > max_snapped then max_snapped = xi end
+        end
+    end
+
+    local function rel_residual(xs)
+        return (A * csr_matrix.with_vector(xs, length) - b):euclidean_norm() / denom
+    end
+
+    if #candidates == 0 then
+        return x, 0, 0, primal:euclidean_norm() / denom, "none"
+    end
+
+    -- (1) Direct: zero every candidate. For independent numerical dust this is
+    -- already feasible within tolerance -- the common case, no factorisation.
+    local proj = {}
+    for i = 1, length do proj[i] = is_candidate[i] and 0 or x_list[i] end
+    local r_direct = rel_residual(proj)
+    if r_direct <= tolerance then
+        return csr_matrix.with_vector(proj, length), #candidates, max_snapped, r_direct, "direct"
+    end
+
+    -- (2) Re-projection: the candidates were load-bearing, so restore feasibility
+    -- with the minimum-norm correction on the FREE (non-candidate) variables.
+    -- Solve (A·W·Aᵀ)·u = -(A·x_proj - b) and set Δx = W·Aᵀ·u, where W masks out
+    -- the candidate columns so they stay exactly 0 while their partners absorb
+    -- the freed load. Mirrors the IPM normal-equation solve (LDLᵀ via Cholesky,
+    -- with the same ε·I retry on a NaN-poisoned near-singular factorisation).
+    local mask = {}
+    for i = 1, length do mask[i] = is_candidate[i] and 0 or 1 end
+    local W = csr_matrix.with_diagonal(mask, length)
+    local r = A * csr_matrix.with_vector(proj, length) - b
+    local P_base = A * W * AT
+    -- Masking out the candidate columns makes A·W·Aᵀ structurally singular
+    -- wherever a constraint row touched only candidates (its row goes empty, and
+    -- the unpivoted Cholesky then divides by a zero pivot -- not even a NaN, but a
+    -- nil that throws). A tiny Tikhonov ε·I fills those diagonals so the
+    -- factorisation is always well-formed; the damping is negligible on the
+    -- well-conditioned majority, and on a genuinely unsatisfiable masked row it
+    -- inflates the correction, which the residual check below then rejects in
+    -- favour of the greedy fallback. pcall guards any residual breakdown.
+    local function solve_proj(reg)
+        local P = P_base + csr_matrix.with_diagonal(reg, AT.width)
+        local L, D = csr_matrix.cholesky_decomposition(P)
+        local u = csr_matrix.backward_substitution(L:T(),
+            csr_matrix.forward_substitution(L * D, -r))
+        return W * (AT * u)
+    end
+    local function try_solve_proj(reg)
+        local ok, dx = pcall(solve_proj, reg)
+        if ok and not has_nan(dx) then return dx end
+        return nil
+    end
+    local dx = try_solve_proj(2 ^ -40) or try_solve_proj(2 ^ -12)
+    if dx then
+        local dx_list = csr_matrix.to_list(dx)
+        local final = {}
+        for i = 1, length do
+            -- Candidates stay 0 (W zeroes their Δx); clamp any round-off-negative
+            -- free correction up to 0 -- the residual check below rejects the
+            -- whole projection if that clamp (or a materially negative free var)
+            -- pushed feasibility back over tolerance.
+            local v = proj[i] + (dx_list[i] or 0)
+            final[i] = v > 0 and v or 0
+        end
+        local r_proj = rel_residual(final)
+        if r_proj <= tolerance then
+            return csr_matrix.with_vector(final, length), #candidates, max_snapped, r_proj, "projection"
+        end
+    end
+
+    -- (3) Projection unusable (singular masked system, or a free variable would
+    -- go materially negative). Fall back to the budgeted greedy snap, which zeroes
+    -- only the subset that fits under tolerance -- always safe, never breaches.
+    local budget_sq = (tolerance * denom) ^ 2
+    local out, count, snapped, rnorm =
+        budgeted_greedy(x_list, candidates, AT, csr_matrix.to_list(primal), budget_sq, length)
+    return csr_matrix.with_vector(out, length), count, snapped, rnorm / denom, "greedy"
+end
+
 ---Uses a primal-dual interior point method (long-step path-following). One
 ---Cholesky factorisation of A·D²·Aᵀ per iteration drives a single Newton
 ---step; if it produces NaN (the unpivoted decomposition cannot recover from
@@ -270,6 +475,16 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     --     iteration, p_criteria, d_criteria, mu_criteria)
 
     if math.max(p_criteria, d_criteria, mu_criteria) <= tolerance then
+        if purify_zeros and p_degree > 0 then
+            local denom = 1 + b:euclidean_norm()
+            local count, max_snapped, residual, mode
+            x, count, max_snapped, residual, mode =
+                certify_zeros(x, s, A, AT, b, primal, denom, p_degree, tolerance)
+            log.trace("  purify_zeros[%s]: snapped %i var(s), max |x| = %g, "
+                .. "relative ||A·x-b|| %g -> %g (tol %g)",
+                mode, count, max_snapped, p_criteria, residual, tolerance)
+        end
+
         if fs_log.is_enabled("trace") then log.trace("primal <x>:\n%s", problem:dump_primal(x)) end
         log.trace("-- finished solve '%s' --", problem.name)
         log.trace("  iterate = %i, width = %i, height = %i", iteration, p_degree, d_degree)
