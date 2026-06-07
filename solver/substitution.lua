@@ -1,62 +1,80 @@
 local problem_generator = require "solver/problem_generator"
 
--- Proportional row reduction (singleton / doubleton variable substitution).
+-- Escape-variable row reduction (column-singleton substitution presolve).
 --
--- Factorio recipe networks contain long linear chains (A --r1--> B --r2--> C).
--- Whenever a material balance row is a pure two-term equality
---   a_rep * x_rep + a_elim * x_elim = 0
--- the eliminated variable is just a positive scalar multiple of the
--- representative (x_elim = k * x_rep, k > 0), so it can be substituted out of
--- the LP entirely. Each substitution removes one constraint row AND one
--- variable column; since the IPM's dominant cost is Cholesky(A·D²·Aᵀ) at
--- O(m³) in the row count m, folding chains directly shrinks the hot loop.
+-- create_problem attaches an "escape" variable to most material balance rows:
+-- |final_sink| on a terminal product, |initial_source| on a raw input,
+-- |shortage_source| on an unreachable cycle material. On a material touched by a
+-- single recipe these rows are pure two-term equalities
+--   a_recipe * x_recipe  (+/-)  1 * x_escape = 0
+-- where the escape variable appears in NO other row (a column singleton) and is
+-- therefore uniquely pinned to the recipe flow: x_escape = k * x_recipe, k > 0.
+-- Such a variable carries no decision -- it just records the flow leaving or
+-- entering the factory -- so it can be substituted out: drop the row and the
+-- column, fold the escape's per-unit cost onto the recipe (c_recipe += k *
+-- c_escape), and reconstruct x_escape after the solve. Because the escape column
+-- is a singleton, the substitution never rewrites any other row, so it is a pure
+-- deletion: the remaining LP is byte-for-byte the same problem minus a pinned
+-- variable, and the IPM solves a strictly smaller system (Cholesky on A·D²·Aᵀ is
+-- O(m³) in the row count m).
 --
--- This is a pure presolve: the reduced LP has the identical optimum (costs are
--- transferred, c_rep' = c_rep + k * c_elim, so the objective is preserved), and
--- the eliminated variables are reconstructed exactly after the solve via
--- M.unfold. The full Problem is never mutated -- it stays the canonical
--- variable space that report / filter_result / diagnose read.
+-- On the explorer corpus (cycle-heavy pyanodon chains) escape variables sit on
+-- ~73% of all rows, so this folds roughly half of them and the corpus solves
+-- ~5x faster. The objective is preserved exactly (cost is conserved); on
+-- degenerate problems the IPM may still land on a different point of the optimal
+-- *face* (it returns the analytic center, which depends on the formulation), but
+-- never a different objective.
 --
--- Safety (we only fold when the substitution provably keeps the solution
--- unchanged and feasible):
---   * the row's RHS limit must be 0 (no constant term leaks into other rows),
---   * the row must have exactly two non-zero terms,
---   * both variables must be recipe / bridge columns (escape variables --
---     source / sink / elastic / slack -- carry the cost tiers and must not be
---     folded),
---   * the two coefficients must have opposite signs, so k = -a_rep/a_elim > 0
---     and x_elim >= 0 follows from x_rep >= 0 automatically.
+-- Why only escape singletons, not recipe<->recipe chain doubletons: folding a
+-- variable that appears in other rows substitutes into them, changing their
+-- coefficients -- which both shifts the IPM center far more on degenerate
+-- problems and, empirically, pushed one corpus problem into a singular
+-- factorisation. Escape-singleton folds touch nothing else and never regressed
+-- convergence.
 --
--- Determinism (Factorio multiplayer is deterministic lockstep): every scan is
--- over keys sorted by string, the representative is the lexicographically
--- smaller of the two variable keys, and no wall-clock / RNG source is touched.
--- Two reduce() calls on the same Problem produce bit-identical output.
+-- |surplus_sink| is deliberately NOT folded: its sign makes the row
+--   producer - consumer - surplus = 0,  surplus >= 0
+-- an inequality (production may exceed consumption), so the variable is a real
+-- slack with a load-bearing bound, not a pinned accumulator.
+--
+-- Determinism (Factorio multiplayer is deterministic lockstep): rows are scanned
+-- in sorted key order and the reduced problem is built in sorted key order, so
+-- two reduce() calls on the same Problem produce bit-identical output. No
+-- wall-clock / RNG source is touched.
 
 local M = {}
 
----True for the variable classes that may be folded. Escape variables
----(source / sink / elastic / slack) attach to material rows with the BIG-M
----cost tiers, so folding them would smear those costs across recipes.
 ---@param kind PrimalKind?
 ---@return boolean
-local function foldable_kind(kind)
+local function is_recipe(kind)
     return kind == "recipe" or kind == "bridge"
 end
 
----Reduce a Problem by substituting out proportional doubleton rows.
+-- Escape classes that are uniquely pinned to a single recipe flow and safe to
+-- substitute out. |surplus_sink| is excluded on purpose (see file header).
+local ESCAPE_KIND = {
+    final_sink = true,
+    initial_source = true,
+    shortage_source = true,
+}
+
+---Reduce a Problem by substituting out column-singleton escape variables.
 ---
----Returns a fresh reduced Problem (a normal problem_generator instance, so the
----existing IPM solves it unchanged) plus a reconstruction map for M.unfold. The
----input `full` problem is not mutated.
+---Returns a fresh reduced Problem (a normal problem_generator instance the IPM
+---solves unchanged) plus a reconstruction map for M.unfold. The input `full`
+---problem is not mutated.
 ---@param full Problem
 ---@return Problem reduced
 ---@return Reconstruction reconstruction
 function M.reduce(full)
-    -- Working copy of the constraint matrix in two synchronised directions:
-    --   row[d][p]      = coefficient of primal p in dual row d
-    --   prim_rows[p]   = set of dual rows that primal p appears in
-    -- Mirrors generate_subject_matrix's filtering: a term counts only when both
-    -- its primal and dual are registered, and explicit zeros are dropped.
+    -- Working copy of the constraint matrix in two synchronised directions, both
+    -- filtered the way generate_subject_matrix filters (a term counts only when
+    -- both its primal and dual are registered, dropping explicit zeros):
+    --   row[d][p]    = coefficient of primal p in dual row d
+    --   prim_rows[p] = set of dual rows primal p appears in
+    -- The prim_rows count is what tells a column singleton from a multi-row
+    -- escape (e.g. an |initial_source| that also feeds a registered |limit| row
+    -- on a user-constrained material -- that one is NOT folded).
     local row = {}
     local prim_rows = {}
     for p, terms in pairs(full.subject_terms) do
@@ -74,8 +92,6 @@ function M.reduce(full)
         end
     end
 
-    -- Objective costs, mutated in place as costs are transferred onto the
-    -- surviving representatives.
     local cost = {}
     for p, info in pairs(full.primals) do
         cost[p] = info.cost
@@ -85,78 +101,53 @@ function M.reduce(full)
     local order = {} ---@type string[]
     local dead_dual = {} ---@type table<string, true>
 
-    -- Fixpoint: folding one row can turn another into a doubleton (the linear
-    -- chain collapse), so re-scan until a full pass folds nothing. Each pass
-    -- walks the live rows in sorted key order for determinism.
-    local changed = true
-    while changed do
-        changed = false
+    -- A single sorted pass suffices: a pure-deletion fold never rewrites another
+    -- row, so it cannot turn a different row into a new foldable doubleton (no
+    -- fixpoint needed, unlike a substitution that touches other rows).
+    local dkeys = {}
+    for d in pairs(full.duals) do dkeys[#dkeys + 1] = d end
+    table.sort(dkeys)
 
-        local dkeys = {}
-        for d in pairs(full.duals) do
-            if not dead_dual[d] then dkeys[#dkeys + 1] = d end
-        end
-        table.sort(dkeys)
+    for _, d in ipairs(dkeys) do
+        local terms = row[d]
+        if full.duals[d].limit == 0 and terms then
+            -- Collect the non-zero terms; only an exact two-term row folds.
+            local plist = {}
+            for p, coeff in pairs(terms) do
+                if coeff ~= 0 then plist[#plist + 1] = p end
+            end
 
-        for _, d in ipairs(dkeys) do
-            local terms = row[d]
-            if not dead_dual[d] and full.duals[d].limit == 0 and terms then
-                -- Collect the non-zero terms; we only fold an exact doubleton.
-                local plist = {}
-                for p, coeff in pairs(terms) do
-                    if coeff ~= 0 then plist[#plist + 1] = p end
+            if #plist == 2 then
+                local p1, p2 = plist[1], plist[2]
+                local k1, k2 = full.primals[p1].kind, full.primals[p2].kind
+                -- Identify the recipe/bridge "keep" and the escape to eliminate.
+                local keep, esc
+                if is_recipe(k1) and ESCAPE_KIND[k2] then
+                    keep, esc = p1, p2
+                elseif is_recipe(k2) and ESCAPE_KIND[k1] then
+                    keep, esc = p2, p1
                 end
 
-                if #plist == 2 then
-                    local p1, p2 = plist[1], plist[2]
-                    if foldable_kind(full.primals[p1].kind)
-                        and foldable_kind(full.primals[p2].kind) then
-                        local a1, a2 = terms[p1], terms[p2]
-                        -- Opposite signs => k > 0 and non-negativity is implied.
-                        if a1 * a2 < 0 then
-                            -- Representative = lexicographically smaller key.
-                            local rep, elim, a_rep, a_elim
-                            if p1 < p2 then
-                                rep, elim, a_rep, a_elim = p1, p2, a1, a2
-                            else
-                                rep, elim, a_rep, a_elim = p2, p1, a2, a1
-                            end
-                            local k = -a_rep / a_elim
-
-                            -- Transfer elim's coefficients in every OTHER row to
-                            -- rep, scaled by k. (Row d itself is removed below.)
-                            for d2 in pairs(prim_rows[elim]) do
-                                if d2 ~= d then
-                                    local c_elim = row[d2][elim]
-                                    row[d2][elim] = nil
-                                    local newc = (row[d2][rep] or 0) + k * c_elim
-                                    if newc == 0 then
-                                        -- Exact cancellation: rep drops out of d2.
-                                        if row[d2][rep] ~= nil then
-                                            row[d2][rep] = nil
-                                            prim_rows[rep][d2] = nil
-                                        end
-                                    else
-                                        if row[d2][rep] == nil then
-                                            prim_rows[rep][d2] = true
-                                        end
-                                        row[d2][rep] = newc
-                                    end
-                                end
-                            end
-
-                            -- Transfer the objective cost onto rep.
-                            cost[rep] = cost[rep] + k * cost[elim]
-
-                            -- Retire elim and the doubleton row d.
-                            prim_rows[elim] = nil
-                            prim_rows[rep][d] = nil
+                if esc then
+                    -- The escape must appear in this row only (column singleton);
+                    -- otherwise eliminating it would drop a constraint it also
+                    -- participates in (e.g. a |limit| row).
+                    local nrows = 0
+                    for _ in pairs(prim_rows[esc]) do nrows = nrows + 1 end
+                    if nrows == 1 then
+                        local k = -terms[keep] / terms[esc]
+                        -- k > 0 means x_esc = k * x_keep keeps x_esc >= 0 given
+                        -- x_keep >= 0; the opposite sign that makes this hold is
+                        -- exactly the producer/sink (final_sink) or consumer/
+                        -- source (initial/shortage) pairing.
+                        if k > 0 then
+                            cost[keep] = cost[keep] + k * cost[esc]
+                            prim_rows[esc] = nil
+                            prim_rows[keep][d] = nil
                             row[d] = nil
                             dead_dual[d] = true
-
-                            eliminated[elim] = { rep = rep, k = k }
-                            order[#order + 1] = elim
-                            changed = true
+                            eliminated[esc] = { rep = keep, k = k }
+                            order[#order + 1] = esc
                         end
                     end
                 end
@@ -164,8 +155,8 @@ function M.reduce(full)
         end
     end
 
-    -- Build the reduced Problem. Insert primals and duals in sorted key order so
-    -- the index assignment (and therefore the generated matrix) is reproducible.
+    -- Build the reduced Problem in sorted key order so the index assignment (and
+    -- therefore the generated matrix) is reproducible.
     local reduced = problem_generator.new(full.name)
 
     local pkeys = {}
@@ -178,30 +169,18 @@ function M.reduce(full)
         reduced:add_objective(p, cost[p], info.is_result, info.kind, info.material)
     end
 
-    local dkeys = {}
+    local rdkeys = {}
     for d in pairs(full.duals) do
-        if not dead_dual[d] then dkeys[#dkeys + 1] = d end
+        if not dead_dual[d] then rdkeys[#rdkeys + 1] = d end
     end
-    table.sort(dkeys)
-    for _, d in ipairs(dkeys) do
+    table.sort(rdkeys)
+    for _, d in ipairs(rdkeys) do
         local terms = row[d]
-        local has_term = false
+        reduced:add_equivalence_constraint(d, full.duals[d].limit)
         if terms then
-            for _, coeff in pairs(terms) do
-                if coeff ~= 0 then has_term = true; break end
-            end
-        end
-        -- Drop rows that collapsed to 0 = 0 (a redundant constraint that would
-        -- otherwise add a zero row to A and make A·D²·Aᵀ singular). A row whose
-        -- limit is non-zero is kept regardless: it is never an internal balance
-        -- and losing it would change feasibility.
-        if has_term or full.duals[d].limit ~= 0 then
-            reduced:add_equivalence_constraint(d, full.duals[d].limit)
-            if terms then
-                for p, coeff in pairs(terms) do
-                    if coeff ~= 0 then
-                        reduced:add_subject_term(p, d, coeff)
-                    end
+            for p, coeff in pairs(terms) do
+                if coeff ~= 0 then
+                    reduced:add_subject_term(p, d, coeff)
                 end
             end
         end
@@ -212,12 +191,12 @@ end
 
 ---Expand a reduced solution back into the full variable space.
 ---
----The reduced solve returns x / y / s keyed only by surviving variables. This
----fills in every eliminated primal's x via x_elim = k * x_rep, resolving chains
----transitively (B -> A -> C) with memoisation. Dual (y) and slack (s) values
----for eliminated rows / columns are left absent: only x is read for
----correctness (filter_result, diagnose, report), and the warm-start make_*
----helpers fall back to defaults for missing keys.
+---Fills in every eliminated escape variable's x via x_esc = k * x_rep (the
+---reconstruction chain is flat -- escape singletons never point at another
+---eliminated variable -- but resolve transitively with memoisation anyway, to be
+---robust). Dual (y) and slack (s) values for eliminated columns are left absent:
+---only x is read for correctness (filter_result, diagnose, report), and the
+---warm-start make_* helpers fall back to defaults for missing keys.
 ---@param reduced_raw PackedVariables?
 ---@param reconstruction Reconstruction
 ---@return PackedVariables? #Full-space packed variables, or nil if the solve produced none.
@@ -236,7 +215,6 @@ function M.unfold(reduced_raw, reconstruction)
     local function resolve(key)
         local info = elim_map[key]
         if not info then
-            -- A surviving (root) variable: present in the reduced solution.
             return x[key] or 0
         end
         local cached = x[key]

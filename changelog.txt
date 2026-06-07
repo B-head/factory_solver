@@ -2,12 +2,13 @@
 Version: 0.6.3
 Date: ????
   Optimizations:
-    - Shrink the solver's linear program before each solve by folding out clean
-      pass-through intermediates -- a material produced and consumed by one
-      recipe each, with no by-products forcing over-production -- whose balance
-      collapses into the neighbouring recipe. Long production chains now solve
-      from a smaller matrix. The solution is identical; quality-recycling and
-      by-product loops keep their full formulation untouched.
+    - Shrink the solver's linear program before each solve by folding out the
+      bookkeeping "escape" variables (a material's external source / sink) that
+      are pinned to a single recipe's flow, removing both the variable and its
+      balance row. Solves run from a much smaller matrix -- on heavily cyclic
+      modpacks (pyanodon) the corpus solves about 5x faster, on Space Age about
+      1.75x. The objective is unchanged; the eliminated flows are reconstructed
+      for display after the solve.
   Changes:
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.2

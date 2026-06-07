@@ -1,13 +1,15 @@
--- Regression suite for solver/substitution.lua, the proportional row-reduction
--- presolve (singleton / doubleton variable elimination).
+-- Regression suite for solver/substitution.lua, the escape-variable row
+-- reduction presolve (column-singleton substitution).
 --
--- Two layers of coverage:
---   1. Gate unit tests on hand-built Problems (problem_generator directly):
---      fold only when limit == 0, exactly two terms, both recipe/bridge, and
---      opposite-signed coefficients. Anything else must be left untouched.
---   2. End-to-end identity tests on real create_problem outputs: solving the
---      reduced problem and unfolding must reproduce the full-problem solution
---      for every variable, while actually shrinking the row count.
+-- Two layers:
+--   1. Gate unit tests on hand-built Problems: a row folds only when it is a
+--      limit-0 two-term equality pairing one recipe/bridge with one
+--      column-singleton escape variable (final_sink / initial_source /
+--      shortage_source) of the opposite sign. surplus_sink, recipe<->recipe
+--      doubletons, multi-row escapes, and non-zero-limit rows must NOT fold.
+--   2. End-to-end identity on real create_problem outputs: solving the reduced
+--      problem and unfolding reproduces the full-problem solution (exactly on
+--      unique optima) while actually shrinking the row count.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
@@ -29,7 +31,6 @@ local function line(recipe_name, products, ingredients)
     }
 end
 
----Count entries in a (possibly sparse) key->value table.
 local function count(t)
     local n = 0
     for _ in pairs(t) do n = n + 1 end
@@ -43,43 +44,91 @@ local cases = {}
 -- ---------------------------------------------------------------------------
 
 table.insert(cases, {
-    name = "fold: opposite-sign two-recipe equality row at limit 0 is eliminated",
+    name = "fold: terminal final_sink singleton is eliminated (cost 0)",
     run = function()
-        local p = pg.new("fold")
+        local p = pg.new("final")
         p:add_objective("recipe/a", 1, true, "recipe")
-        p:add_objective("recipe/b", 1, true, "recipe")
-        p:add_equivalence_constraint("|limit|m", 0)
-        p:add_subject_term("recipe/a", "|limit|m", 2)  -- a produces 2 m
-        p:add_subject_term("recipe/b", "|limit|m", -1) -- b consumes 1 m
+        p:add_objective("|final_sink|m", 0, false, "final_sink")
+        p:add_equivalence_constraint("m", 0)
+        p:add_subject_term("recipe/a", "m", 2)       -- a produces 2 m
+        p:add_subject_term("|final_sink|m", "m", -1) -- final_sink exports m
 
         local reduced, recon = sub.reduce(p)
-
-        harness.assert_eq(count(recon.eliminated), 1, "one variable eliminated")
-        -- rep = lexicographically smaller key = recipe/a; elim = recipe/b.
-        local info = recon.eliminated["recipe/b"]
-        assert(info, "recipe/b should be eliminated")
-        harness.assert_eq(info.rep, "recipe/a", "representative")
-        -- b = k*a with 2a - b = 0 => b = 2a => k = 2.
-        harness.assert_near(info.k, 2, 1e-12, "k = -a_rep/a_elim = -2/-1")
-        harness.assert_eq(reduced.dual_length, 0, "the only row was removed")
-        harness.assert_eq(reduced.primal_length, 1, "elim column removed")
-        -- Cost transfers: c_rep' = 1 + k*1 = 3.
-        harness.assert_near(reduced.primals["recipe/a"].cost, 3, 1e-12, "cost transfer")
+        harness.assert_eq(count(recon.eliminated), 1, "final_sink eliminated")
+        local info = recon.eliminated["|final_sink|m"]
+        assert(info, "|final_sink|m eliminated")
+        harness.assert_eq(info.rep, "recipe/a", "representative is the producer")
+        harness.assert_near(info.k, 2, 1e-12, "k = -2/-1 (final_sink = 2*producer)")
+        harness.assert_eq(reduced.dual_length, 0, "row removed")
+        harness.assert_eq(reduced.primal_length, 1, "escape column removed")
+        harness.assert_near(reduced.primals["recipe/a"].cost, 1, 1e-12,
+            "cost unchanged (final_sink cost is 0)")
     end,
 })
 
 table.insert(cases, {
-    name = "no fold: same-sign coefficients (k would be negative)",
+    name = "fold: raw initial_source singleton folds and transfers its cost",
     run = function()
-        local p = pg.new("samesign")
+        local p = pg.new("initial")
         p:add_objective("recipe/a", 1, true, "recipe")
-        p:add_objective("recipe/b", 1, true, "recipe")
-        p:add_equivalence_constraint("|limit|m", 0)
-        p:add_subject_term("recipe/a", "|limit|m", 1)
-        p:add_subject_term("recipe/b", "|limit|m", 1)
+        p:add_objective("|initial_source|m", 5, false, "initial_source")
+        p:add_equivalence_constraint("m", 0)
+        p:add_subject_term("recipe/a", "m", -3)        -- a consumes 3 m
+        p:add_subject_term("|initial_source|m", "m", 1) -- supplied externally
+
+        local reduced, recon = sub.reduce(p)
+        local info = recon.eliminated["|initial_source|m"]
+        assert(info, "|initial_source|m eliminated")
+        harness.assert_near(info.k, 3, 1e-12, "initial_source = 3*consumer")
+        -- cost transfers: c_a' = 1 + k*5 = 16.
+        harness.assert_near(reduced.primals["recipe/a"].cost, 16, 1e-12, "cost transfer")
+    end,
+})
+
+table.insert(cases, {
+    name = "no fold: surplus_sink is a real slack, not a pinned escape",
+    run = function()
+        local p = pg.new("surplus")
+        p:add_objective("recipe/a", 1, true, "recipe")
+        p:add_objective("|surplus_sink|m", 1024, false, "surplus_sink")
+        p:add_equivalence_constraint("m", 0)
+        p:add_subject_term("recipe/a", "m", 1)
+        p:add_subject_term("|surplus_sink|m", "m", -1)
 
         local _, recon = sub.reduce(p)
-        harness.assert_eq(count(recon.eliminated), 0, "same-sign row not folded")
+        harness.assert_eq(count(recon.eliminated), 0, "surplus_sink not folded")
+    end,
+})
+
+table.insert(cases, {
+    name = "no fold: recipe<->recipe doubleton (only escape singletons fold)",
+    run = function()
+        local p = pg.new("recrec")
+        p:add_objective("recipe/a", 1, true, "recipe")
+        p:add_objective("recipe/b", 1, true, "recipe")
+        p:add_equivalence_constraint("m", 0)
+        p:add_subject_term("recipe/a", "m", 2)
+        p:add_subject_term("recipe/b", "m", -1)
+
+        local _, recon = sub.reduce(p)
+        harness.assert_eq(count(recon.eliminated), 0, "recipe-recipe row not folded")
+    end,
+})
+
+table.insert(cases, {
+    name = "no fold: escape that appears in a second row is not a column singleton",
+    run = function()
+        local p = pg.new("multirow")
+        p:add_objective("recipe/a", 1, true, "recipe")
+        p:add_objective("|initial_source|m", 1, false, "initial_source")
+        p:add_equivalence_constraint("m", 0)
+        p:add_equivalence_constraint("|limit|m", 5) -- a second registered row
+        p:add_subject_term("recipe/a", "m", -1)
+        p:add_subject_term("|initial_source|m", "m", 1)
+        p:add_subject_term("|initial_source|m", "|limit|m", 1) -- escape in 2 rows
+
+        local _, recon = sub.reduce(p)
+        harness.assert_eq(count(recon.eliminated), 0, "multi-row escape not folded")
     end,
 })
 
@@ -88,68 +137,13 @@ table.insert(cases, {
     run = function()
         local p = pg.new("limit")
         p:add_objective("recipe/a", 1, true, "recipe")
-        p:add_objective("recipe/b", 1, true, "recipe")
-        p:add_equivalence_constraint("|limit|m", 5) -- limit != 0
-        p:add_subject_term("recipe/a", "|limit|m", 1)
-        p:add_subject_term("recipe/b", "|limit|m", -1)
+        p:add_objective("|final_sink|m", 0, false, "final_sink")
+        p:add_equivalence_constraint("m", 5) -- limit != 0
+        p:add_subject_term("recipe/a", "m", 1)
+        p:add_subject_term("|final_sink|m", "m", -1)
 
         local _, recon = sub.reduce(p)
         harness.assert_eq(count(recon.eliminated), 0, "non-zero limit row not folded")
-    end,
-})
-
-table.insert(cases, {
-    name = "no fold: row containing an escape variable",
-    run = function()
-        local p = pg.new("escape")
-        p:add_objective("recipe/a", 1, true, "recipe")
-        p:add_objective("|initial_source|m", 1, false, "initial_source")
-        p:add_equivalence_constraint("|limit|m", 0)
-        p:add_subject_term("recipe/a", "|limit|m", -1)
-        p:add_subject_term("|initial_source|m", "|limit|m", 1)
-
-        local _, recon = sub.reduce(p)
-        harness.assert_eq(count(recon.eliminated), 0, "escape-bearing row not folded")
-    end,
-})
-
-table.insert(cases, {
-    name = "no fold: three-term row",
-    run = function()
-        local p = pg.new("triple")
-        p:add_objective("recipe/a", 1, true, "recipe")
-        p:add_objective("recipe/b", 1, true, "recipe")
-        p:add_objective("recipe/c", 1, true, "recipe")
-        p:add_equivalence_constraint("|limit|m", 0)
-        p:add_subject_term("recipe/a", "|limit|m", 1)
-        p:add_subject_term("recipe/b", "|limit|m", -1)
-        p:add_subject_term("recipe/c", "|limit|m", -1)
-
-        local _, recon = sub.reduce(p)
-        harness.assert_eq(count(recon.eliminated), 0, "three-term row not folded")
-    end,
-})
-
-table.insert(cases, {
-    name = "fixpoint: folding one row exposes the next (chain collapse)",
-    run = function()
-        -- a -> b (row m1), b -> c (row m2). Folding m1 rewrites m2 in terms of
-        -- the survivor, which then folds too. Both b and c get eliminated.
-        local p = pg.new("chain")
-        p:add_objective("recipe/a", 1, true, "recipe")
-        p:add_objective("recipe/b", 1, true, "recipe")
-        p:add_objective("recipe/c", 1, true, "recipe")
-        p:add_equivalence_constraint("|limit|m1", 0)
-        p:add_equivalence_constraint("|limit|m2", 0)
-        p:add_subject_term("recipe/a", "|limit|m1", 1)
-        p:add_subject_term("recipe/b", "|limit|m1", -1)
-        p:add_subject_term("recipe/b", "|limit|m2", 1)
-        p:add_subject_term("recipe/c", "|limit|m2", -1)
-
-        local reduced, recon = sub.reduce(p)
-        harness.assert_eq(count(recon.eliminated), 2, "two variables eliminated")
-        harness.assert_eq(reduced.dual_length, 0, "both rows removed")
-        harness.assert_eq(reduced.primal_length, 1, "only the root survives")
     end,
 })
 
@@ -157,7 +151,6 @@ table.insert(cases, {
 -- Layer 2: end-to-end identity on real create_problem outputs.
 -- ---------------------------------------------------------------------------
 
----Solve `problem` cold to completion, asserting it finishes.
 local function solve_full(problem, tag, limit)
     local state, vars = harness.solve_to_completion(lp, problem,
         { tolerance = 1e-6, iterate_limit = limit or 400 })
@@ -166,7 +159,6 @@ local function solve_full(problem, tag, limit)
     return state, vars
 end
 
----Reduce `problem`, solve the reduced LP cold, then unfold into full space.
 local function solve_reduced(problem, tag, limit)
     local reduced, recon = sub.reduce(problem)
     local state, vars = harness.solve_to_completion(lp, reduced,
@@ -176,10 +168,10 @@ local function solve_reduced(problem, tag, limit)
     return state, sub.unfold(vars, recon), reduced
 end
 
----Assert the two solutions agree on every full primal key. A small activity
----floor skips the recipe_epsilon "dust" on recipes driven toward zero, whose
----residual (~tolerance/epsilon) is solver-path dependent and not part of the
----optimum (see the activity_floor note in lp_scale_invariance.lua).
+---Assert the two solutions agree on every full primal key. An activity floor
+---skips the interior-point "dust" (recipes parked at ~tolerance/epsilon rather
+---than exactly 0), whose residual is solver-path dependent and not part of the
+---optimum.
 local function assert_same_solution(full_problem, x_full, x_reduced, tag)
     local floor = 1e-2
     local mismatches = {}
@@ -202,17 +194,8 @@ local function assert_same_solution(full_problem, x_full, x_reduced, tag)
     end
 end
 
--- NOTE on real create_problem chains: every internal material balance row
--- carries a |surplus_sink| (and terminals a |final_sink|, raws an
--- |initial_source|), so a plain producer->consumer chain is NOT a pure
--- doubleton and is left unfolded. These identity cases therefore mainly assert
--- the *safety* property -- reduce + unfold is a faithful no-op (or exact fold)
--- whatever the topology -- rather than a row-count win. The synthetic gate
--- tests above prove the folding mechanics; bridge-target rows (which get no
--- surplus_sink) are where folding actually fires on real problems.
-
 table.insert(cases, {
-    name = "identity: linear chain m1->m2->m3 pinned at m3==5 stays exact",
+    name = "identity: linear chain folds raw + terminal escapes, stays exact",
     run = function()
         local lines = {
             line("r1", { item("m2", 1) }, { item("m1", 1) }),
@@ -228,56 +211,26 @@ table.insert(cases, {
         local _, vars_reduced, reduced = solve_reduced(
             cp.create_problem("chain-red", constraints, lines), "chain")
 
-        -- m2 is a clean pass-through intermediate, so create_problem now emits
-        -- it as an equality (no surplus_sink) and substitution folds the row out:
-        -- the reduced problem is strictly smaller.
+        -- m1 (raw -> initial_source) and m3 (terminal -> final_sink) are
+        -- escape-singleton rows, so both fold out.
         harness.assert_true(reduced.dual_length < full.dual_length,
             string.format("reduced rows %d < full rows %d",
                 reduced.dual_length, full.dual_length))
+        -- Unique optimum -> exact match.
         assert_same_solution(full, vars_full.x, vars_reduced.x, "chain")
-        -- Sanity: both recipes run at 5/s in the unfolded solution.
         harness.assert_near(vars_reduced.x["recipe/r1/normal"], 5, 0.1, "r1 rate")
         harness.assert_near(vars_reduced.x["recipe/r2/normal"], 5, 0.1, "r2 rate")
+        -- The folded escapes are reconstructed in full space.
+        harness.assert_near(vars_reduced.x["|initial_source|item/m1/normal"], 5, 0.1,
+            "raw supply reconstructed")
+        harness.assert_near(vars_reduced.x["|final_sink|item/m3/normal"], 5, 0.1,
+            "final output reconstructed")
     end,
 })
 
 table.insert(cases, {
-    name = "identity: 5-link chain stays exact under reduce+unfold",
+    name = "identity: recycling loop stays exact under reduce+unfold",
     run = function()
-        local lines = {
-            line("r1", { item("m2", 1) }, { item("m1", 1) }),
-            line("r2", { item("m3", 2) }, { item("m2", 1) }),
-            line("r3", { item("m4", 1) }, { item("m3", 1) }),
-            line("r4", { item("m5", 3) }, { item("m4", 1) }),
-            line("r5", { item("m6", 1) }, { item("m5", 1) }),
-        }
-        local constraints = {
-            { type = "item", name = "m6", quality = "normal",
-              limit_type = "equal", limit_amount_per_second = 12 },
-        }
-
-        local full = cp.create_problem("chain5-full", constraints, lines)
-        local _, vars_full = solve_full(full, "chain5", 600)
-        local _, vars_reduced, reduced = solve_reduced(
-            cp.create_problem("chain5-red", constraints, lines), "chain5", 600)
-
-        -- Interior materials m2..m5 are clean pass-through intermediates -> they
-        -- fold, removing several rows.
-        harness.assert_true(reduced.dual_length <= full.dual_length - 3,
-            string.format("expected >=3 rows folded, full=%d reduced=%d",
-                full.dual_length, reduced.dual_length))
-        assert_same_solution(full, vars_full.x, vars_reduced.x, "chain5")
-    end,
-})
-
-table.insert(cases, {
-    name = "identity: recycling loop (escape/loop rows preserved) stays exact",
-    run = function()
-        -- Mirrors the 2-tier shape from lp_scale_invariance: a self-loop with a
-        -- bootstrap miner. Most rows here are NOT pure doubletons (recyclers
-        -- emit cascades, the loop material has multiple producers/consumers), so
-        -- this exercises that folding the few foldable rows still reproduces the
-        -- full solution exactly.
         local lines = {
             line("iron-mining", { item("iron-ore", 1) }, {}),
             line("iron-plate", { item("iron-plate", 1) }, { item("iron-ore", 1) }),
@@ -319,8 +272,6 @@ table.insert(cases, {
             harness.assert_eq(recon1.order[i], recon2.order[i],
                 "elimination order [" .. i .. "]")
         end
-        -- The matrix dump is index-ordered, so identical structure => identical
-        -- string. This pins the stable-sort determinism the LP relies on.
         harness.assert_eq(r1:dump_subject_matrix(), r2:dump_subject_matrix(),
             "reduced subject matrix is bit-identical across runs")
     end,
