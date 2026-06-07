@@ -108,11 +108,21 @@ if ($ReuseProblems -and $Serial) {
 # Resolve the standalone Lua interpreter for the worker pool (any non-serial mode).
 if (-not $Serial) {
     if (-not $LuaExe) {
-        $defaultLua = Join-Path $env:LOCALAPPDATA "Programs/Lua/bin/lua.exe"
-        if (Test-Path $defaultLua) {
-            $LuaExe = $defaultLua
-        } else {
-            $onPath = Get-Command lua -ErrorAction SilentlyContinue
+        # Prefer LuaJIT: the solve worker is pure-Lua numeric code (CSR Cholesky /
+        # substitutions) and LuaJIT runs the corpus ~2.7x faster than stock Lua
+        # 5.4 with identical results. Fall back to stock Lua if LuaJIT is absent.
+        # (This only affects the standalone research solve pool; the mod itself
+        # always runs under Factorio's own Lua.)
+        $candidates = @(
+            (Join-Path $env:LOCALAPPDATA "Programs/LuaJIT/bin/luajit.exe"),
+            (Join-Path $env:LOCALAPPDATA "Programs/Lua/bin/lua.exe")
+        )
+        foreach ($c in $candidates) {
+            if (Test-Path $c) { $LuaExe = $c; break }
+        }
+        if (-not $LuaExe) {
+            $onPath = Get-Command luajit -ErrorAction SilentlyContinue
+            if (-not $onPath) { $onPath = Get-Command lua -ErrorAction SilentlyContinue }
             if ($onPath) { $LuaExe = $onPath.Source }
         }
     }
