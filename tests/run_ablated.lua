@@ -36,13 +36,18 @@ io.write(string.format("ablation: deficit_seeding=%s catalyst_closure=%s reachab
 --   CP_TILT_DEPTH_BASE=b shortage cost = elastic_cost * b^depth (deep=costlier)
 -- depth is computed per problem from its own lines, so the wrapper can build
 -- the cost fn even though the cases pass no options.
+--   CP_SURPLUS_MULT=m    surplus_sink cost = elastic_cost * m (lower it < 1 to
+--                        test "byproduct disposal is bookkeeping" -- a chain
+--                        whose cost is byproduct-dominated then beats the import
+--                        while a raw-dominated chain is unaffected).
 local ELASTIC = 2 ^ 10
 local tilt_flat = tonumber(os.getenv("CP_TILT_FLAT"))
 local tilt_depth_base = tonumber(os.getenv("CP_TILT_DEPTH_BASE"))
-if tilt_flat or tilt_depth_base then
+local surplus_mult = tonumber(os.getenv("CP_SURPLUS_MULT"))
+if tilt_flat or tilt_depth_base or surplus_mult then
     cp_options.reachability_gating = false -- a tilt only makes sense un-gated
-    io.write(string.format("tilt: flat=%s depth_base=%s (reachability_gating forced off)\n",
-        tostring(tilt_flat), tostring(tilt_depth_base)))
+    io.write(string.format("tilt: flat=%s depth_base=%s surplus_mult=%s (reachability_gating forced off)\n",
+        tostring(tilt_flat), tostring(tilt_depth_base), tostring(surplus_mult)))
 end
 
 -- Inject the options into every cp.create_problem call the cases make.
@@ -50,16 +55,22 @@ local cp = require "solver/create_problem"
 local orig_create = cp.create_problem
 cp.create_problem = function(name, constraints, lines, forced_imports, options)
     local opts = options or cp_options
-    if (tilt_flat or tilt_depth_base) and not (options and options.shortage_cost_fn) then
+    if (tilt_flat or tilt_depth_base or surplus_mult)
+        and not (options and (options.shortage_cost_fn or options.surplus_cost_fn)) then
         -- shallow-copy so we don't mutate the shared cp_options across cases
         local merged = {}
         for k, v in pairs(opts) do merged[k] = v end
-        local depth = tilt_depth_base and cp.compute_reachability_depth(lines) or nil
-        merged.shortage_cost_fn = function(cn)
-            if tilt_depth_base then
-                return ELASTIC * (tilt_depth_base ^ (depth[cn] or 0))
+        if tilt_flat or tilt_depth_base then
+            local depth = tilt_depth_base and cp.compute_reachability_depth(lines) or nil
+            merged.shortage_cost_fn = function(cn)
+                if tilt_depth_base then
+                    return ELASTIC * (tilt_depth_base ^ (depth[cn] or 0))
+                end
+                return ELASTIC * tilt_flat
             end
-            return ELASTIC * tilt_flat
+        end
+        if surplus_mult then
+            merged.surplus_cost_fn = function() return ELASTIC * surplus_mult end
         end
         opts = merged
     end

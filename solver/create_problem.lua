@@ -720,6 +720,7 @@ end
 ---@field catalyst_closure boolean?     Default true. Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. Off: skip the loop.
 ---@field reachability_gating boolean?  Default true. Gate |shortage_source| on un-reachability (reachable materials must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|.
 ---@field shortage_cost_fn (fun(constraint_name: string): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. The caller precomputes whatever signal the tilt rides on (e.g. M.compute_reachability_depth) and closes over it. nil leaves the flat elastic_cost in place.
+---@field surplus_cost_fn (fun(constraint_name: string): number)?  Research only. Re-prices the |surplus_sink| (over-production / byproduct disposal) objective instead of the flat elastic_cost. Lowering surplus relative to shortage tests the "byproduct disposal is bookkeeping, not real economic cost" hypothesis: a chain whose cost is byproduct-dominated should beat the import, while a raw-dominated chain (genuine resource spend) is unaffected. nil leaves the flat elastic_cost in place.
 ---@field surplus_sink_gating boolean?   Default FALSE -- this is NOT shipped behaviour, a research probe (project_sink_side_reachability_gating). When on, gate |surplus_sink| on drainability (the backward dual of reachability): a material that can shed surplus to a free terminal sink loses its penalised over-production escape. Measured to change ~21% of the corpus and break convergence on a few, so it ships OFF; the switch only exists to reproduce that A/B. Off (default): every produced+consumed non-bridge material gets a |surplus_sink|.
 
 ---Create linear programming problems.
@@ -745,6 +746,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- Research probe (tilted-cost experiment): callback that re-prices the
     -- un-gated |shortage_source| objective. nil leaves the flat elastic_cost.
     local opt_shortage_cost_fn = options.shortage_cost_fn
+    local opt_surplus_cost_fn = options.surplus_cost_fn
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -956,7 +958,11 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         if not bridge_target_variables[constraint_name]
             and not (opt_surplus_sink_gating and drainable[constraint_name]) then
             local elastic_name = vk.surplus_sink(constraint_name)
-            problem:add_objective(elastic_name, elastic_cost, false, "surplus_sink", constraint_name)
+            local surplus_cost = elastic_cost
+            if opt_surplus_cost_fn then
+                surplus_cost = opt_surplus_cost_fn(constraint_name)
+            end
+            problem:add_objective(elastic_name, surplus_cost, false, "surplus_sink", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, -1)
         end
         -- A user-pinned material ships through a free |final_sink| even though
