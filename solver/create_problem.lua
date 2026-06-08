@@ -719,7 +719,7 @@ end
 ---@field deficit_seeding boolean?      Default true. Seed find_deficit_materials' raw deficits as |initial_source| cycle entry points. Off: skip that seeding.
 ---@field catalyst_closure boolean?     Default true. Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. Off: skip the loop.
 ---@field reachability_gating boolean?  Default true. Gate |shortage_source| on un-reachability (reachable materials must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|.
----@field shortage_cost_fn (fun(constraint_name: string): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. The caller precomputes whatever signal the tilt rides on (e.g. M.compute_reachability_depth) and closes over it. nil leaves the flat elastic_cost in place.
+---@field shortage_cost_fn (fun(constraint_name: string, is_reachable: boolean): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. is_reachable is create_problem's OWN reachability verdict (the same set the gate uses: active lines + deficit seeds + catalyst closure), so a "soft gate" can lift only reachable materials and leave unreachable ones their cheap import hatch. The caller may also close over any precomputed signal (e.g. M.compute_reachability_depth). nil leaves the flat elastic_cost in place.
 ---@field surplus_cost_fn (fun(constraint_name: string): number)?  Research only. Re-prices the |surplus_sink| (over-production / byproduct disposal) objective instead of the flat elastic_cost. Lowering surplus relative to shortage tests the "byproduct disposal is bookkeeping, not real economic cost" hypothesis: a chain whose cost is byproduct-dominated should beat the import, while a raw-dominated chain (genuine resource spend) is unaffected. nil leaves the flat elastic_cost in place.
 ---@field surplus_sink_gating boolean?   Default FALSE -- this is NOT shipped behaviour, a research probe (project_sink_side_reachability_gating). When on, gate |surplus_sink| on drainability (the backward dual of reachability): a material that can shed surplus to a free terminal sink loses its penalised over-production escape. Measured to change ~21% of the corpus and break convergence on a few, so it ships OFF; the switch only exists to reproduce that A/B. Off (default): every produced+consumed non-bridge material gets a |surplus_sink|.
 
@@ -1015,7 +1015,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             local elastic_name = vk.shortage_source(constraint_name)
             local shortage_cost = elastic_cost
             if opt_shortage_cost_fn then
-                shortage_cost = opt_shortage_cost_fn(constraint_name)
+                shortage_cost = opt_shortage_cost_fn(constraint_name, reachable[constraint_name] == true)
             end
             problem:add_objective(elastic_name, shortage_cost, false, "shortage_source", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, 1)

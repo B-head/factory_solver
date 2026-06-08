@@ -40,14 +40,21 @@ io.write(string.format("ablation: deficit_seeding=%s catalyst_closure=%s reachab
 --                        test "byproduct disposal is bookkeeping" -- a chain
 --                        whose cost is byproduct-dominated then beats the import
 --                        while a raw-dominated chain is unaffected).
+--   CP_TILT_FLAT_REACHABLE=K  soft gate: shortage cost = elastic_cost * K for
+--                        REACHABLE materials only; unreachable stay at
+--                        elastic_cost (keep their cheap import hatch). Tests
+--                        whether reachability is the signal that separates
+--                        "should manufacture" (reachable) from "should import"
+--                        (unreachable) -- a finite-K softening of the gate.
 local ELASTIC = 2 ^ 10
 local tilt_flat = tonumber(os.getenv("CP_TILT_FLAT"))
 local tilt_depth_base = tonumber(os.getenv("CP_TILT_DEPTH_BASE"))
 local surplus_mult = tonumber(os.getenv("CP_SURPLUS_MULT"))
-if tilt_flat or tilt_depth_base or surplus_mult then
+local tilt_flat_reach = tonumber(os.getenv("CP_TILT_FLAT_REACHABLE"))
+if tilt_flat or tilt_depth_base or surplus_mult or tilt_flat_reach then
     cp_options.reachability_gating = false -- a tilt only makes sense un-gated
-    io.write(string.format("tilt: flat=%s depth_base=%s surplus_mult=%s (reachability_gating forced off)\n",
-        tostring(tilt_flat), tostring(tilt_depth_base), tostring(surplus_mult)))
+    io.write(string.format("tilt: flat=%s depth_base=%s surplus_mult=%s flat_reachable=%s (reachability_gating forced off)\n",
+        tostring(tilt_flat), tostring(tilt_depth_base), tostring(surplus_mult), tostring(tilt_flat_reach)))
 end
 
 -- Inject the options into every cp.create_problem call the cases make.
@@ -55,14 +62,20 @@ local cp = require "solver/create_problem"
 local orig_create = cp.create_problem
 cp.create_problem = function(name, constraints, lines, forced_imports, options)
     local opts = options or cp_options
-    if (tilt_flat or tilt_depth_base or surplus_mult)
+    if (tilt_flat or tilt_depth_base or surplus_mult or tilt_flat_reach)
         and not (options and (options.shortage_cost_fn or options.surplus_cost_fn)) then
         -- shallow-copy so we don't mutate the shared cp_options across cases
         local merged = {}
         for k, v in pairs(opts) do merged[k] = v end
-        if tilt_flat or tilt_depth_base then
+        if tilt_flat or tilt_depth_base or tilt_flat_reach then
             local depth = tilt_depth_base and cp.compute_reachability_depth(lines) or nil
-            merged.shortage_cost_fn = function(cn)
+            merged.shortage_cost_fn = function(cn, is_reachable)
+                if tilt_flat_reach then
+                    -- soft gate: use create_problem's OWN reachability verdict
+                    -- (is_reachable), not a plain recompute, so it matches the
+                    -- gate (active lines + deficits + catalyst closure).
+                    return is_reachable and (ELASTIC * tilt_flat_reach) or ELASTIC
+                end
                 if tilt_depth_base then
                     return ELASTIC * (tilt_depth_base ^ (depth[cn] or 0))
                 end
