@@ -370,6 +370,62 @@ function M.compute_reachable_materials(production_lines, extra_seeds)
     return reachable
 end
 
+---Research only (tilted-cost experiment): like compute_reachable_materials but
+---records the BFS layer at which each material first became reachable. Seeds
+---(materials with no producer + extra_seeds) are depth 0; a product becomes
+---reachable one layer past the deepest of its recipe's ingredients. Materials
+---never reached are absent from the result (treat as depth = infinity). This is
+---the "distance from raw" signal a depth-based shortage tilt would ride on.
+---@param production_lines NormalizedProductionLine[]
+---@param extra_seeds table<string, true>?
+---@return table<string, integer> depth
+function M.compute_reachability_depth(production_lines, extra_seeds)
+    local has_producer = {} ---@type table<string, true>
+    for _, line in ipairs(production_lines) do
+        for _, product in each_product(line) do
+            has_producer[tn.typed_name_to_variable_name(product)] = true
+        end
+    end
+
+    local depth = {} ---@type table<string, integer>
+    for _, line in ipairs(production_lines) do
+        for _, ingredient in each_ingredient(line) do
+            local name = tn.typed_name_to_variable_name(ingredient)
+            if not has_producer[name] then depth[name] = 0 end
+        end
+    end
+    if extra_seeds then
+        for name in pairs(extra_seeds) do depth[name] = 0 end
+    end
+
+    local fired = {} ---@type table<integer, true>
+    repeat
+        local changed = false
+        for i, line in ipairs(production_lines) do
+            if not fired[i] then
+                local all_reachable, max_in = true, 0
+                for _, ingredient in each_ingredient(line) do
+                    local d = depth[tn.typed_name_to_variable_name(ingredient)]
+                    if d == nil then all_reachable = false break end
+                    if d > max_in then max_in = d end
+                end
+                if all_reachable then
+                    fired[i] = true
+                    for _, product in each_product(line) do
+                        local name = tn.typed_name_to_variable_name(product)
+                        if depth[name] == nil then
+                            depth[name] = max_in + 1
+                            changed = true
+                        end
+                    end
+                end
+            end
+        end
+    until not changed
+
+    return depth
+end
+
 ---Backward dual of compute_reachable_materials: the set of materials whose
 ---surplus can be drained, for free, to a zero-cost terminal sink. Seeds with the
 ---materials that own a free |final_sink| -- pure products (produced, never
@@ -663,6 +719,7 @@ end
 ---@field deficit_seeding boolean?      Default true. Seed find_deficit_materials' raw deficits as |initial_source| cycle entry points. Off: skip that seeding.
 ---@field catalyst_closure boolean?     Default true. Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. Off: skip the loop.
 ---@field reachability_gating boolean?  Default true. Gate |shortage_source| on un-reachability (reachable materials must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|.
+---@field shortage_cost_fn (fun(constraint_name: string): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. The caller precomputes whatever signal the tilt rides on (e.g. M.compute_reachability_depth) and closes over it. nil leaves the flat elastic_cost in place.
 ---@field surplus_sink_gating boolean?   Default FALSE -- this is NOT shipped behaviour, a research probe (project_sink_side_reachability_gating). When on, gate |surplus_sink| on drainability (the backward dual of reachability): a material that can shed surplus to a free terminal sink loses its penalised over-production escape. Measured to change ~21% of the corpus and break convergence on a few, so it ships OFF; the switch only exists to reproduce that A/B. Off (default): every produced+consumed non-bridge material gets a |surplus_sink|.
 
 ---Create linear programming problems.
@@ -685,6 +742,9 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- never gates surplus_sink), so only an explicit `true` from the headless
     -- worker turns it on.
     local opt_surplus_sink_gating = options.surplus_sink_gating == true
+    -- Research probe (tilted-cost experiment): callback that re-prices the
+    -- un-gated |shortage_source| objective. nil leaves the flat elastic_cost.
+    local opt_shortage_cost_fn = options.shortage_cost_fn
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -947,7 +1007,11 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- every non-deficit produced+consumed material gets the hatch (the
             -- original pre-gating behaviour), to measure what the gate prevents.
             local elastic_name = vk.shortage_source(constraint_name)
-            problem:add_objective(elastic_name, elastic_cost, false, "shortage_source", constraint_name)
+            local shortage_cost = elastic_cost
+            if opt_shortage_cost_fn then
+                shortage_cost = opt_shortage_cost_fn(constraint_name)
+            end
+            problem:add_objective(elastic_name, shortage_cost, false, "shortage_source", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, 1)
             problem:add_subject_term(elastic_name, vk.limit(constraint_name), 1)
 
