@@ -250,6 +250,7 @@ local function scc_features(problem, lines, scc, scc_set, active_keys, adj)
     local n_sh, n_su, n_el = 0, 0, 0
     local n_sh_extprod, n_su_extcons = 0, 0
     local n_sh_strict, n_su_strict = 0, 0
+    local n_sh_exportable = 0
     for _, key in ipairs(active_keys) do
         local p = problem.primals[key]
         local m = p.material
@@ -257,6 +258,12 @@ local function scc_features(problem, lines, scc, scc_set, active_keys, adj)
             n_sh = n_sh + 1
             if m and mc.has_external_producer(m, scc_set, adj) then n_sh_extprod = n_sh_extprod + 1 end
             if m and strict_external_producer(m, scc_set, lines) then n_sh_strict = n_sh_strict + 1 end
+            -- export_feasible: can the cycle yield a net exportable unit of this
+            -- material at SOME positive recipe rate? true => the deficit is
+            -- FABRICABLE (importing it via shortage is an avoidable cheat);
+            -- false => no rate vector produces a net surplus, so importing is the
+            -- only option (correct). The import-vs-fabricate discriminator.
+            if m and mc.export_feasible(lines, m) then n_sh_exportable = n_sh_exportable + 1 end
         elseif p.kind == "surplus_sink" then
             n_su = n_su + 1
             if m and has_external_consumer(m, scc_set, adj) then n_su_extcons = n_su_extcons + 1 end
@@ -274,6 +281,7 @@ local function scc_features(problem, lines, scc, scc_set, active_keys, adj)
         n_act_sh = n_sh, n_act_su = n_su,
         n_sh_extprod = n_sh_extprod, n_su_extcons = n_su_extcons,
         n_sh_strict = n_sh_strict, n_su_strict = n_su_strict,
+        n_sh_exportable = n_sh_exportable,
         self_sustaining = mc.is_self_sustaining(lines, scc),
         source_scc = mc.is_source_scc(scc_set, adj),
     }
@@ -316,6 +324,13 @@ local function process(constraints, lines, label)
                 local inside, outside = partition(prob, scc_set, internal_recipe_set)
                 table.sort(active_base_mats)
                 local feat = scc_features(prob, lines, scc, scc_set, active_base, adj)
+
+                -- baseline flow over the cycle's INTERNAL recipes. ~0 => the LP
+                -- runs none of the cycle and lives entirely off the active escape
+                -- (pure import/dump = the escape is doing the cycle's job);
+                -- > 0 => the cycle runs and the escape only tops up a leak.
+                local internal_flow_b = 0
+                for key in pairs(internal_recipe_set) do internal_flow_b = internal_flow_b + math.abs(x0[key] or 0) end
 
                 -- baseline raw sums
                 local cheat_b = sum_kinds(prob, x0, CHEAT_KINDS)
@@ -388,6 +403,8 @@ local function process(constraints, lines, label)
                     n_act_sh = feat.n_act_sh, n_act_su = feat.n_act_su,
                     n_sh_extprod = feat.n_sh_extprod, n_su_extcons = feat.n_su_extcons,
                     n_sh_strict = feat.n_sh_strict, n_su_strict = feat.n_su_strict,
+                    n_sh_exportable = feat.n_sh_exportable,
+                    internal_flow_before = internal_flow_b,
                     self_sustaining = feat.self_sustaining,
                     source_scc = feat.source_scc,
                     h1_mult = h1_mult,
@@ -414,7 +431,8 @@ end
 local COLS = {
     "label", "scc_size", "n_Sel_present", "n_active_base", "active_base_materials",
     "active_kinds", "n_act_sh", "n_act_su", "n_sh_extprod", "n_su_extcons",
-    "n_sh_strict", "n_su_strict", "self_sustaining", "source_scc",
+    "n_sh_strict", "n_su_strict", "n_sh_exportable", "internal_flow_before",
+    "self_sustaining", "source_scc",
     "h1_mult", "h1_sibling_activated", "h1_dOut_max", "h1_nOut", "h1_dIn_max",
     "h2_dOut_max", "h2_nOut", "h2_dIn_max", "h2_nActiveSel_after",
     "cheat_before", "cheat_after", "relax_before", "relax_after",
