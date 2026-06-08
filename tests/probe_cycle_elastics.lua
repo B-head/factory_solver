@@ -164,6 +164,55 @@ local function all_Sel_keys(problem, scc_set)
     return out
 end
 
+-- Mirror of mc.has_external_producer: some recipe OUTSIDE the SCC consumes
+-- `material` and produces a material outside the SCC (an outbound edge
+-- material -> v with v not in S). "Can the SCC drain this material into the
+-- rest of the factory?" The dual signal to has_external_producer.
+local function has_external_consumer(material, scc_set, adj)
+    local out = adj[material]
+    if not out then return false end
+    for v in pairs(out) do
+        if not scc_set[v] then return true end
+    end
+    return false
+end
+
+-- Structural features of one SCC, computable BEFORE raising any cost: the kind
+-- mix of the baseline-active escapes and whether each has an external supply
+-- (shortage: an outside producer) / drain (surplus: an outside consumer) route,
+-- plus the deficit-heuristic gates (self-sustaining, source-SCC). The
+-- import-vs-collapse hypothesis is that shortage-active escapes with an external
+-- producer relieve into import, while surplus-active escapes without an external
+-- consumer force the cycle to shrink.
+local function scc_features(problem, lines, scc, scc_set, active_keys, adj)
+    local n_sh, n_su, n_el = 0, 0, 0
+    local n_sh_extprod, n_su_extcons = 0, 0
+    for _, key in ipairs(active_keys) do
+        local p = problem.primals[key]
+        local m = p.material
+        if p.kind == "shortage_source" then
+            n_sh = n_sh + 1
+            if m and mc.has_external_producer(m, scc_set, adj) then n_sh_extprod = n_sh_extprod + 1 end
+        elseif p.kind == "surplus_sink" then
+            n_su = n_su + 1
+            if m and has_external_consumer(m, scc_set, adj) then n_su_extcons = n_su_extcons + 1 end
+        elseif p.kind == "elastic" then
+            n_el = n_el + 1
+        end
+    end
+    local kinds = {}
+    if n_sh > 0 then kinds[#kinds + 1] = "sh" end
+    if n_su > 0 then kinds[#kinds + 1] = "su" end
+    if n_el > 0 then kinds[#kinds + 1] = "el" end
+    return {
+        active_kinds = (#kinds > 0) and table.concat(kinds, "+") or "none",
+        n_act_sh = n_sh, n_act_su = n_su,
+        n_sh_extprod = n_sh_extprod, n_su_extcons = n_su_extcons,
+        self_sustaining = mc.is_self_sustaining(lines, scc),
+        source_scc = mc.is_source_scc(scc_set, adj),
+    }
+end
+
 ---Process one problem; returns rows + note. Each row is one cyclic SCC with
 ---a baseline-active elastic.
 local function process(constraints, lines, label)
@@ -200,6 +249,7 @@ local function process(constraints, lines, label)
                 local internal_recipe_set = internal_recipes(lines, scc_set)
                 local inside, outside = partition(prob, scc_set, internal_recipe_set)
                 table.sort(active_base_mats)
+                local feat = scc_features(prob, lines, scc, scc_set, active_base, adj)
 
                 -- baseline raw sums
                 local cheat_b = sum_kinds(prob, x0, CHEAT_KINDS)
@@ -268,6 +318,11 @@ local function process(constraints, lines, label)
                     n_Sel_present = #sel_present,
                     n_active_base = #active_base,
                     active_base_materials = table.concat(active_base_mats, ","),
+                    active_kinds = feat.active_kinds,
+                    n_act_sh = feat.n_act_sh, n_act_su = feat.n_act_su,
+                    n_sh_extprod = feat.n_sh_extprod, n_su_extcons = feat.n_su_extcons,
+                    self_sustaining = feat.self_sustaining,
+                    source_scc = feat.source_scc,
                     h1_mult = h1_mult,
                     h1_sibling_activated = h1_sibling,
                     h1_dOut_max = h1_dOut,
@@ -291,6 +346,8 @@ end
 -- ---- output -----------------------------------------------------------------
 local COLS = {
     "label", "scc_size", "n_Sel_present", "n_active_base", "active_base_materials",
+    "active_kinds", "n_act_sh", "n_act_su", "n_sh_extprod", "n_su_extcons",
+    "self_sustaining", "source_scc",
     "h1_mult", "h1_sibling_activated", "h1_dOut_max", "h1_nOut", "h1_dIn_max",
     "h2_dOut_max", "h2_nOut", "h2_dIn_max", "h2_nActiveSel_after",
     "cheat_before", "cheat_after", "relax_before", "relax_after",
