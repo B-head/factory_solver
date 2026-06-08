@@ -75,10 +75,34 @@ local function rsum(problem, x)
     return s
 end
 
+-- Sum |x| over initial_source (raws, cost ~1).
+local function import_sum(problem, x)
+    local s = 0
+    for key, p in pairs(problem.primals) do
+        if p.kind == "initial_source" then s = s + math.abs(x[key] or 0) end
+    end
+    return s
+end
+
+-- Sum |x| over escape-priced boundary (surplus_sink + shortage_source), each at
+-- the flat 1024 tier, EXCLUDING the shortage keys we are raising (so this is the
+-- "other escapes" the fabrication path drags in: byproduct dumps + secondary
+-- deficits).
+local function other_escape_sum(problem, x, exclude)
+    local s = 0
+    for key, p in pairs(problem.primals) do
+        if (p.kind == "surplus_sink" or p.kind == "shortage_source") and not exclude[key] then
+            s = s + math.abs(x[key] or 0)
+        end
+    end
+    return s
+end
+
 local COLS = {
     "label", "scc_size", "material", "n_active_sh", "base_shortage",
     "flip_mult", "internal_flow_at_flip", "shortage_at_flip", "fully_fabricated",
     "relax_before", "relax_at_flip", "Rsum_before", "Rsum_at_flip",
+    "import_before", "import_at_flip", "otheresc_before", "otheresc_at_flip",
 }
 
 local function process(constraints, lines, label, emit)
@@ -118,9 +142,13 @@ local function process(constraints, lines, label, emit)
                 -- qualify: self-sustaining, fabricable, idle (pure import)
                 if self_sust and fab and iflow0 < 1e-6 then
                     local base_short = 0
-                    for _, key in ipairs(active_sh) do base_short = base_short + (x0[key] or 0) end
+                    local exclude = {}
+                    for _, key in ipairs(active_sh) do base_short = base_short + (x0[key] or 0); exclude[key] = true end
                     local relax0 = target_relax(prob, x0)
                     local rsum0 = rsum(prob, x0)
+                    local import0 = import_sum(prob, x0)
+                    local esc0 = other_escape_sum(prob, x0, exclude)
+                    local import_f, esc_f = -1, -1
 
                     -- Flip = the import (shortage) is eliminated. Trigger on the
                     -- shortage dropping to ~0 (NOT on internal-recipe flow, which
@@ -145,6 +173,8 @@ local function process(constraints, lines, label, emit)
                                     iflow_f = internal_flow(p2, x2, internal_set)
                                     relax_f = target_relax(p2, x2)
                                     rsum_f = rsum(p2, x2)
+                                    import_f = import_sum(p2, x2)
+                                    esc_f = other_escape_sum(p2, x2, exclude)
                                     break
                                 end
                             end
@@ -162,6 +192,8 @@ local function process(constraints, lines, label, emit)
                         shortage_at_flip = short_f, fully_fabricated = fully,
                         relax_before = relax0, relax_at_flip = relax_f,
                         Rsum_before = rsum0, Rsum_at_flip = rsum_f,
+                        import_before = import0, import_at_flip = import_f,
+                        otheresc_before = esc0, otheresc_at_flip = esc_f,
                     })
                 end
             end
