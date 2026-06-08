@@ -103,6 +103,7 @@ local case_files = {
     "chain_reachability",
     "explore_detect",
     "lp_substitution",
+    "material_weights",
 }
 
 local total, passed, failed = 0, 0, 0
