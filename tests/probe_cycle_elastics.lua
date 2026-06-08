@@ -164,6 +164,68 @@ local function all_Sel_keys(problem, scc_set)
     return out
 end
 
+-- STRICT external producer: a line that produces `material` while taking NO
+-- SCC material as an ingredient (incl. fuel). Unlike mc.has_external_producer
+-- (a material->material edge u->material with u outside S), this excludes the
+-- common false positive of a CYCLE-INTERNAL recipe that happens to also take an
+-- external ingredient (seed_18: hydrogen-chloride-quartz consumes small-lamp +
+-- quartz-tube [both in S] AND external chlorine/hydrogen, so the edge
+-- chlorine->small-lamp exists, yet there is no recipe that makes small-lamp
+-- from outside the cycle). This is the honest "can the material be supplied
+-- without running the cycle" test.
+local function strict_external_producer(material, scc_set, lines)
+    for _, line in ipairs(lines) do
+        local makes = false
+        for _, prod in ipairs(line.products) do
+            if tn.typed_name_to_variable_name(prod) == material then makes = true; break end
+        end
+        if not makes and line.fuel_burnt_result
+            and tn.typed_name_to_variable_name(line.fuel_burnt_result) == material then
+            makes = true
+        end
+        if makes then
+            local takes_scc = false
+            for _, ing in ipairs(line.ingredients) do
+                if scc_set[tn.typed_name_to_variable_name(ing)] then takes_scc = true; break end
+            end
+            if not takes_scc and line.fuel_ingredient
+                and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then
+                takes_scc = true
+            end
+            if not takes_scc then return true end
+        end
+    end
+    return false
+end
+
+-- STRICT external consumer (dual): a line that consumes `material` while
+-- producing NO SCC material (incl. burnt result). The honest "can the material
+-- be drained without running the cycle" test.
+local function strict_external_consumer(material, scc_set, lines)
+    for _, line in ipairs(lines) do
+        local takes = false
+        for _, ing in ipairs(line.ingredients) do
+            if tn.typed_name_to_variable_name(ing) == material then takes = true; break end
+        end
+        if not takes and line.fuel_ingredient
+            and tn.typed_name_to_variable_name(line.fuel_ingredient) == material then
+            takes = true
+        end
+        if takes then
+            local makes_scc = false
+            for _, prod in ipairs(line.products) do
+                if scc_set[tn.typed_name_to_variable_name(prod)] then makes_scc = true; break end
+            end
+            if not makes_scc and line.fuel_burnt_result
+                and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then
+                makes_scc = true
+            end
+            if not makes_scc then return true end
+        end
+    end
+    return false
+end
+
 -- Mirror of mc.has_external_producer: some recipe OUTSIDE the SCC consumes
 -- `material` and produces a material outside the SCC (an outbound edge
 -- material -> v with v not in S). "Can the SCC drain this material into the
@@ -187,15 +249,18 @@ end
 local function scc_features(problem, lines, scc, scc_set, active_keys, adj)
     local n_sh, n_su, n_el = 0, 0, 0
     local n_sh_extprod, n_su_extcons = 0, 0
+    local n_sh_strict, n_su_strict = 0, 0
     for _, key in ipairs(active_keys) do
         local p = problem.primals[key]
         local m = p.material
         if p.kind == "shortage_source" then
             n_sh = n_sh + 1
             if m and mc.has_external_producer(m, scc_set, adj) then n_sh_extprod = n_sh_extprod + 1 end
+            if m and strict_external_producer(m, scc_set, lines) then n_sh_strict = n_sh_strict + 1 end
         elseif p.kind == "surplus_sink" then
             n_su = n_su + 1
             if m and has_external_consumer(m, scc_set, adj) then n_su_extcons = n_su_extcons + 1 end
+            if m and strict_external_consumer(m, scc_set, lines) then n_su_strict = n_su_strict + 1 end
         elseif p.kind == "elastic" then
             n_el = n_el + 1
         end
@@ -208,6 +273,7 @@ local function scc_features(problem, lines, scc, scc_set, active_keys, adj)
         active_kinds = (#kinds > 0) and table.concat(kinds, "+") or "none",
         n_act_sh = n_sh, n_act_su = n_su,
         n_sh_extprod = n_sh_extprod, n_su_extcons = n_su_extcons,
+        n_sh_strict = n_sh_strict, n_su_strict = n_su_strict,
         self_sustaining = mc.is_self_sustaining(lines, scc),
         source_scc = mc.is_source_scc(scc_set, adj),
     }
@@ -321,6 +387,7 @@ local function process(constraints, lines, label)
                     active_kinds = feat.active_kinds,
                     n_act_sh = feat.n_act_sh, n_act_su = feat.n_act_su,
                     n_sh_extprod = feat.n_sh_extprod, n_su_extcons = feat.n_su_extcons,
+                    n_sh_strict = feat.n_sh_strict, n_su_strict = feat.n_su_strict,
                     self_sustaining = feat.self_sustaining,
                     source_scc = feat.source_scc,
                     h1_mult = h1_mult,
@@ -347,7 +414,7 @@ end
 local COLS = {
     "label", "scc_size", "n_Sel_present", "n_active_base", "active_base_materials",
     "active_kinds", "n_act_sh", "n_act_su", "n_sh_extprod", "n_su_extcons",
-    "self_sustaining", "source_scc",
+    "n_sh_strict", "n_su_strict", "self_sustaining", "source_scc",
     "h1_mult", "h1_sibling_activated", "h1_dOut_max", "h1_nOut", "h1_dIn_max",
     "h2_dOut_max", "h2_nOut", "h2_dIn_max", "h2_nActiveSel_after",
     "cheat_before", "cheat_after", "relax_before", "relax_after",
