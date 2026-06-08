@@ -16,7 +16,16 @@ local mc = require "solver/material_cycles"
 local tn = require "manage/typed_name"
 
 local TOL, ITER = 1e-7, 800
-local OPTS = { deficit_seeding = false, catalyst_closure = false, reachability_gating = false }
+-- options default OFF (pure tilt experiment); flip one ON via env to A/B a
+-- shipped bootstrap/gate feature: CP_DEFICIT_SEEDING / CP_CATALYST_CLOSURE /
+-- CP_REACHABILITY_GATING = 1.
+local OPTS = {
+    deficit_seeding = os.getenv("CP_DEFICIT_SEEDING") == "1",
+    catalyst_closure = os.getenv("CP_CATALYST_CLOSURE") == "1",
+    reachability_gating = os.getenv("CP_REACHABILITY_GATING") == "1",
+}
+print(string.format("OPTS: deficit_seeding=%s catalyst_closure=%s reachability_gating=%s",
+    tostring(OPTS.deficit_seeding), tostring(OPTS.catalyst_closure), tostring(OPTS.reachability_gating)))
 local ELASTIC_COST = 2 ^ 10
 local RAISE_ALL = 1024 * 262144
 
