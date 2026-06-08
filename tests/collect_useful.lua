@@ -21,9 +21,14 @@
 -- on; only this research worker flips them). Set CP_<NAME>=1 to turn one back on.
 --
 -- Usage (from repo root):
---   lua tests/collect_useful.lua <problem-dump-file>   -- explorer corpus
---   lua tests/collect_useful.lua --selftest            -- inline lp_lower_limit
--- Output: a TSV table (one header line starting '#', then one row per candidate).
+--   lua tests/collect_useful.lua <dump-file> [<dump-file> ...]   -- one or many
+--   lua tests/collect_useful.lua --manifest <list.txt>           -- paths, 1/line
+--   lua tests/collect_useful.lua --selftest                      -- inline fixture
+--   ... --out <file>   -- write the TSV here instead of stdout (Lua writes the
+--                         file directly, so no shell stdout/stderr capture quirks
+--                         and no command-line-length limit on big corpora).
+-- Output: one '#'-prefixed header line, then one row per useful candidate, with
+-- a '#file:'/'#note:' comment line per processed dump.
 
 require "tests/headless_env"
 
@@ -189,12 +194,13 @@ local function fmt(v)
     if type(v) == "number" then return string.format("%.6g", v) end
     return tostring(v)
 end
-local function emit(rows)
-    io.write("#" .. table.concat(COLS, "\t") .. "\n")
+-- `sink` is io.write or a file:write closure; set in main from --out.
+local function emit_header(sink) sink("#" .. table.concat(COLS, "\t") .. "\n") end
+local function emit_rows(sink, rows)
     for _, r in ipairs(rows) do
         local out = {}
         for _, k in ipairs(COLS) do out[#out + 1] = fmt(r[k]) end
-        io.write(table.concat(out, "\t") .. "\n")
+        sink(table.concat(out, "\t") .. "\n")
     end
 end
 
@@ -224,24 +230,63 @@ local function selftest_fixture()
 end
 
 -- ---- main -------------------------------------------------------------------
-local arg1 = arg[1]
-io.stderr:write(string.format("options: deficit_seeding=%s catalyst_closure=%s reachability_gating=%s\n",
+-- Parse args: --selftest, --out <file>, --manifest <file>, and/or positional
+-- dump files. Lua writes the output itself (to --out or stdout), so the corpus
+-- driver never has to capture native stdout/stderr (which WinPS mangles).
+local selftest, out_path, manifest_path = false, nil, nil
+local files = {}
+do
+    local i = 1
+    while arg[i] do
+        local a = arg[i]
+        if a == "--selftest" then selftest = true
+        elseif a == "--out" then i = i + 1; out_path = arg[i]
+        elseif a == "--manifest" then i = i + 1; manifest_path = arg[i]
+        else files[#files + 1] = a end
+        i = i + 1
+    end
+end
+if manifest_path then
+    for line in io.lines(manifest_path) do
+        line = line:gsub("%s+$", "")
+        if line ~= "" then files[#files + 1] = line end
+    end
+end
+
+local sink = io.write
+local out_file = nil
+if out_path then
+    out_file = assert(io.open(out_path, "w"))
+    sink = function(s) out_file:write(s) end
+end
+
+sink(string.format("#options: deficit_seeding=%s catalyst_closure=%s reachability_gating=%s\n",
     tostring(EXPERIMENT_OPTIONS.deficit_seeding), tostring(EXPERIMENT_OPTIONS.catalyst_closure),
     tostring(EXPERIMENT_OPTIONS.reachability_gating)))
+emit_header(sink)
 
-if arg1 == "--selftest" or arg1 == nil then
+if selftest or (#files == 0) then
     local constraints, lines = selftest_fixture()
     local rows, note = collect(constraints, lines, "selftest:lp_lower_limit")
-    if note then io.stderr:write("note: " .. note .. "\n") end
-    emit(rows)
+    sink("#file: selftest:lp_lower_limit" .. (note and (" note: " .. note) or "") .. "\n")
+    emit_rows(sink, rows)
 else
-    local prob, kind, detail = problem_dump.load_problem(arg1)
-    if not prob then
-        io.stderr:write("load failed (" .. tostring(kind) .. "): " .. tostring(detail) .. "\n")
-        os.exit(1)
+    for _, path in ipairs(files) do
+        local prob, kind, detail = problem_dump.load_problem(path)
+        if not prob then
+            sink("#file: " .. path .. " LOAD-FAILED (" .. tostring(kind) .. "): " .. tostring(detail) .. "\n")
+        else
+            local label = "seed=" .. tostring(prob.meta and prob.meta.seed) ..
+                "|" .. (path:match("([^/\\]+)%.lua$") or path)
+            local ok, rows, note = pcall(collect, prob.constraints, prob.normalized_lines, label)
+            if not ok then
+                sink("#file: " .. label .. " RAISED: " .. tostring(rows) .. "\n")
+            else
+                sink("#file: " .. label .. (note and (" note: " .. note) or "") .. "\n")
+                emit_rows(sink, rows)
+            end
+        end
     end
-    local label = "seed=" .. tostring(prob.meta and prob.meta.seed)
-    local rows, note = collect(prob.constraints, prob.normalized_lines, label)
-    if note then io.stderr:write("note: " .. note .. "\n") end
-    emit(rows)
 end
+
+if out_file then out_file:close() end
