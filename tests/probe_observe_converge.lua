@@ -51,12 +51,17 @@ local TOL, ITER = 1e-7, 800
 local OPTS = { deficit_seeding = false, catalyst_closure = false, reachability_gating = false }
 local ELASTIC_COST = 2 ^ 10
 local TARGET_COST = 2 ^ 20
-local OBSERVE_MULT = 16384
 local K_PRED = 1.5
-local MAX_ROUNDS = 6
+local MAX_ROUNDS = 10 -- backstop only; the per-SCC observe should land most in <=2 rounds
+
+local TRACE = os.getenv("FS_TRACE") ~= nil
+local function trace(s) if TRACE then io.stderr:write(s) end end
 
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }) end
 local function build(c, l) return create_problem.create_problem("converge", c, l, nil, OPTS) end
+
+-- Short readable id for a shortage key (last two '/'-segments), trace only.
+local function kid(key) return (key:gsub(".*|", ""):gsub("([^/]+)/([^/]+)/[^/]*$", "%1/%2")) end
 
 local function internal_recipes(lines, scc_set)
     local out = {}
@@ -92,15 +97,17 @@ local function target_relax(problem, x)
     return s
 end
 
--- Escape mass (surplus_sink + shortage_source) of escapes whose material is in
--- scc_set, EXCLUDING the avoidable keys themselves -- the SCC's dEsc footprint
--- (byproduct dumps + in-SCC secondary deficits). At baseline the SCC is idle so
--- this is ~0; after fabrication it is the disposal mass fabrication dragged in.
-local function scc_footprint(problem, x, scc_set, exclude)
+-- Total escape mass (surplus_sink + shortage_source), EXCLUDING the avoidable
+-- keys (`exclude`). Read GLOBALLY, not restricted to one SCC: a fabrication's
+-- byproduct dumps and secondary deficits often land OUTSIDE its SCC, so a
+-- footprint-restricted read misses them (it read 0 for navens/bio-scafold and
+-- starved the prediction). When only ONE SCC is raised, the delta of this global
+-- read vs baseline cancels every unrelated escape and equals that SCC's dEsc --
+-- exactly the accurate measurement probe_observe_price used for its 95.5% one-shot.
+local function other_escape(problem, x, exclude)
     local s = 0
     for key, p in pairs(problem.primals) do
-        if (p.kind == "surplus_sink" or p.kind == "shortage_source") and p.material
-            and scc_set[p.material] and not exclude[key] then
+        if (p.kind == "surplus_sink" or p.kind == "shortage_source") and not exclude[key] then
             s = s + math.abs(x[key] or 0)
         end
     end
@@ -122,7 +129,7 @@ end
 
 local COLS = {
     "label", "n_scc", "n_keys", "n_oneshot", "n_after_corr", "n_unresolved",
-    "rounds", "total_solves",
+    "observe_solves", "rounds", "total_solves",
 }
 
 local function process(constraints, lines, label, emit)
@@ -137,10 +144,10 @@ local function process(constraints, lines, label, emit)
     local adj = mc.build_material_graph(lines)
     local sccs = mc.find_sccs(adj)
 
-    -- Gather every avoidable-cheat shortage key across qualifying SCCs.
-    -- keys[i] = { key, qty, scc_set, exclude, ceiling, mult, frozen, resolved_round }
-    local keys = {}
-    local n_scc = 0
+    -- Gather avoidable-cheat shortage keys, GROUPED by SCC (the observe is done
+    -- per-SCC so its global escape delta cleanly isolates that SCC's dEsc).
+    -- groups[i] = { sh = {keys...}, qty = {key->qty}, ceiling = {key->mult} }
+    local groups, keys, excl_all, n_scc = {}, {}, {}, 0
     for _, scc in ipairs(sccs) do
         if mc.is_cyclic_scc(scc, adj) then
             local scc_set = {}
@@ -161,34 +168,62 @@ local function process(constraints, lines, label, emit)
                 end
                 if self_sust and fab and internal_flow(x0, iset) < 1e-6 then
                     n_scc = n_scc + 1
-                    local exclude = {}
-                    for _, key in ipairs(active_sh) do exclude[key] = true end
+                    local g = { sh = {} }
                     for _, key in ipairs(active_sh) do
                         local qty = x0[key] or 0
                         if qty > 1e-12 then
-                            -- collapse ceiling: cost*qty <= target_cost  =>  mult <= target/(elastic*qty)
-                            local ceiling = TARGET_COST / (ELASTIC_COST * qty)
-                            keys[#keys + 1] = {
-                                key = key, qty = qty, scc_set = scc_set, exclude = exclude,
-                                ceiling = math.max(2, ceiling), mult = 1, frozen = false, resolved_round = -1,
-                            }
+                            -- collapse ceiling: cost*qty <= target_cost => mult <= target/(elastic*qty)
+                            local ceiling = math.max(2, TARGET_COST / (ELASTIC_COST * qty))
+                            local k = { key = key, qty = qty, ceiling = ceiling, group = g,
+                                mult = 1, frozen = false, resolved_round = -1 }
+                            keys[#keys + 1] = k
+                            g.sh[#g.sh + 1] = k
+                            excl_all[key] = true
                         end
                     end
+                    if #g.sh > 0 then groups[#groups + 1] = g end
                 end
             end
         end
     end
     if #keys == 0 then return end
+    trace(("== %s : %d SCC / %d keys ==\n"):format(label, n_scc, #keys))
 
-    -- Phase 2: ONE global observe -- all avoidable keys at the ceiling at once.
-    local obs_mults = {}
-    for _, k in ipairs(keys) do obs_mults[k.key] = OBSERVE_MULT end
-    local pobs, sobs, xobs = solve_with(constraints, lines, obs_mults)
-    if not xobs then return end -- observe didn't finish; out of scope for this probe
-    for _, k in ipairs(keys) do
-        local desc = scc_footprint(pobs, xobs, k.scc_set, k.exclude)
-        local pred = K_PRED * desc / k.qty
-        k.mult = math.max(2, math.min(k.ceiling, pred))
+    -- Phase 2: per-SCC OBSERVE. Raise ONE SCC's keys to its ceiling, solve, read
+    -- the global escape delta vs baseline = that SCC's dEsc. If the SCC's shortage
+    -- does NOT clear, or it clears only by relaxing the target, it is cone-over-
+    -- promise / unavoidable -> freeze now (import is correct), don't waste rounds.
+    -- One observe solve per SCC; most dumps are single-SCC so this stays ~1.
+    local esc_before = other_escape(prob, x0, excl_all)
+    local observe_solves = 0
+    for gi, g in ipairs(groups) do
+        local obs_mults = {}
+        for _, k in ipairs(g.sh) do obs_mults[k.key] = k.ceiling end
+        local pobs, sobs, xobs = solve_with(constraints, lines, obs_mults)
+        observe_solves = observe_solves + 1
+        local cleared = xobs ~= nil
+        local short_o, relax_o = 0, math.huge
+        if xobs then
+            for _, k in ipairs(g.sh) do short_o = short_o + (xobs[k.key] or 0) end
+            relax_o = target_relax(pobs, xobs)
+            cleared = short_o <= th and relax_o <= relax0 + 1e-4
+        end
+        if cleared then
+            local desc = other_escape(pobs, xobs, excl_all) - esc_before
+            local qsum = 0
+            for _, k in ipairs(g.sh) do qsum = qsum + k.qty end
+            for _, k in ipairs(g.sh) do
+                -- split the SCC's dEsc across its keys by qty share
+                local share = desc * (k.qty / qsum)
+                k.mult = math.max(2, math.min(k.ceiling, K_PRED * share / k.qty))
+                trace(("  [observe scc%d] %-26s qty=%.4g ceil=%.4g dEsc=%.4g -> mult=%.4g\n")
+                    :format(gi, kid(k.key), k.qty, k.ceiling, desc, k.mult))
+            end
+        else
+            for _, k in ipairs(g.sh) do k.frozen = true end
+            trace(("  [observe scc%d] cone-over-promise/unavoidable (short_o=%.4g relax_o=%.4g) -> FREEZE %d key(s)\n")
+                :format(gi, short_o, relax_o, #g.sh))
+        end
     end
 
     -- Phase 3+: verify + correct loop. Each round = one solve.
@@ -206,15 +241,19 @@ local function process(constraints, lines, label, emit)
                 local v = xr[k.key] or 0
                 if v <= th then
                     if k.resolved_round < 0 then k.resolved_round = rounds end
+                    trace(("  [r%d] %-28s mult=%.4g short=%.4g  OK\n"):format(rounds, kid(k.key), k.mult, v))
                 else
-                    -- still importing: straggler. bump, or freeze if at ceiling.
+                    -- still importing: straggler. The per-SCC observe already set
+                    -- an accurate price, so a straggler is just slightly under the
+                    -- threshold -- bump x2 (bounded by the collapse ceiling). At the
+                    -- ceiling it is unavoidable -> freeze (import is correct).
                     k.resolved_round = -1
                     if k.mult >= k.ceiling * (1 - 1e-9) then
-                        k.frozen = true -- unavoidable / cone-over-promise: import is correct
+                        k.frozen = true
+                        trace(("  [r%d] %-28s mult=%.4g short=%.4g  FREEZE (at ceiling)\n"):format(rounds, kid(k.key), k.mult, v))
                     else
-                        local desc = scc_footprint(pr, xr, k.scc_set, k.exclude)
-                        local pred = K_PRED * desc / k.qty
-                        k.mult = math.min(k.ceiling, math.max(k.mult * 2, pred))
+                        k.mult = math.min(k.ceiling, k.mult * 2)
+                        trace(("  [r%d] %-28s short=%.4g  BUMP -> mult=%.4g\n"):format(rounds, kid(k.key), v, k.mult))
                         live_straggler = true
                     end
                 end
@@ -237,7 +276,8 @@ local function process(constraints, lines, label, emit)
     emit({
         label = label, n_scc = n_scc, n_keys = #keys,
         n_oneshot = n_oneshot, n_after_corr = n_after, n_unresolved = n_unres,
-        rounds = rounds, total_solves = 2 + rounds,
+        observe_solves = observe_solves, rounds = rounds,
+        total_solves = 1 + observe_solves + rounds,
     })
 end
 
