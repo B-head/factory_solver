@@ -21,8 +21,8 @@
 --
 -- Single-shot (run_corpus): one row per problem, starts 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_w_normalize.lua -Collect '^seed=' -Out <tsv>
---   <lua> tests/probe_w_normalize.lua --manifest <list> --out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_w_normalize.lua -Collect '^seed=' -Out <tsv>
+--   <lua> tests/research/probe_w_normalize.lua --manifest <list> --out <tsv>
 
 require "tests/headless_env"
 

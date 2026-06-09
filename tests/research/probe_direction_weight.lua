@@ -26,7 +26,7 @@
 --
 -- Single-shot (run_corpus): one row per avoidable-cheat material, starts 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_direction_weight.lua -Collect '^seed=' -Out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_direction_weight.lua -Collect '^seed=' -Out <tsv>
 
 require "tests/headless_env"
 
@@ -70,45 +70,11 @@ local function apply_w(problem, weight)
     end
 end
 
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
-
-local function internal_flow(x, internal_set)
-    local s = 0
-    for key in pairs(internal_set) do s = s + math.abs(x[key] or 0) end
-    return s
-end
-
-local function target_relax(problem, x)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
-    end
-    return s
-end
-
-local function shortage_of(x, keys)
-    local s = 0
-    for _, k in ipairs(keys) do s = s + (x[k] or 0) end
-    return s
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
+local internal_flow = R.internal_flow
+local target_relax = R.target_relax
+local shortage_of = R.shortage_of_keys
 
 -- Ladder a lever (apply mutates costs) to flip; w_pre applies the w tilt first
 -- when tilt=true. invert reads ladder as x1/m. Returns smallest base_m flipping,

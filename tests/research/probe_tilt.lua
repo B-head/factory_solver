@@ -20,10 +20,10 @@
 -- a failure. Stop on: every recipe active / active-count plateau / nothing left to
 -- tilt / iteration cap.
 --
--- Usage (from repo root):  lua tests/probe_tilt.lua <problem-file> [--raise]
+-- Usage (from repo root):  lua tests/research/probe_tilt.lua <problem-file> [--raise]
 
 require "tests/headless_env"
-local R = require "tests/research_lib"
+local R = require "tests/research/research_lib"
 
 local MAXIT = 60
 local PATIENCE = 8

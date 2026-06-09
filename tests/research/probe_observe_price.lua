@@ -39,7 +39,7 @@
 --     and are correctly out of scope (import is right for them).
 --
 -- Usage (from repo root):
---   <lua> tests/probe_observe_price.lua --manifest <list> --out <file.tsv>
+--   <lua> tests/research/probe_observe_price.lua --manifest <list> --out <file.tsv>
 
 require "tests/headless_env"
 
@@ -61,53 +61,11 @@ local K_PRED = 1.5         -- substrate-analysis constant: predicted_mult = k * 
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }) end
 local function build(c, l) return create_problem.create_problem("observe", c, l, nil, OPTS) end
 
--- recipes internal to the SCC (>=1 ingredient AND >=1 product in S).
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
-
-local function internal_flow(x, internal_set)
-    local s = 0
-    for key in pairs(internal_set) do s = s + math.abs(x[key] or 0) end
-    return s
-end
-
-local function target_relax(problem, x)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
-    end
-    return s
-end
-
--- Sum |x| over escape-priced boundary (surplus_sink + shortage_source) at the flat
--- 1024 tier, EXCLUDING the shortage keys we are pricing -- the "other escapes" the
--- fabrication path drags in (byproduct dumps + secondary deficits).
-local function other_escape_sum(problem, x, exclude)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if (p.kind == "surplus_sink" or p.kind == "shortage_source") and not exclude[key] then
-            s = s + math.abs(x[key] or 0)
-        end
-    end
-    return s
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
+local internal_flow = R.internal_flow
+local target_relax = R.target_relax
+local other_escape_sum = R.other_escape_sum
 
 -- Solve once with the SCC's active shortages priced at ELASTIC_COST*mult. Returns
 -- shortage sum, target relax, and other-escape mass (or nil if not finished).

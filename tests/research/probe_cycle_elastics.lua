@@ -20,8 +20,8 @@
 -- PowerShell side never captures native stdout -- truncation bug).
 --
 -- Usage (from repo root):
---   <lua> tests/probe_cycle_elastics.lua --manifest <list.txt> --out <file.tsv>
---   <lua> tests/probe_cycle_elastics.lua <dump.lua> [<dump.lua> ...] --out <f>
+--   <lua> tests/research/probe_cycle_elastics.lua --manifest <list.txt> --out <file.tsv>
+--   <lua> tests/research/probe_cycle_elastics.lua <dump.lua> [<dump.lua> ...] --out <f>
 
 require "tests/headless_env"
 
@@ -83,36 +83,8 @@ local function rsum(problem, x)
     return s
 end
 
--- Build the set of recipe variable keys that are INTERNAL to an SCC: a recipe
--- with >=1 ingredient (incl. fuel) in S AND >=1 product (incl. burnt result) in
--- S. Returns a set of recipe-variable-name keys.
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local has_ing_in = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then has_ing_in = true; break end
-        end
-        if not has_ing_in and line.fuel_ingredient
-            and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then
-            has_ing_in = true
-        end
-        if has_ing_in then
-            local has_prod_in = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then has_prod_in = true; break end
-            end
-            if not has_prod_in and line.fuel_burnt_result
-                and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then
-                has_prod_in = true
-            end
-            if has_prod_in then
-                out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true
-            end
-        end
-    end
-    return out
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
 
 -- Partition primals into inside/outside the SCC. inside = (elastic whose
 -- material is in S) OR (recipe internal to S). Returns two lists of keys.

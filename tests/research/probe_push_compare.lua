@@ -17,7 +17,7 @@
 --
 -- Single-shot (run_corpus): rows start 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_push_compare.lua -Collect '^seed=' -Out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_push_compare.lua -Collect '^seed=' -Out <tsv>
 
 require "tests/headless_env"
 

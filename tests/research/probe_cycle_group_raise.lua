@@ -19,8 +19,8 @@
 --
 -- Single-shot (run_corpus): one row per problem, starts 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_cycle_group_raise.lua -Collect '^seed=' -Out <tsv>
---   <lua> tests/probe_cycle_group_raise.lua --manifest <list> --out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_cycle_group_raise.lua -Collect '^seed=' -Out <tsv>
+--   <lua> tests/research/probe_cycle_group_raise.lua --manifest <list> --out <tsv>
 
 require "tests/headless_env"
 

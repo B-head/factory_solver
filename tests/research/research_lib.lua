@@ -7,7 +7,7 @@
 -- perturb the Problem (reprice a cost, force a recipe to carry flow). Those pieces
 -- lived inline in a dozen throwaway s:\tmp scripts that were rewritten every
 -- session. This module is that boilerplate, factored once, so a new probe is a few
--- lines of intent plus require "tests/research_lib".
+-- lines of intent plus require "tests/research/research_lib".
 --
 -- It deliberately sits ON TOP of the committed primitives rather than replacing
 -- them: load/solve come from tests/problem_dump, detect/park_threshold/is_recipe
@@ -39,6 +39,7 @@ local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 local ed = require "tests/explore_detect"
 local problem_dump = require "tests/problem_dump"
+local tn = require "manage/typed_name"
 
 local M = {}
 
@@ -225,6 +226,102 @@ end
 ---@return string
 function M.fileid(path)
     return path:match("[^/\\]+$") or path
+end
+
+-- ---- SCC / escape aggregation (shared probe reads) --------------------------
+--
+-- These five were copy-pasted, verbatim, into a dozen cyclic-SCC probes. The
+-- signatures here are the canonical ones; probes alias them (local internal_flow
+-- = R.internal_flow, ...) so existing call sites are untouched. `shortage_of`
+-- had two incompatible shapes in the wild, so it is exposed as two named
+-- helpers (by-material vs by-key-list) rather than one overloaded function.
+
+---Recipe-flow variable names internal to an SCC: lines with >= 1 ingredient AND
+--->= 1 product (counting fuel_ingredient / fuel_burnt_result) whose variable is
+---in `scc_set`. Keyed set of recipe variable names.
+---@param lines NormalizedProductionLine[]
+---@param scc_set table<string, true> Material variable names that form the SCC.
+---@return table<string, true>
+function M.internal_recipes(lines, scc_set)
+    local out = {}
+    for _, line in ipairs(lines) do
+        local hi = false
+        for _, ing in ipairs(line.ingredients) do
+            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
+        end
+        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
+        if hi then
+            local hp = false
+            for _, prod in ipairs(line.products) do
+                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
+            end
+            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
+            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
+        end
+    end
+    return out
+end
+
+---Sum |x| over a keyed set of recipe variables (the SCC's internal flow).
+---@param x table<string, number>
+---@param internal_set table<string, true>
+---@return number
+function M.internal_flow(x, internal_set)
+    local s = 0
+    for key in pairs(internal_set) do s = s + math.abs(x[key] or 0) end
+    return s
+end
+
+---Sum |x| over every elastic (target-relaxation) variable.
+---@param problem Problem
+---@param x table<string, number>
+---@return number
+function M.target_relax(problem, x)
+    local s = 0
+    for key, p in pairs(problem.primals) do
+        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
+    end
+    return s
+end
+
+---Sum |x| over the escape-priced boundary (surplus_sink + shortage_source),
+---excluding keys in `exclude` -- the "other escapes" a fabrication path drags in.
+---@param problem Problem
+---@param x table<string, number>
+---@param exclude table<string, true>
+---@return number
+function M.other_escape_sum(problem, x, exclude)
+    local s = 0
+    for key, p in pairs(problem.primals) do
+        if (p.kind == "surplus_sink" or p.kind == "shortage_source") and not exclude[key] then
+            s = s + math.abs(x[key] or 0)
+        end
+    end
+    return s
+end
+
+---Total shortage_source |x| for one material (0 if absent).
+---@param problem Problem
+---@param x table<string, number>
+---@param material string
+---@return number
+function M.shortage_of_material(problem, x, material)
+    local s = 0
+    for key, p in pairs(problem.primals) do
+        if p.kind == "shortage_source" and p.material == material then s = s + math.abs(x[key] or 0) end
+    end
+    return s
+end
+
+---Sum x over an explicit list of shortage variable keys (signed, as the
+---direction probes read it).
+---@param x table<string, number>
+---@param keys string[]
+---@return number
+function M.shortage_of_keys(x, keys)
+    local s = 0
+    for _, k in ipairs(keys) do s = s + (x[k] or 0) end
+    return s
 end
 
 return M

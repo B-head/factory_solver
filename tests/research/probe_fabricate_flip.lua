@@ -12,7 +12,7 @@
 -- alone flips the cheat to the correct fabrication. RAW numbers only.
 --
 -- Usage (from repo root):
---   <lua> tests/probe_fabricate_flip.lua --manifest <list> --out <file.tsv>
+--   <lua> tests/research/probe_fabricate_flip.lua --manifest <list> --out <file.tsv>
 
 require "tests/headless_env"
 
@@ -32,26 +32,8 @@ local LADDER = { 2, 4, 8, 16, 32, 64, 128, 256, 1024, 4096, 16384, 65536 }
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }) end
 local function build(c, l) return create_problem.create_problem("flip", c, l, nil, OPTS) end
 
--- recipes internal to the SCC (>=1 ingredient AND >=1 product in S).
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
 
 local function internal_flow(problem, x, internal_set)
     local s = 0
@@ -59,13 +41,7 @@ local function internal_flow(problem, x, internal_set)
     return s
 end
 
-local function target_relax(problem, x)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
-    end
-    return s
-end
+local target_relax = R.target_relax
 
 local function rsum(problem, x)
     local s = 0
@@ -84,19 +60,7 @@ local function import_sum(problem, x)
     return s
 end
 
--- Sum |x| over escape-priced boundary (surplus_sink + shortage_source), each at
--- the flat 1024 tier, EXCLUDING the shortage keys we are raising (so this is the
--- "other escapes" the fabrication path drags in: byproduct dumps + secondary
--- deficits).
-local function other_escape_sum(problem, x, exclude)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if (p.kind == "surplus_sink" or p.kind == "shortage_source") and not exclude[key] then
-            s = s + math.abs(x[key] or 0)
-        end
-    end
-    return s
-end
+local other_escape_sum = R.other_escape_sum
 
 local COLS = {
     "label", "scc_size", "material", "n_active_sh", "base_shortage",

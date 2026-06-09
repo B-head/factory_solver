@@ -21,8 +21,8 @@
 -- `-Collect '^seed='` drops the header.
 --
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_cheap_surplus.lua -Collect '^seed=' -Out <tsv>
---   <lua> tests/probe_cheap_surplus.lua --manifest <list> --out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_cheap_surplus.lua -Collect '^seed=' -Out <tsv>
+--   <lua> tests/research/probe_cheap_surplus.lua --manifest <list> --out <tsv>
 
 require "tests/headless_env"
 
@@ -48,25 +48,12 @@ local function build_surplus(c, l, S)
     return create_problem.create_problem("cs", c, l, nil, o)
 end
 
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
-local function internal_flow(x, s) local v = 0; for k in pairs(s) do v = v + math.abs(x[k] or 0) end; return v end
-local function target_relax(p, x) local s = 0; for k, pr in pairs(p.primals) do if pr.kind == "elastic" then s = s + math.abs(x[k] or 0) end end; return s end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
+local internal_flow = R.internal_flow
+local target_relax = R.target_relax
 local function surplus_total(p, x) local s = 0; for k, pr in pairs(p.primals) do if pr.kind == "surplus_sink" then s = s + math.abs(x[k] or 0) end end; return s end
-local function shortage_of(p, x, m) local s = 0; for k, pr in pairs(p.primals) do if pr.kind == "shortage_source" and pr.material == m then s = s + math.abs(x[k] or 0) end end; return s end
+local shortage_of = R.shortage_of_material
 
 local COLS = { "label", "scc_size", "material", "n_active_sh", "base_shortage", "surplus0" }
 for _, S in ipairs(LADDER) do COLS[#COLS + 1] = "after_S" .. S end

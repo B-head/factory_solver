@@ -19,8 +19,8 @@
 --
 -- Single-shot (run_corpus): one row per importing material, rows start 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_per_material_raise.lua -Collect '^seed=' -Out <tsv>
---   <lua> tests/probe_per_material_raise.lua --manifest <list> --out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_per_material_raise.lua -Collect '^seed=' -Out <tsv>
+--   <lua> tests/research/probe_per_material_raise.lua --manifest <list> --out <tsv>
 
 require "tests/headless_env"
 

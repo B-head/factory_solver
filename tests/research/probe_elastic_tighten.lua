@@ -22,7 +22,7 @@
 --
 -- Single-shot (run_corpus): one row per problem, starts 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_elastic_tighten.lua -Collect '^seed=' -Out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_elastic_tighten.lua -Collect '^seed=' -Out <tsv>
 
 require "tests/headless_env"
 

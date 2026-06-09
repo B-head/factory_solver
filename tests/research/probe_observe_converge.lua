@@ -35,7 +35,7 @@
 -- HONEST upper bound for the cheaper-to-attribute per-SCC-observe variant.
 --
 -- Usage (from repo root):
---   <lua> tests/probe_observe_converge.lua --manifest <list> --out <file.tsv>
+--   <lua> tests/research/probe_observe_converge.lua --manifest <list> --out <file.tsv>
 
 require "tests/headless_env"
 
@@ -63,39 +63,10 @@ local function build(c, l) return create_problem.create_problem("converge", c, l
 -- Short readable id for a shortage key (last two '/'-segments), trace only.
 local function kid(key) return (key:gsub(".*|", ""):gsub("([^/]+)/([^/]+)/[^/]*$", "%1/%2")) end
 
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
-
-local function internal_flow(x, internal_set)
-    local s = 0
-    for key in pairs(internal_set) do s = s + math.abs(x[key] or 0) end
-    return s
-end
-
-local function target_relax(problem, x)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
-    end
-    return s
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
+local internal_flow = R.internal_flow
+local target_relax = R.target_relax
 
 -- Total escape mass (surplus_sink + shortage_source), EXCLUDING the avoidable
 -- keys (`exclude`). Read GLOBALLY, not restricted to one SCC: a fabrication's

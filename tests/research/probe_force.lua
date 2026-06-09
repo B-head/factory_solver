@@ -23,11 +23,11 @@
 --     WASTE alone may pay off in a coalition with the parked recipes that consume
 --     its by-products / supply its inputs. Treat output as a screen, not a verdict.
 --
--- Usage (from repo root):  lua tests/probe_force.lua <problem-file>
+-- Usage (from repo root):  lua tests/research/probe_force.lua <problem-file>
 -- Emits a human table then a machine-readable "RESULT\t..." line for run_corpus.ps1.
 
 require "tests/headless_env"
-local R = require "tests/research_lib"
+local R = require "tests/research/research_lib"
 
 local EPS = 0.1       -- forced minimum flow (well above a typical ~0.008 park floor)
 local NET_TOL = 1e-4  -- |net total escape mass| below this = NEUTRAL (reshuffle/noise)

@@ -24,7 +24,7 @@
 --
 -- Single-shot (run_corpus): one row per avoidable-cheat material, starts 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/probe_amount_lever.lua -Collect '^seed=' -Out <tsv>
+--   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_amount_lever.lua -Collect '^seed=' -Out <tsv>
 
 require "tests/headless_env"
 
@@ -44,37 +44,10 @@ local LADDER = { 2, 4, 8, 16, 32, 64, 128, 256, 1024, 4096 }
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }) end
 local function build(c, l) return create_problem.create_problem("amt", c, l, nil, OPTS) end
 
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
-
-local function internal_flow(x, internal_set)
-    local s = 0
-    for key in pairs(internal_set) do s = s + math.abs(x[key] or 0) end
-    return s
-end
-
-local function target_relax(p, x)
-    local s = 0
-    for key, pr in pairs(p.primals) do if pr.kind == "elastic" then s = s + math.abs(x[key] or 0) end end
-    return s
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
+local internal_flow = R.internal_flow
+local target_relax = R.target_relax
 local function rsum(p, x)
     local s = 0
     for key, pr in pairs(p.primals) do if pr.kind == "recipe" then s = s + math.abs(x[key] or 0) end end

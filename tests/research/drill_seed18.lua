@@ -4,7 +4,7 @@
 -- external producer (extP=1), yet raise-all collapses (Rsum->0, target relaxes)
 -- instead of routing through that producer. Goal: see WHY the external producer
 -- is not economical. Not a test; raw dump. Run from repo root:
---   <lua> tests/drill_seed18.lua <dump.lua> <material-var>
+--   <lua> tests/research/drill_seed18.lua <dump.lua> <material-var>
 require "tests/headless_env"
 
 local create_problem = require "solver/create_problem"

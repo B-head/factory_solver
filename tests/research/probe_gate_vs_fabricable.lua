@@ -16,7 +16,7 @@
 -- fabricable one (a missed cheat). RAW counts only.
 --
 -- Usage (from repo root):
---   <lua> tests/probe_gate_vs_fabricable.lua --manifest <list> --out <file.tsv>
+--   <lua> tests/research/probe_gate_vs_fabricable.lua --manifest <list> --out <file.tsv>
 
 require "tests/headless_env"
 
@@ -35,25 +35,8 @@ local OPTS_SHIP = { deficit_seeding = true, catalyst_closure = true, reachabilit
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }) end
 local function build(c, l, o) return create_problem.create_problem("gate", c, l, nil, o) end
 
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
 
 -- find the primal value of a given kind for a material (0 if absent).
 local function kind_value_for_material(problem, x, material, kind)
@@ -67,13 +50,7 @@ local function kind_value_for_material(problem, x, material, kind)
     return total, present
 end
 
-local function target_relax(problem, x)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
-    end
-    return s
-end
+local target_relax = R.target_relax
 
 local COLS = {
     "label", "scc_size", "material", "export_feasible",

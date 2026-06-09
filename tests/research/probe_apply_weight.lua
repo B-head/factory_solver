@@ -16,7 +16,7 @@
 -- row per active-shortage material.
 --
 -- Usage (from repo root):
---   <lua> tests/probe_apply_weight.lua --manifest <list> --out <file.tsv>
+--   <lua> tests/research/probe_apply_weight.lua --manifest <list> --out <file.tsv>
 
 require "tests/headless_env"
 
@@ -64,48 +64,11 @@ local function build_weighted(c, l, w, shortage_only)
     return create_problem.create_problem("aw", c, l, nil, o)
 end
 
-local function internal_recipes(lines, scc_set)
-    local out = {}
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then out[tn.typed_name_to_variable_name(line.recipe_typed_name)] = true end
-        end
-    end
-    return out
-end
-
-local function internal_flow(x, internal_set)
-    local s = 0
-    for key in pairs(internal_set) do s = s + math.abs(x[key] or 0) end
-    return s
-end
-
-local function target_relax(problem, x)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
-    end
-    return s
-end
-
--- shortage value for one material (0 if absent).
-local function shortage_of(problem, x, material)
-    local s = 0
-    for key, p in pairs(problem.primals) do
-        if p.kind == "shortage_source" and p.material == material then s = s + math.abs(x[key] or 0) end
-    end
-    return s
-end
+local R = require "tests/research/research_lib"
+local internal_recipes = R.internal_recipes
+local internal_flow = R.internal_flow
+local target_relax = R.target_relax
+local shortage_of = R.shortage_of_material
 
 -- AFTER state for one material under a weighted solve.
 --   fab      : its import is eliminated (shortage ~0) and target not relaxed

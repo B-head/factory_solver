@@ -17,7 +17,7 @@
 --                   anywhere in the chain (pure dead-end byproducts -> sure dumps)
 --
 -- Usage (from repo root):
---   <lua> tests/probe_byproduct_signal.lua --manifest <list> --flip <flip_weight.tsv> --out <tsv>
+--   <lua> tests/research/probe_byproduct_signal.lua --manifest <list> --flip <flip_weight.tsv> --out <tsv>
 
 require "tests/headless_env"
 

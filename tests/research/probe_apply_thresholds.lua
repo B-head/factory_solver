@@ -14,7 +14,7 @@
 -- relaxation rises. surplus changes are acceptable (dump-acceptable yardstick).
 --
 -- Usage (from repo root):
---   <lua> tests/probe_apply_thresholds.lua --thresholds <pmr.tsv> --manifest <list> --out <tsv>
+--   <lua> tests/research/probe_apply_thresholds.lua --thresholds <pmr.tsv> --manifest <list> --out <tsv>
 
 require "tests/headless_env"
 
