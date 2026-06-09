@@ -20,14 +20,14 @@
 -- Two modes:
 --
 --   INSPECT (no pattern):
---     lua tests/sweep_cost.lua <problem-file>
+--     lua tests/research/sweep_cost.lua <problem-file>
 --   Solves the baseline once and lists the cost-bearing variables worth tweaking
 --   (every penalty escape, every source/target-priced term, plus whatever the
 --   solution actually leaned on), each with its current cost and solved value.
 --   Use this first to discover the exact key to pass to a sweep.
 --
 --   SWEEP (pattern + values):
---     lua tests/sweep_cost.lua <problem-file> <key-substring> <v1,v2,v3,...>
+--     lua tests/research/sweep_cost.lua <problem-file> <key-substring> <v1,v2,v3,...>
 --   The special pattern `@cheat` auto-resolves to the single highest-|value|
 --   active penalty escape (|shortage_source|/|elastic|) in the baseline solve --
 --   the material the LP leaned on hardest -- so a batch can sweep the dominant
@@ -39,7 +39,7 @@
 --   you can confirm the pattern hit what you meant -- widen or narrow it as needed.
 --
 --   ABLATE (leave-one-out cost zeroing):
---     lua tests/sweep_cost.lua <problem-file> --ablate [<key-substring>]
+--     lua tests/research/sweep_cost.lua <problem-file> --ablate [<key-substring>]
 --   For every primal whose baseline cost is nonzero (optionally restricted to keys
 --   containing <key-substring>), re-solves with JUST that one variable's cost set
 --   to 0 and prints one row per variable: base_cost, resulting cheat, dcheat vs
@@ -52,7 +52,7 @@
 --   data-collection mode for "what causes the cheat in THIS problem" -- per case.
 --
 --   MEASURE (research dump -- wide neutral TSV):
---     lua tests/sweep_cost.lua <problem-file> --measure [<key-substring>]
+--     lua tests/research/sweep_cost.lua <problem-file> --measure [<key-substring>]
 --   Same leave-one-out cost zeroing as --ablate, but emits a tab-separated table
 --   with NO judgment: per solution (a "(base)" row then one row per zeroed
 --   variable) it reports every measurable quantity -- total mass and active-count
@@ -67,7 +67,7 @@
 -- (SWEEP_VARS has no effect in --ablate/--measure modes -- one row per variable.)
 --
 -- Usage (from the repo root so require paths resolve):
---   lua tests/sweep_cost.lua <problem-file> [<key-substring> <v1,v2,...>]
+--   lua tests/research/sweep_cost.lua <problem-file> [<key-substring> <v1,v2,...>]
 
 require "tests/headless_env"
 
@@ -85,7 +85,7 @@ end
 
 -- ---- shard flags ------------------------------------------------------------
 -- Two flags orthogonal to the positional `<file> <mode> [<filter>]` grammar keep
--- this worker a pure single-shot box the shell can fan out (tests/sweep_fanout.sh):
+-- this worker a pure single-shot box the shell can fan out (tests/research/sweep_fanout.sh):
 --   --list-units    print how many leave-one-out targets this file has, then exit
 --                   (the shell uses the count to carve index ranges); no solving.
 --   --units <m-n>   process only sorted-target indices m..n (1-based, inclusive).
@@ -132,7 +132,7 @@ end
 -- ---- args -------------------------------------------------------------------
 local path = arg[1]
 if not path then
-    die("usage: lua tests/sweep_cost.lua <problem-file> [<key-substring> <v1,v2,...>]")
+    die("usage: lua tests/research/sweep_cost.lua <problem-file> [<key-substring> <v1,v2,...>]")
 end
 local pattern = arg[2] -- nil => inspect mode
 -- For --ablate / --measure, arg[3] is an optional key-substring FILTER, not a
@@ -515,7 +515,7 @@ if not pattern then
     for _, r in ipairs(rows) do
         print(string.format("  %-58s cost=%-10.4g val=%.6g", r.key, r.cost, r.val))
     end
-    print("\n# to sweep: lua tests/sweep_cost.lua <file> '<key-substring>' <v1,v2,...>")
+    print("\n# to sweep: lua tests/research/sweep_cost.lua <file> '<key-substring>' <v1,v2,...>")
     os.exit(0)
 end
 

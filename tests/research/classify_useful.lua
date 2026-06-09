@@ -1,7 +1,7 @@
 ---@diagnostic disable: undefined-global
 -- Useful-candidate CLASSIFICATION driver (tilted-cost research, v2).
 --
--- Adapted from tests/collect_useful.lua. Keeps every column that driver emits
+-- Adapted from tests/research/collect_useful.lua. Keeps every column that driver emits
 -- (same "useful candidate" definition, same escape-cost-raising probe over the
 -- original 4096 ladder = `activate_mult`), and adds two new columns that
 -- classify -- via DETERMINISTIC PROBE EXPERIMENTS, never by eyeballing rows --
@@ -25,9 +25,9 @@
 -- / --selftest; Lua writes the --out file itself (no native-stdout capture).
 --
 -- Usage (from repo root):
---   lua tests/classify_useful.lua <dump-file> [<dump-file> ...]
---   lua tests/classify_useful.lua --manifest <list.txt>
---   lua tests/classify_useful.lua --selftest
+--   lua tests/research/classify_useful.lua <dump-file> [<dump-file> ...]
+--   lua tests/research/classify_useful.lua --manifest <list.txt>
+--   lua tests/research/classify_useful.lua --selftest
 --   ... --out <file>
 
 require "tests/headless_env"

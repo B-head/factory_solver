@@ -35,7 +35,7 @@ local PARK_NOTE_FRACTION = M.PARK_NOTE_FRACTION
 ---rather than by parsing the key. recipe and virtual_recipe lines carry kind
 ---"recipe"; |bridge| plumbing carries "bridge" and is excluded, so the count
 ---stays about the user's chain rather than solver internals. Shared by detect()
----and the cost-sweep driver (tests/sweep_cost.lua) so the two agree.
+---and the cost-sweep driver (tests/research/sweep_cost.lua) so the two agree.
 ---@param k string
 ---@param primals table<string, Primal>? Variable metadata from the solved Problem.
 ---@return boolean

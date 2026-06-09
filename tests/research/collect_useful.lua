@@ -21,9 +21,9 @@
 -- on; only this research worker flips them). Set CP_<NAME>=1 to turn one back on.
 --
 -- Usage (from repo root):
---   lua tests/collect_useful.lua <dump-file> [<dump-file> ...]   -- one or many
---   lua tests/collect_useful.lua --manifest <list.txt>           -- paths, 1/line
---   lua tests/collect_useful.lua --selftest                      -- inline fixture
+--   lua tests/research/collect_useful.lua <dump-file> [<dump-file> ...]   -- one or many
+--   lua tests/research/collect_useful.lua --manifest <list.txt>           -- paths, 1/line
+--   lua tests/research/collect_useful.lua --selftest                      -- inline fixture
 --   ... --out <file>   -- write the TSV here instead of stdout (Lua writes the
 --                         file directly, so no shell stdout/stderr capture quirks
 --                         and no command-line-length limit on big corpora).

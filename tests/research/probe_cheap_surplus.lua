@@ -21,7 +21,7 @@
 -- `-Collect '^seed='` drops the header.
 --
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_cheap_surplus.lua -Collect '^seed=' -Out <tsv>
+--   pwsh tests/research/run_corpus.ps1 -Driver tests/research/probe_cheap_surplus.lua -Collect '^seed=' -Out <tsv>
 --   <lua> tests/research/probe_cheap_surplus.lua --manifest <list> --out <tsv>
 
 require "tests/headless_env"

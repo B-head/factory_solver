@@ -9,8 +9,8 @@
 -- strategy can be tried against the simplest failures first.
 --
 -- Usage (from repo root):
---   CP_REACHABILITY_GATING=0 lua tests/run_ablated.lua
---   CP_REACHABILITY_GATING=0 CP_DEFICIT_SEEDING=0 lua tests/run_ablated.lua [filter]
+--   CP_REACHABILITY_GATING=0 lua tests/research/run_ablated.lua
+--   CP_REACHABILITY_GATING=0 CP_DEFICIT_SEEDING=0 lua tests/research/run_ablated.lua [filter]
 --
 -- env vars (each defaults ON; "0" disables that one mechanism):
 --   CP_DEFICIT_SEEDING, CP_CATALYST_CLOSURE, CP_REACHABILITY_GATING

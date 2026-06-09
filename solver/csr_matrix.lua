@@ -32,7 +32,7 @@ local int_max = 2147483647
 -- lp_extreme_coefficients fixture failing). Relative to each pivot's own scale,
 -- a well-conditioned pivot sits far above δ_y and is untouched; only a pivot that
 -- has cancelled down into its own round-off is lifted. Tuned on the pyanodon
--- random-chain corpus (tests/sweep_tolerance.lua); see solver/linear_programming.
+-- random-chain corpus (tests/research/sweep_tolerance.lua); see solver/linear_programming.
 local cholesky_pivot_floor_rel = 2 ^ -52
 
 ---Setup metatable.

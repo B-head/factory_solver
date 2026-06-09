@@ -18,7 +18,7 @@
 -- Degeneracy is reported as raw bucket counts over the result recipe variables,
 -- no good/bad labelling -- the distribution shift across tolerance is the signal.
 --
--- Usage (from repo root): lua tests/sweep_tolerance.lua <problem.lua> <tol,tol,...>
+-- Usage (from repo root): lua tests/research/sweep_tolerance.lua <problem.lua> <tol,tol,...>
 --   The tolerance list may also come from the SWEEP_TOLS env var (so a parallel
 --   `xargs -P` pool can append just the file as the sole argument).
 -- Columns (tab-separated):
@@ -34,7 +34,7 @@ local problem_dump = require "tests/problem_dump"
 local path = arg[1]
 local tol_arg = arg[2] or os.getenv("SWEEP_TOLS")
 if not path or not tol_arg then
-    io.stderr:write("usage: lua tests/sweep_tolerance.lua <problem-file> <tol,tol,...>\n")
+    io.stderr:write("usage: lua tests/research/sweep_tolerance.lua <problem-file> <tol,tol,...>\n")
     io.stderr:write("       (or set SWEEP_TOLS env and pass just the file)\n")
     os.exit(2)
 end

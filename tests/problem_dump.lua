@@ -4,7 +4,7 @@
 -- problem per generated chain to script-output as a loadable Lua table
 -- { meta, constraints, normalized_lines }. Two standalone `lua` consumers read
 -- those files -- tests/solve_problem.lua (the worker-pool consumer) and
--- tests/sweep_cost.lua (the cost-sensitivity driver). Both did the exact same
+-- tests/research/sweep_cost.lua (the cost-sensitivity driver). Both did the exact same
 -- two things by hand: load+validate the dump, and drive the IPM from "ready"
 -- to a terminal state. This module is that shared pair.
 --

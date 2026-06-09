@@ -1,4 +1,4 @@
-# Collect tests/collect_useful.lua over every explorer-dumped problem into one
+# Collect tests/research/collect_useful.lua over every explorer-dumped problem into one
 # TSV corpus. The collection is Factorio-free (the dumps already exist under
 # script-output/explore_problems); this just lists them into a manifest and runs
 # the Lua worker ONCE, which reads the manifest and writes the --out file itself.
@@ -8,7 +8,7 @@
 # Widen the corpus first by regenerating more dumps (boots Factorio once):
 #   pwsh tests/explore_chains.ps1 -Seeds 30 -StartSeed 1
 # then collect them here (no Factorio):
-#   pwsh tests/collect_corpus.ps1 -Out useful_corpus.tsv
+#   pwsh tests/research/collect_corpus.ps1 -Out useful_corpus.tsv
 #
 # collect_useful.lua keeps reachability_gating / deficit_seeding /
 # catalyst_closure OFF by default (pure tilted-cost experiment); set the matching
@@ -22,20 +22,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+. "$PSScriptRoot/ps_lib.ps1"
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 
-if (-not $LuaExe) {
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA "Programs/LuaJIT/bin/luajit.exe"),
-        (Join-Path $env:LOCALAPPDATA "Programs/Lua/bin/lua.exe")
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { $LuaExe = $c; break } }
-    if (-not $LuaExe) {
-        $g = Get-Command lua -ErrorAction SilentlyContinue
-        if ($g) { $LuaExe = $g.Source }
-    }
-    if (-not $LuaExe) { Write-Error "no Lua interpreter found (set -LuaExe)"; exit 2 }
-}
+$LuaExe = Resolve-LuaExe $LuaExe
 
 if (-not (Test-Path $DumpDir)) {
     Write-Error "dump dir not found: $DumpDir (run tests/explore_chains.ps1 first)"; exit 2
@@ -53,7 +43,7 @@ Write-Host "collecting $($dumps.Count) dumps with $LuaExe -> $Out"
 Push-Location $repoRoot.Path
 try {
     # Lua writes $Out itself; we don't capture its stdout. Let any stderr show.
-    & $LuaExe "tests/collect_useful.lua" "--manifest" $manifest "--out" $Out
+    & $LuaExe "tests/research/collect_useful.lua" "--manifest" $manifest "--out" $Out
 } finally { Pop-Location; Remove-Item $manifest -ErrorAction SilentlyContinue }
 
 $rows = @(Get-Content $Out | Where-Object { $_ -and ($_ -notmatch '^#') })

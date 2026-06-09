@@ -15,7 +15,7 @@
 --
 -- Single-shot (run_corpus): one row per importing cyclic SCC, starts 'seed='.
 -- Usage:
---   pwsh tests/run_corpus.ps1 -Driver tests/research/probe_one_vs_all.lua -Collect '^seed=' -Out <tsv>
+--   pwsh tests/research/run_corpus.ps1 -Driver tests/research/probe_one_vs_all.lua -Collect '^seed=' -Out <tsv>
 
 require "tests/headless_env"
 
