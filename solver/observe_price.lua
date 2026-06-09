@@ -12,8 +12,10 @@
 --   1. BASELINE solve (flat 1024) -> collect the avoidable-cheat shortage keys:
 --      a material with an active shortage whose cyclic SCC is self-sustaining,
 --      export-feasible, and currently idle (the placed cycle is not running).
---   2. OBSERVE (one solve per SCC at the ceiling) -> read the escape-mass delta
---      dEsc the forced fabrication drags in, and price the key at
+--   2. OBSERVE (one solve per SCC at the ceiling) -> read the escape-COST delta
+--      dEsc the forced fabrication drags in (objective cost of the collateral
+--      surplus/shortage/initial_source, in elastic_cost units -- see M.other_escape
+--      for why cost, not mass), and price the key at
 --      clamp(K_PRED * dEsc/qty, 2, ceiling). An SCC whose shortage does not
 --      clear without relaxing the target is cone-over-promise: FREEZE it (import
 --      is correct) rather than chase it.
@@ -36,7 +38,7 @@ local M = {}
 
 local ELASTIC_COST = create_problem.elastic_cost
 local TARGET_COST = create_problem.target_cost
-M.K_PRED = 1.5
+M.K_PRED = 2.0
 M.MAX_ROUNDS = 10
 
 -- A recipe variable sits at the IPM interior floor (parked) below this; mirrors
@@ -88,8 +90,22 @@ function M.target_relax(primals, x)
     return s
 end
 
--- Sum |x| over the escape-priced boundary (surplus_sink + shortage_source),
--- excluding `exclude` keys -- the "other escapes" a forced fabrication drags in.
+-- Objective COST carried by the escape boundary (surplus_sink + shortage_source +
+-- initial_source), in elastic_cost units, excluding `exclude` keys -- the "other
+-- escapes" a forced fabrication drags in. apply_observe reads the delta of this vs
+-- baseline as dEsc and prices the cycle's shortage at K_PRED * dEsc/qty.
+--
+-- This is COST-weighted, not mass-weighted, and that is load-bearing on the shipped
+-- soft-gate config: forcing a cycle to fabricate drags in SECONDARY shortages that
+-- the soft gate prices at elastic_cost*k (k=256). A mass read sees only their tiny
+-- |x| and under-prices the cycle's shortage, so the chain keeps importing and the
+-- verify loop has to bump it round after round; weighting each escape by its real
+-- objective cost captures the 256x and the prediction lands in one shot. It also
+-- folds initial_source in correctly: the raw supply a fabrication pulls in is huge
+-- by mass but cheap by cost (source_cost ~ elastic_cost/1024 for items), so cost
+-- weighting discounts it automatically instead of letting it dominate dEsc.
+-- (cheat_mass / target_relax stay mass-based: those measure import/relaxation
+-- magnitude for the keep-best revert, where mass is the right neutral unit.)
 ---@param primals table<string, Primal>
 ---@param x table<string, number>
 ---@param exclude table<string, true>
@@ -97,11 +113,12 @@ end
 function M.other_escape(primals, x, exclude)
     local s = 0
     for key, p in pairs(primals) do
-        if (p.kind == "surplus_sink" or p.kind == "shortage_source") and not exclude[key] then
-            s = s + math.abs(x[key] or 0)
+        if (p.kind == "surplus_sink" or p.kind == "shortage_source" or p.kind == "initial_source")
+            and not exclude[key] then
+            s = s + (p.cost or 0) * math.abs(x[key] or 0)
         end
     end
-    return s
+    return s / ELASTIC_COST
 end
 
 -- Recipe-flow variables internal to an SCC (>= 1 ingredient AND >= 1 product in
