@@ -18,9 +18,8 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
-local function item(name, amount)
-    return { type = "item", name = name, quality = "normal", amount_per_second = amount }
-end
+local fixture = require "tests/cases/fixture"
+local item = fixture.item
 
 ---@param recipe_type "recipe"|"virtual_recipe"
 ---@param opts { is_source: boolean?, is_sink: boolean? }?

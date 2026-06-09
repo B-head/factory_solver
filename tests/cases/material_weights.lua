@@ -13,19 +13,8 @@
 local harness = require "tests/harness"
 local mw = require "solver/material_weights"
 
-local function item(name, amount)
-    return { type = "item", name = name, quality = "normal", amount_per_second = amount }
-end
-
-local function line(recipe_name, products, ingredients)
-    return {
-        recipe_typed_name = { type = "recipe", name = recipe_name, quality = "normal" },
-        products = products,
-        ingredients = ingredients,
-        power_per_second = 0,
-        pollution_per_second = 0,
-    }
-end
+local fixture = require "tests/cases/fixture"
+local item, line = fixture.item, fixture.line
 
 -- Variable-name shorthand for an item/normal material.
 local function key(name) return "item/" .. name .. "/normal" end

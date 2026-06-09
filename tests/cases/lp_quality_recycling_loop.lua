@@ -17,55 +17,9 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
-local QUALITY = { "normal", "uncommon", "rare", "epic", "legendary" }
-
-local function item(name, quality, amount)
-    return { type = "item", name = name, quality = quality or "normal", amount_per_second = amount }
-end
-
-local function line(recipe_name, recipe_quality, products, ingredients)
-    return {
-        recipe_typed_name = { type = "recipe", name = recipe_name, quality = recipe_quality or "normal" },
-        products = products,
-        ingredients = ingredients,
-        power_per_second = 0,
-        pollution_per_second = 0,
-    }
-end
-
----Same helper as lp_quality_cascade; kept local so each case file is
----self-contained (the test runner loads files independently).
----@param name string
----@param base_amount number
----@param start_quality string
----@param tiers integer
----@param next_prob number?
-local function cascade(name, base_amount, start_quality, tiers, next_prob)
-    next_prob = next_prob or 0.1
-    local start_idx
-    for i, q in ipairs(QUALITY) do
-        if q == start_quality then start_idx = i; break end
-    end
-    assert(start_idx, "unknown start_quality: " .. tostring(start_quality))
-
-    local ret = {}
-    local prob_left = 1
-    for offset = 0, tiers - 1 do
-        local idx = start_idx + offset
-        if idx > #QUALITY then break end
-        local p
-        if offset < tiers - 1 and idx < #QUALITY then
-            p = prob_left * (1 - next_prob)
-            prob_left = prob_left * next_prob
-        else
-            p = prob_left
-            prob_left = 0
-        end
-        table.insert(ret, item(name, QUALITY[idx], base_amount * p))
-        if prob_left == 0 then break end
-    end
-    return ret
-end
+local fixture = require "tests/cases/fixture"
+local QUALITY = fixture.QUALITY
+local item, line, cascade = fixture.item, fixture.line, fixture.cascade
 
 local cases = {}
 

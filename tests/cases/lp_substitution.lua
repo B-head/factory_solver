@@ -17,19 +17,8 @@ local cp = require "solver/create_problem"
 local pg = require "solver/problem_generator"
 local sub = require "solver/substitution"
 
-local function item(name, amount)
-    return { type = "item", name = name, quality = "normal", amount_per_second = amount }
-end
-
-local function line(recipe_name, products, ingredients)
-    return {
-        recipe_typed_name = { type = "recipe", name = recipe_name, quality = "normal" },
-        products = products,
-        ingredients = ingredients,
-        power_per_second = 0,
-        pollution_per_second = 0,
-    }
-end
+local fixture = require "tests/cases/fixture"
+local item, line = fixture.item, fixture.line
 
 local function count(t)
     local n = 0

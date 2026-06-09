@@ -8,9 +8,8 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
-local function item(name, amount)
-    return { type = "item", name = name, quality = "normal", amount_per_second = amount }
-end
+local fixture = require "tests/cases/fixture"
+local item = fixture.item
 
 -- A point temperature is the degenerate range [T,T] in the range-only model.
 local function fluid_single(name, temperature, amount)

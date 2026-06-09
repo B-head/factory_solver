@@ -21,9 +21,8 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
-local function item(name, quality, amount)
-    return { type = "item", name = name, quality = quality or "normal", amount_per_second = amount }
-end
+local fixture = require "tests/cases/fixture"
+local item = fixture.item
 
 local function line(recipe_name, products, ingredients, fuel_ingredient, fuel_burnt_result)
     return {

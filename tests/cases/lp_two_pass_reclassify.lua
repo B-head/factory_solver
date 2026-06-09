@@ -28,16 +28,9 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
-local function it(name, amount)
-    return { type = "item", name = name, quality = "normal", amount_per_second = amount }
-end
-local function line(recipe, products, ingredients)
-    return {
-        recipe_typed_name = { type = "recipe", name = recipe, quality = "normal" },
-        products = products, ingredients = ingredients,
-        power_per_second = 0, pollution_per_second = 0,
-    }
-end
+local fixture = require "tests/cases/fixture"
+local it = fixture.item
+local line = fixture.line
 
 -- Run create_problem + solve, return the packed primal map.
 local function solve(name, constraints, lines, forced)
