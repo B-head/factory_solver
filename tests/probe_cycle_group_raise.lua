@@ -45,6 +45,9 @@ end
 local function shortage_total(p, x)
     local s = 0; for key, pr in pairs(p.primals) do if pr.kind == "shortage_source" then s = s + math.abs(x[key] or 0) end end; return s
 end
+local function initial_total(p, x)
+    local s = 0; for key, pr in pairs(p.primals) do if pr.kind == "initial_source" then s = s + math.abs(x[key] or 0) end end; return s
+end
 local function shortage_in_set(p, x, set)
     local s = 0
     for key, pr in pairs(p.primals) do if pr.kind == "shortage_source" and pr.material and set[pr.material] then s = s + math.abs(x[key] or 0) end end
@@ -69,13 +72,13 @@ local function scc_threshold(constraints, lines, scc_set, target0, thresh)
 end
 
 local COLS = { "label", "n_scc_import", "n_flip", "n_traded", "n_stuck",
-    "short0", "short_after", "target0", "target_after", "state_after" }
+    "short0", "short_after", "ini0", "ini_after", "target0", "target_after", "state_after" }
 
 local function process(constraints, lines, label, emit)
     local ok, p0 = pcall(build, constraints, lines); if not ok then return end
     local st, v0 = solve(p0); if st ~= "finished" then return end
     local thresh = ed.park_threshold(v0, p0.primals)
-    local S0, T0 = shortage_total(p0, v0.x), target_total(p0, v0.x)
+    local S0, T0, I0 = shortage_total(p0, v0.x), target_total(p0, v0.x), initial_total(p0, v0.x)
     if S0 <= thresh then return end  -- no import at baseline
 
     local adj = mc.build_material_graph(lines)
@@ -97,7 +100,7 @@ local function process(constraints, lines, label, emit)
     end
 
     -- apply all flip thresholds at once, measure global totals
-    local S_after, T_after, state_after = -1, -1, "noflip"
+    local S_after, I_after, T_after, state_after = -1, -1, -1, "noflip"
     if #flip_sets > 0 then
         local ok2, p2 = pcall(build, constraints, lines)
         if ok2 then
@@ -108,11 +111,14 @@ local function process(constraints, lines, label, emit)
             end
             local s2, v2 = solve(p2)
             state_after = s2
-            if s2 == "finished" then S_after, T_after = shortage_total(p2, v2.x), target_total(p2, v2.x) end
+            if s2 == "finished" then
+                S_after, T_after, I_after = shortage_total(p2, v2.x), target_total(p2, v2.x), initial_total(p2, v2.x)
+            end
         end
     end
     emit({ label = label, n_scc_import = n_import, n_flip = n_flip, n_traded = n_traded, n_stuck = n_stuck,
-        short0 = S0, short_after = S_after, target0 = T0, target_after = T_after, state_after = state_after })
+        short0 = S0, short_after = S_after, ini0 = I0, ini_after = I_after,
+        target0 = T0, target_after = T_after, state_after = state_after })
 end
 
 -- ---- main -------------------------------------------------------------------
