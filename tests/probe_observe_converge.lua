@@ -115,27 +115,53 @@ local function other_escape(problem, x, exclude)
 end
 
 -- Build a problem and apply per-key shortage cost multipliers (key -> mult);
--- keys absent from `mults` keep the flat baseline. Returns problem, state, x.
+-- keys absent from `mults` keep the flat baseline. Returns problem, state, x, and
+-- the IPM iteration count of THIS solve (steps) -- the real cost unit, vs the
+-- coarser solve count. Each solve here is COLD (fresh create_problem, no warm
+-- start), so these iterations are an upper bound on a warm-started production loop.
 local function solve_with(constraints, lines, mults)
     local ok, p = pcall(build, constraints, lines)
-    if not ok then return nil end
+    if not ok then return nil, nil, nil, 0 end
     for key, m in pairs(mults) do
         if p.primals[key] then p.primals[key].cost = ELASTIC_COST * m end
     end
-    local s, v = solve(p)
-    if s ~= "finished" then return p, s, nil end
-    return p, s, v.x
+    local s, v, steps = solve(p)
+    if s ~= "finished" then return p, s, nil, steps end
+    return p, s, v.x, steps
+end
+
+-- WARM-started solve of the perturbed problem: same as solve_with but seeds the
+-- IPM from `warm` (a previous solve's packed variables) instead of the cold
+-- Mehrotra start. The solver's iteration-1 re-centering clamp keeps the warm
+-- direction while discarding the boundary clamps. Returns state, steps -- this is
+-- a measurement-only re-solve (the cold solve_with stays the canonical result),
+-- so it reports just convergence + cost, not x.
+local function solve_with_warm(constraints, lines, mults, warm)
+    local ok, p = pcall(build, constraints, lines)
+    if not ok then return "error", 0 end
+    for key, m in pairs(mults) do
+        if p.primals[key] then p.primals[key].cost = ELASTIC_COST * m end
+    end
+    local state, iteration, vars, steps = "ready", nil, warm, 0
+    while state == "calculating" or state == "ready" do
+        state, iteration, vars = lp.solve(p, state, iteration, vars, TOL, ITER)
+        steps = steps + 1
+        if steps > ITER + 4 then break end
+    end
+    return state, steps
 end
 
 local COLS = {
     "label", "n_scc", "n_keys", "n_oneshot", "n_after_corr", "n_unresolved",
     "observe_solves", "rounds", "total_solves",
+    "base_iters", "observe_iters", "verify_iters", "total_iters",
+    "warm_observe_iters", "warm_verify_iters", "total_warm_iters", "warm_fail",
 }
 
 local function process(constraints, lines, label, emit)
     local ok, prob = pcall(build, constraints, lines)
     if not ok then return end
-    local state, vars = solve(prob)
+    local state, vars, base_iters = solve(prob)
     if state ~= "finished" then return end
     local x0 = vars.x
     local th = ed.park_threshold(vars, prob.primals)
@@ -195,12 +221,18 @@ local function process(constraints, lines, label, emit)
     -- promise / unavoidable -> freeze now (import is correct), don't waste rounds.
     -- One observe solve per SCC; most dumps are single-SCC so this stays ~1.
     local esc_before = other_escape(prob, x0, excl_all)
-    local observe_solves = 0
+    local observe_solves, observe_iters = 0, 0
+    local warm_observe_iters, warm_verify_iters, warm_fail = 0, 0, 0
     for gi, g in ipairs(groups) do
         local obs_mults = {}
         for _, k in ipairs(g.sh) do obs_mults[k.key] = k.ceiling end
-        local pobs, sobs, xobs = solve_with(constraints, lines, obs_mults)
+        local pobs, sobs, xobs, obs_steps = solve_with(constraints, lines, obs_mults)
         observe_solves = observe_solves + 1
+        observe_iters = observe_iters + (obs_steps or 0)
+        -- warm measurement: same observe, seeded from the baseline solution.
+        local ws, wsteps = solve_with_warm(constraints, lines, obs_mults, vars)
+        warm_observe_iters = warm_observe_iters + wsteps
+        if ws ~= "finished" then warm_fail = warm_fail + 1 end
         local cleared = xobs ~= nil
         local short_o, relax_o = 0, math.huge
         if xobs then
@@ -227,12 +259,17 @@ local function process(constraints, lines, label, emit)
     end
 
     -- Phase 3+: verify + correct loop. Each round = one solve.
-    local rounds = 0
+    local rounds, verify_iters = 0, 0
     while rounds < MAX_ROUNDS do
         rounds = rounds + 1
         local mults = {}
         for _, k in ipairs(keys) do mults[k.key] = k.frozen and 1 or k.mult end
-        local pr, sr, xr = solve_with(constraints, lines, mults)
+        local pr, sr, xr, ver_steps = solve_with(constraints, lines, mults)
+        verify_iters = verify_iters + (ver_steps or 0)
+        -- warm measurement: same verify, seeded from the baseline solution.
+        local ws, wsteps = solve_with_warm(constraints, lines, mults, vars)
+        warm_verify_iters = warm_verify_iters + wsteps
+        if ws ~= "finished" then warm_fail = warm_fail + 1 end
         if not xr then break end
 
         local live_straggler = false
@@ -278,6 +315,11 @@ local function process(constraints, lines, label, emit)
         n_oneshot = n_oneshot, n_after_corr = n_after, n_unresolved = n_unres,
         observe_solves = observe_solves, rounds = rounds,
         total_solves = 1 + observe_solves + rounds,
+        base_iters = base_iters, observe_iters = observe_iters,
+        verify_iters = verify_iters, total_iters = base_iters + observe_iters + verify_iters,
+        warm_observe_iters = warm_observe_iters, warm_verify_iters = warm_verify_iters,
+        total_warm_iters = base_iters + warm_observe_iters + warm_verify_iters,
+        warm_fail = warm_fail,
     })
 end
 
