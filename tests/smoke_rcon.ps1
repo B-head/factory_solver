@@ -321,10 +321,10 @@ try {
             if ($readSide -ne "OK") { $verdict = "FAIL" }
         }
 
-        # The catalyst_reclassify fixture additionally proves the two-pass
-        # diagnose-then-reclassify actually fired (forced_imports set, residual
-        # cheat ~0), not merely that the solve converged -- a clean solve also
-        # reaches "finished".
+        # The catalyst_reclassify fixture additionally proves the observe-price
+        # machine resolved the catalyst loop (observe_price settled, residual
+        # cheat ~0, loop recipes running), not merely that the solve converged --
+        # a clean solve also reaches "finished".
         $reclassify = $null
         if ($verdict -eq "PASS" -and $fixture -eq "catalyst_reclassify") {
             $reclassify = Invoke-RconCommand -Stream $stream `

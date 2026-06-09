@@ -3,8 +3,20 @@ local acc = require "manage/accessor"
 local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 local substitution = require "solver/substitution"
+local observe_price = require "solver/observe_price"
 
 local iterate_limit = 600
+
+-- Flip to false to fall straight back to the legacy hard reachability gate +
+-- two-pass diagnose (immediate rollback). When true (shipped), the gate is
+-- replaced by a SOFT gate -- reachable shortages priced at elastic_cost *
+-- soft_gate_k so the chain still wins -- and the unreachable self-sustaining
+-- catalyst cycles are repriced by the observe-price fixed point below.
+local observe_price_enabled = true
+-- The soft-gate multiplier. Must stay below target_cost/elastic_cost (= 2^10) so
+-- a reachable shortage never undercuts target relaxation; 256 is the measured
+-- minimum that clears every headless fixture (see project_tilted_cost memo).
+local soft_gate_k = 256
 
 -- Proportional row reduction: fold provably surplus-free producer/consumer
 -- doubletons out of the LP before the IPM solves it, then reconstruct the
@@ -55,20 +67,58 @@ function M.forwerd_solve(force_data, solution)
     end
 
     if solution.solver_state == "ready" then
-        -- A fresh "ready" (any edit / migration / new solution) starts pass 1 and
-        -- must drop forced imports left from a previous solve's reclassify pass.
-        -- The two-pass restart below sets reclassify_pending so its own "ready"
-        -- tick keeps the freshly diagnosed seeds instead of clearing them.
-        if not solution.reclassify_pending then
-            solution.forced_imports = nil
+        local options = nil
+        if observe_price_enabled then
+            -- Shipped path: replace the hard gate with the soft gate and apply the
+            -- current observe-price phase's per-material shortage overrides. A
+            -- fresh "ready" (edit / migration / new solution) drops in-flight
+            -- observe-price state so the next solve restarts from a clean
+            -- baseline; the loop's OWN restarts set op_restart to keep their plan.
+            if not solution.op_restart then solution.observe_price = nil end
+            solution.op_restart = nil
+            solution.reclassify_pending = nil
+
+            options = { reachability_gating = false, reachability_soft_gate_k = soft_gate_k }
+            -- forced_imports here carries the two-pass diagnose's cheap-import set
+            -- (the avoidable export-feasible cheats observe-price does NOT
+            -- fabricate -- the running-on-imported-input cycles where import is
+            -- correct). It is computed once after the baseline solve and reapplied
+            -- on every rebuild; observe-price's fabricate targets get
+            -- shortage_cost_overrides instead.
+            local op = solution.observe_price
+            local forced = op and op.imports or nil
+            if op and op.reverted then
+                -- keep-best fallback: the priced result was worse, so cheap-import
+                -- everything (the diagnose set plus the fabricate targets).
+                forced = {}
+                for m in pairs(op.imports or {}) do forced[m] = true end
+                if op.plan then for _, k in ipairs(op.plan.keys) do forced[k.material] = true end end
+            elseif op and op.plan then
+                if op.phase == "observe" then
+                    options.shortage_cost_overrides =
+                        observe_price.observe_overrides(op.plan, op.plan.groups[op.group_index])
+                elseif op.phase == "verify" then
+                    options.shortage_cost_overrides = observe_price.verify_overrides(op.plan)
+                end
+            end
+            solution.forced_imports = forced
+        else
+            -- Legacy rollback: hard reachability gate + two-pass diagnose. A fresh
+            -- "ready" drops forced imports left from a previous reclassify pass;
+            -- the two-pass restart sets reclassify_pending to keep its seeds.
+            if not solution.reclassify_pending then
+                solution.forced_imports = nil
+            end
+            solution.reclassify_pending = nil
+            solution.observe_price = nil
         end
-        solution.reclassify_pending = nil
 
         solution.problem = create_problem.create_problem(
             solution.name,
             solution.constraints,
             get_normalized(),
-            solution.forced_imports
+            solution.forced_imports,
+            options
         )
         -- Mirror the inactive-recipe set onto the solution so save / UI lookups
         -- (which see solution, not problem) can gray out isolated lines without
@@ -125,29 +175,128 @@ function M.forwerd_solve(force_data, solution)
 
     solution.quantity_of_machines_required = problem:filter_result(solution.raw_variables)
 
-    -- Two-pass diagnose-then-reclassify (catalyst-loop import-vs-fabricate). When
-    -- the FIRST pass converges, check whether it fabricated any material through
-    -- |shortage_source| / |elastic| that its own recipe set can actually produce
-    -- (export_feasible) -- an AVOIDABLE cheat the cost tiers preferred over an
-    -- inefficient real chain. If any, re-seed them as forced imports and restart
-    -- for ONE more pass, warm-started from the pass-1 primal. forced_imports is
-    -- nil through pass 1, so this guard fires exactly once per solve cycle; pass 2
-    -- has it set and skips re-diagnosis. Unavoidable cheats (no flow makes the
-    -- material) are never diagnosed and keep their |shortage_source| escape hatch.
-    if solution.solver_state == "finished"
-        and solution.forced_imports == nil
-        and solution.raw_variables
-        and solution.problem then
-        local avoidable = create_problem.diagnose_avoidable_cheats(
-            solution.raw_variables.x, solution.problem.primals, get_normalized())
-        if next(avoidable) ~= nil then
-            solution.forced_imports = avoidable
-            solution.reclassify_pending = true
-            solution.solver_state = "ready"
-            solution.solver_iteration = nil
-            -- raw_variables kept as the pass-2 warm start.
+    if observe_price_enabled then
+        -- observe-price fixed point (the shipped replacement for the two-pass).
+        -- Each phase below is a full incremental solve; advancing it sets
+        -- solver_state="ready" + op_restart so the rebuild above stays on the
+        -- same plan. See M.observe_price_step.
+        if solution.solver_state == "finished" then
+            M.observe_price_step(solution, get_normalized())
+        end
+    else
+        -- Legacy two-pass diagnose-then-reclassify (rollback). When the FIRST pass
+        -- converges, re-seed every avoidable export-feasible cheat as a forced
+        -- import and restart once, warm-started. forced_imports is nil through
+        -- pass 1 so this fires exactly once per solve cycle.
+        if solution.solver_state == "finished"
+            and solution.forced_imports == nil
+            and solution.raw_variables
+            and solution.problem then
+            local avoidable = create_problem.diagnose_avoidable_cheats(
+                solution.raw_variables.x, solution.problem.primals, get_normalized())
+            if next(avoidable) ~= nil then
+                solution.forced_imports = avoidable
+                solution.reclassify_pending = true
+                solution.solver_state = "ready"
+                solution.solver_iteration = nil
+                -- raw_variables kept as the pass-2 warm start.
+            end
         end
     end
+end
+
+---Advance the observe-price fixed point one step after a baseline / observe /
+---verify solve has finished. Mutates solution.observe_price (the in-flight plan)
+---and, when another solve is needed, flips solver_state back to "ready" with
+---op_restart set so the rebuild keeps the plan. When the plan converges (or there
+---is nothing to price) it leaves solver_state == "finished" and the current
+---solution stands. Spread across ticks exactly like the old two-pass restart.
+---@param solution Solution
+---@param lines NormalizedProductionLine[]
+function M.observe_price_step(solution, lines)
+    if not solution.raw_variables or not solution.problem then return end
+    local primals = solution.problem.primals
+    local x = solution.raw_variables.x
+    local op = solution.observe_price
+
+    local function restart()
+        solution.op_restart = true
+        solution.solver_state = "ready"
+        solution.solver_iteration = nil
+    end
+
+    if not op then
+        -- The baseline (soft-gate only) solve just finished. Two things split the
+        -- avoidable cheats it left:
+        --   * observe-price's plan -- self-sustaining IDLE cycles to fabricate;
+        --   * the two-pass diagnose -- the remaining avoidable export-feasible
+        --     cheats (running-on-imported-input cycles where import is correct,
+        --     e.g. lp_two_pass_reclassify), cheap-imported via forced_imports.
+        -- The diagnose is a structural import-seeder (it picks WHICH material to
+        -- import), the same role deficit_seeding / catalyst_closure play, so it
+        -- stays. Exclude observe-price's fabricate targets so the two don't fight.
+        local plan = observe_price.collect_plan(primals, x, lines)
+        local imports = create_problem.diagnose_avoidable_cheats(x, primals, lines)
+        if plan then
+            for _, k in ipairs(plan.keys) do imports[k.material] = nil end
+        end
+        if not plan and next(imports) == nil then
+            -- Nothing to fabricate or cheap-import: park a "done" sentinel so we
+            -- don't re-diagnose on every idle tick.
+            solution.observe_price = { phase = "done" }
+            return
+        end
+        solution.observe_price = {
+            phase = plan and "observe" or "finalize",
+            plan = plan,
+            imports = imports,
+            group_index = 1,
+            round = 0,
+            baseline_cheat = observe_price.cheat_mass(primals, x),
+        }
+        restart()
+    elseif op.phase == "finalize" then
+        -- No fabricate plan -- the single solve that applied the cheap-import set
+        -- just finished and stands.
+        op.phase = "done"
+    elseif op.phase == "observe" then
+        -- The observe solve for group_index just finished: price (or freeze) it,
+        -- then observe the next group, or move on to verify.
+        observe_price.apply_observe(op.plan, op.plan.groups[op.group_index], primals, x)
+        op.group_index = op.group_index + 1
+        if op.group_index <= #op.plan.groups then
+            restart()
+        else
+            op.phase = "verify"
+            op.round = 0
+            restart()
+        end
+    elseif op.phase == "verify" then
+        if op.reverted then
+            -- The keep-best revert solve (no overrides) finished: it is the
+            -- baseline-equivalent answer; accept it.
+            op.phase = "done"
+            return
+        end
+        op.round = op.round + 1
+        local live = observe_price.apply_verify(op.plan, x, op.round)
+        if live and op.round < observe_price.MAX_ROUNDS then
+            restart()
+        else
+            -- Keep-best guard: observe-price is best-effort. If the priced result
+            -- carries MORE import/relaxation cheat than the baseline, discard the
+            -- overrides and re-solve once at the baseline (the placed cycle stays a
+            -- neutral import rather than a worse fabrication).
+            local final_cheat = observe_price.cheat_mass(primals, x)
+            if final_cheat > op.baseline_cheat + 1e-6 then
+                op.reverted = true
+                restart()
+            else
+                op.phase = "done"
+            end
+        end
+    end
+    -- op.phase == "done": nothing to do; the finished solution stands.
 end
 
 ---comment

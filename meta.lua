@@ -134,8 +134,37 @@ __factory_solver__storage = {}
 ---@field solver_iteration integer?
 ---@field raw_variables PackedVariables?
 ---@field done_lines table<string, true>?
----@field forced_imports table<string, true>?  Two-pass reclassify (manage/pre_solve.lua): avoidable cheats diagnosed from pass 1, re-seeded as |initial_source| imports for pass 2. nil during pass 1 / a clean solve.
----@field reclassify_pending boolean?  Internal flag: set when the two-pass restart re-arms solver_state="ready" for pass 2, so forwerd_solve keeps forced_imports instead of clearing them as it would for a fresh solve.
+---@field forced_imports table<string, true>?  Legacy two-pass reclassify (manage/pre_solve.lua, used only when observe_price is disabled): avoidable cheats diagnosed from pass 1, re-seeded as |initial_source| imports for pass 2. nil during pass 1 / a clean solve.
+---@field reclassify_pending boolean?  Legacy two-pass internal flag: set when the restart re-arms solver_state="ready" for pass 2, so forwerd_solve keeps forced_imports instead of clearing them as it would for a fresh solve.
+---@field observe_price ObservePriceState?  In-flight observe-price fixed point (manage/pre_solve.lua / solver/observe_price.lua). nil before the baseline solve; a "done" sentinel once the loop settles. Plain tables only, so it rides storage without a metatable.
+---@field op_restart boolean?  Internal flag: set when observe_price advances and re-arms solver_state="ready", so the rebuild keeps the in-flight plan instead of dropping it as it would for a fresh edit.
+
+---@class ObservePriceState
+---@field phase "observe"|"verify"|"finalize"|"done"  Which loop stage the next finished solve belongs to. "finalize" is the single cheap-import-only solve when nothing qualifies to fabricate; "done" is the settled sentinel.
+---@field plan ObservePricePlan?  The fabricate plan (nil when only cheap-imports apply).
+---@field imports table<string, true>?  Two-pass diagnose's cheap-import set (avoidable export-feasible cheats observe-price does not fabricate), applied as forced_imports on every rebuild.
+---@field group_index integer?  1-based index into plan.groups currently being observed.
+---@field round integer?  Verify/correct round counter.
+---@field baseline_cheat number?  shortage+elastic mass of the baseline solve, for the keep-best guard.
+---@field reverted boolean?  Set when the keep-best guard discarded the fabricate overrides and fell back to cheap-importing every avoidable cheat.
+
+---@class ObservePricePlan
+---@field keys ObservePriceKey[]
+---@field groups string[]  SCC group ids, in observe order.
+---@field exclude table<string, true>  The plan's own shortage variable keys (for the escape-mass delta).
+---@field esc_before number  Baseline other-escape mass.
+---@field relax0 number  Baseline target-relaxation mass.
+---@field threshold number  Baseline park threshold.
+
+---@class ObservePriceKey
+---@field key string  The |shortage_source| variable name.
+---@field material string  The material variable it stands in for (the shortage_cost_overrides key).
+---@field qty number  Baseline shortage value.
+---@field ceiling number  Max multiplier (target_cost / (elastic_cost * qty)).
+---@field group string  SCC group id.
+---@field mult number  Current price multiplier.
+---@field frozen boolean  Frozen back to flat import (cone-over-promise / unavoidable).
+---@field resolved_round integer  Round the key's shortage parked (-1 = unresolved).
 
 ---@class Constraint
 ---@field type FilterType

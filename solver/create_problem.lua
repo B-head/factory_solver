@@ -718,7 +718,9 @@ end
 ---@class CreateProblemOptions
 ---@field deficit_seeding boolean?      Default true. Seed find_deficit_materials' raw deficits as |initial_source| cycle entry points. Off: skip that seeding.
 ---@field catalyst_closure boolean?     Default true. Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. Off: skip the loop.
----@field reachability_gating boolean?  Default true. Gate |shortage_source| on un-reachability (reachable materials must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|.
+---@field reachability_gating boolean?  Default true. HARD gate: deny |shortage_source| to reachable materials (they must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|. The shipped build replaces this with reachability_soft_gate_k (below); the hard gate is retained for the A/B and for fixtures that still assert the deny-the-hatch behaviour.
+---@field reachability_soft_gate_k number?  SOFT gate (the shipped replacement for the hard reachability_gating): instead of denying the hatch to a reachable material, emit its |shortage_source| at elastic_cost * k (k >> 1), so running the chain beats the penalised import. Reproduces the gate as a cost using create_problem's OWN reachability verdict (active lines + deficit seeds + catalyst closure). k must stay below target_cost/elastic_cost (= 2^10) so a reachable shortage never undercuts target relaxation; the shipped value is 256. Applies only to reachable, non-deficit materials; unreachable materials keep the flat elastic_cost hatch (their import-vs-fabricate is observe_price's job via shortage_cost_overrides). nil leaves the hatch flat.
+---@field shortage_cost_overrides table<string, number>?  Per-material multiplier on the |shortage_source| objective (cost = elastic_cost * mult), keyed by material variable name. Plain string-keyed table, storage-safe and deterministic. Applied regardless of gating and takes precedence over reachability_soft_gate_k. This is solver/observe_price's production channel: it reprices the unreachable self-sustaining catalyst shortages so the placed cycle fabricates instead of penalty-importing. Absent materials keep their gate/flat cost. nil leaves costs unchanged.
 ---@field shortage_cost_fn (fun(constraint_name: string, is_reachable: boolean): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. is_reachable is create_problem's OWN reachability verdict (the same set the gate uses: active lines + deficit seeds + catalyst closure), so a "soft gate" can lift only reachable materials and leave unreachable ones their cheap import hatch. The caller may also close over any precomputed signal (e.g. M.compute_reachability_depth). nil leaves the flat elastic_cost in place.
 ---@field surplus_cost_fn (fun(constraint_name: string): number)?  Research only. Re-prices the |surplus_sink| (over-production / byproduct disposal) objective instead of the flat elastic_cost. Lowering surplus relative to shortage tests the "byproduct disposal is bookkeeping, not real economic cost" hypothesis: a chain whose cost is byproduct-dominated should beat the import, while a raw-dominated chain (genuine resource spend) is unaffected. nil leaves the flat elastic_cost in place.
 ---@field surplus_sink_gating boolean?   Default FALSE -- this is NOT shipped behaviour, a research probe (project_sink_side_reachability_gating). When on, gate |surplus_sink| on drainability (the backward dual of reachability): a material that can shed surplus to a free terminal sink loses its penalised over-production escape. Measured to change ~21% of the corpus and break convergence on a few, so it ships OFF; the switch only exists to reproduce that A/B. Off (default): every produced+consumed non-bridge material gets a |surplus_sink|.
@@ -747,6 +749,12 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- un-gated |shortage_source| objective. nil leaves the flat elastic_cost.
     local opt_shortage_cost_fn = options.shortage_cost_fn
     local opt_surplus_cost_fn = options.surplus_cost_fn
+    -- Soft gate (shipped gating replacement) and observe_price's per-material
+    -- overrides. Both re-price the |shortage_source| objective on the same
+    -- (un-gated) hatch; overrides win over the soft gate, the soft gate lifts
+    -- reachable materials, unreachable ones stay flat.
+    local opt_soft_gate_k = options.reachability_soft_gate_k
+    local opt_shortage_cost_overrides = options.shortage_cost_overrides
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -1001,21 +1009,32 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
                 problem:add_subject_term(slack_name, bare_limit, 1)
             end
         elseif not (opt_reachability_gating and reachable[constraint_name]) then
-            -- |shortage_source| is gated on reachability: materials reachable
-            -- from raw inputs (or promoted deficits) must run their producer
-            -- chain. Without this gating the LP would pay elastic_cost to
-            -- fabricate intermediates rather than run long recycling chains
-            -- (e.g. Fulgora scrap), which produces wrong solutions. Materials
-            -- stuck in dead-end cycles that the deficit heuristic did not
-            -- catch (mass-losing loops with no external input) keep the
-            -- escape hatch — otherwise the LP can only return all-zero.
-            -- Research ablation: opt_reachability_gating=false un-gates this so
-            -- every non-deficit produced+consumed material gets the hatch (the
-            -- original pre-gating behaviour), to measure what the gate prevents.
+            -- |shortage_source| is the import-vs-fabricate escape. Reachable
+            -- materials (reachable from raw inputs or promoted deficits) must run
+            -- their producer chain rather than pay elastic_cost to fabricate
+            -- intermediates (the Fulgora-scrap wrong-solution). The shipped build
+            -- enforces that as a SOFT gate (reachability_soft_gate_k): the hatch
+            -- exists but is priced at elastic_cost*k so the chain wins. The legacy
+            -- HARD gate (opt_reachability_gating) instead denies the hatch
+            -- entirely and is kept for the A/B; when it is on, reachable materials
+            -- skip this branch. Materials in dead-end / mass-losing cycles the
+            -- deficit heuristic did not catch stay unreachable and keep the flat
+            -- hatch -- their import-vs-fabricate is observe_price's job, repriced
+            -- per material through shortage_cost_overrides.
             local elastic_name = vk.shortage_source(constraint_name)
+            local is_reachable = reachable[constraint_name] == true
             local shortage_cost = elastic_cost
+            if opt_soft_gate_k and is_reachable then
+                shortage_cost = elastic_cost * opt_soft_gate_k
+            end
+            -- Per-material override (observe_price) takes precedence over the gate.
+            if opt_shortage_cost_overrides then
+                local mult = opt_shortage_cost_overrides[constraint_name]
+                if mult then shortage_cost = elastic_cost * mult end
+            end
+            -- Research-only callback, authoritative when set (headless ablation).
             if opt_shortage_cost_fn then
-                shortage_cost = opt_shortage_cost_fn(constraint_name, reachable[constraint_name] == true)
+                shortage_cost = opt_shortage_cost_fn(constraint_name, is_reachable)
             end
             problem:add_objective(elastic_name, shortage_cost, false, "shortage_source", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, 1)
@@ -1141,5 +1160,11 @@ function M.diagnose_avoidable_cheats(x, primals, production_lines, epsilon)
     end
     return avoidable
 end
+
+-- Cost tiers exported so solver/observe_price.lua can compute its ceiling
+-- (target_cost / (elastic_cost * qty)) and its per-material shortage multipliers
+-- against the same constants the LP is priced with, instead of duplicating them.
+M.elastic_cost = elastic_cost
+M.target_cost = target_cost
 
 return M

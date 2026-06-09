@@ -256,6 +256,12 @@ function M.reinit_force_data(force_index)
             -- vector) is keyed by the same names, so drop it too.
             solution.problem = nil
             solution.raw_variables = nil
+            -- A configuration change is a fresh solve: drop any in-flight
+            -- observe-price plan (and its restart flag) so the rebuild below
+            -- starts from a clean baseline instead of resuming a stale plan whose
+            -- variable keys may no longer match.
+            solution.observe_price = nil
+            solution.op_restart = nil
             solution.solver_state = "ready"
             -- Normalize any legacy numeric solver_state from a save written
             -- before the integer iteration counter was split out into its own
@@ -399,6 +405,10 @@ function M.apply_research_bonuses(force_data, new_bonuses)
     for _, solution in pairs(force_data.solutions) do
         solution.problem = nil
         solution.raw_variables = nil
+        -- New bonuses change recipe amounts, so re-solve fresh: drop any in-flight
+        -- observe-price plan so it does not resume against the rebuilt problem.
+        solution.observe_price = nil
+        solution.op_restart = nil
         solution.solver_state = "ready"
     end
 end

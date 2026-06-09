@@ -100,6 +100,7 @@ local case_files = {
     "lp_explorer_constrained_material",
     "lp_explorer_pyanodon_chains",
     "lp_two_pass_reclassify",
+    "lp_observe_price",
     "chain_reachability",
     "explore_detect",
     "lp_substitution",
