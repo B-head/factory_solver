@@ -4,7 +4,7 @@
 -- of the loop that predates the module), this drives the real module synchronously,
 -- mirroring manage/pre_solve.lua's incremental state machine, so it measures exactly
 -- what production does -- including reading each escape's real primal.cost (the soft
--- gate's 256x secondary shortages) through the module's cost-weighted other_escape.
+-- gate's 256x secondary shortages) through the module's cost-weighted escape_cost.
 --
 -- Per dump it emits the convergence outcome: total solves, one-shot vs corrected
 -- keys, avoidable still importing at the end (a genuine miss), collapse, over-dump.
@@ -25,12 +25,12 @@ local SOFT_GATE_K = 256
 local OPTS_BASE = { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K }
 
 -- A/B switch: FS_LEGACY=1 restores the pre-recalibration predictor (mass-weighted
--- other_escape over surplus_sink + shortage_source only, K_PRED=1.5) so the same
+-- escape_cost over surplus_sink + shortage_source only, K_PRED=1.5) so the same
 -- driver measures BEFORE vs AFTER the cost-weighted + K=2.0 change. Default = the
 -- shipped module as-is.
 if os.getenv("FS_LEGACY") then
     op.K_PRED = 1.5
-    op.other_escape = function(primals, x, exclude)
+    op.escape_cost = function(primals, x, exclude)
         local s = 0
         for key, p in pairs(primals) do
             if (p.kind == "surplus_sink" or p.kind == "shortage_source") and not exclude[key] then

@@ -12,11 +12,11 @@
 --   1. BASELINE solve (flat 1024) -> collect the avoidable-cheat shortage keys:
 --      a material with an active shortage whose cyclic SCC is self-sustaining,
 --      export-feasible, and currently idle (the placed cycle is not running).
---   2. OBSERVE (one solve per SCC at the ceiling) -> read the escape-COST delta
---      dEsc the forced fabrication drags in (objective cost of the collateral
---      surplus/shortage/initial_source, in elastic_cost units -- see M.other_escape
+--   2. OBSERVE (one solve per SCC at the ceiling) -> read the escape-cost delta
+--      dCost the forced fabrication drags in (objective cost of the collateral
+--      surplus/shortage/initial_source, in elastic_cost units -- see M.escape_cost
 --      for why cost, not mass), and price the key at
---      clamp(K_PRED * dEsc/qty, 2, ceiling). An SCC whose shortage does not
+--      clamp(K_PRED * dCost/qty, 2, ceiling). An SCC whose shortage does not
 --      clear without relaxing the target is cone-over-promise: FREEZE it (import
 --      is correct) rather than chase it.
 --   3. VERIFY + CORRECT -> re-solve at the predicted prices; a key still
@@ -93,7 +93,7 @@ end
 -- Objective COST carried by the escape boundary (surplus_sink + shortage_source +
 -- initial_source), in elastic_cost units, excluding `exclude` keys -- the "other
 -- escapes" a forced fabrication drags in. apply_observe reads the delta of this vs
--- baseline as dEsc and prices the cycle's shortage at K_PRED * dEsc/qty.
+-- baseline (dCost) and prices the cycle's shortage at K_PRED * dCost/qty.
 --
 -- This is COST-weighted, not mass-weighted, and that is load-bearing on the shipped
 -- soft-gate config: forcing a cycle to fabricate drags in SECONDARY shortages that
@@ -103,14 +103,14 @@ end
 -- objective cost captures the 256x and the prediction lands in one shot. It also
 -- folds initial_source in correctly: the raw supply a fabrication pulls in is huge
 -- by mass but cheap by cost (source_cost ~ elastic_cost/1024 for items), so cost
--- weighting discounts it automatically instead of letting it dominate dEsc.
+-- weighting discounts it automatically instead of letting it dominate the delta.
 -- (cheat_mass / target_relax stay mass-based: those measure import/relaxation
 -- magnitude for the keep-best revert, where mass is the right neutral unit.)
 ---@param primals table<string, Primal>
 ---@param x table<string, number>
 ---@param exclude table<string, true>
 ---@return number
-function M.other_escape(primals, x, exclude)
+function M.escape_cost(primals, x, exclude)
     local s = 0
     for key, p in pairs(primals) do
         if (p.kind == "surplus_sink" or p.kind == "shortage_source" or p.kind == "initial_source")
@@ -155,8 +155,8 @@ end
 -- plan = {
 --   keys = { { key, material, qty, ceiling, group, mult=1, frozen=false, resolved_round=-1 } ... },
 --   groups = { "<group-id>", ... },          -- observe order
---   exclude = { [shortage_key]=true ... },    -- the plan's own keys, for the escape delta
---   esc_before, relax0, threshold,            -- baseline readouts
+--   exclude = { [shortage_key]=true ... },    -- the plan's own keys, for the cost delta
+--   escape_cost_before, relax0, threshold,    -- baseline readouts
 -- }
 ---@param primals table<string, Primal>
 ---@param x table<string, number>
@@ -216,7 +216,7 @@ function M.collect_plan(primals, x, lines)
     if #keys == 0 then return nil end
     return {
         keys = keys, groups = groups, exclude = exclude,
-        esc_before = M.other_escape(primals, x, exclude),
+        escape_cost_before = M.escape_cost(primals, x, exclude),
         relax0 = M.target_relax(primals, x),
         threshold = threshold,
     }
@@ -244,8 +244,8 @@ end
 -- Read one group's OBSERVE solve and set its keys' prices (mutates plan). If the
 -- group's shortage does not clear, or clears only by relaxing the target, it is
 -- cone-over-promise / unavoidable -> FREEZE (import is correct). Otherwise split
--- the observed escape delta across the group's keys by qty share and price each
--- at clamp(K_PRED * share/qty, 2, ceiling).
+-- the observed escape-cost delta across the group's keys by qty share and price
+-- each at clamp(K_PRED * share/qty, 2, ceiling).
 ---@param plan table
 ---@param gid string
 ---@param observe_primals table<string, Primal>
@@ -263,9 +263,9 @@ function M.apply_observe(plan, gid, observe_primals, observe_x)
         for _, k in ipairs(gk) do k.frozen = true end
         return
     end
-    local desc = M.other_escape(observe_primals, observe_x, plan.exclude) - plan.esc_before
+    local dcost = M.escape_cost(observe_primals, observe_x, plan.exclude) - plan.escape_cost_before
     for _, k in ipairs(gk) do
-        local share = desc * (k.qty / qsum)
+        local share = dcost * (k.qty / qsum)
         k.mult = math.max(2, math.min(k.ceiling, M.K_PRED * share / k.qty))
     end
 end

@@ -34,8 +34,8 @@ local function cycle_lines()
     }
 end
 -- elastic_cost is the flat |shortage_source| / |surplus_sink| price (create_problem
--- 2^10). other_escape reads each escape's real `cost`, so the constructed primals
--- carry one just like create_problem's do; the dEsc it returns is in elastic units.
+-- 2^10). escape_cost reads each escape's real `cost`, so the constructed primals
+-- carry one just like create_problem's do; the dCost it returns is in elastic units.
 local elastic_cost = 2 ^ 10
 local A_SHORTAGE = "|shortage_source|item/A/normal"
 local function base_primals()
@@ -107,15 +107,15 @@ table.insert(cases, {
         local plan = op.collect_plan(base_primals(), idle_x(), cycle_lines())
         -- Observe solution: the shortage cleared (cycle fabricates A), no target
         -- relaxation, and the fabrication dumps 4 units of a byproduct at the flat
-        -- elastic_cost -> cost-weighted dEsc = elastic_cost*4 / elastic_cost = 4.
+        -- elastic_cost -> cost-weighted dCost = elastic_cost*4 / elastic_cost = 4.
         local obs_primals = base_primals()
         obs_primals["|surplus_sink|item/C/normal"] =
             { kind = "surplus_sink", material = "item/C/normal", cost = elastic_cost }
         local obs_x = { ["recipe/r1/normal"] = 1, ["recipe/r2/normal"] = 1, ["recipe/r3/normal"] = 1,
             [A_SHORTAGE] = 0, ["|surplus_sink|item/C/normal"] = 4 }
         op.apply_observe(plan, plan.groups[1], obs_primals, obs_x)
-        -- mult = clamp(K_PRED * dEsc/qty, 2, ceiling) = clamp(2.0 * 4 / 1, 2, 1024) = 8.
-        harness.assert_near(plan.keys[1].mult, 8, 1e-6, "priced at k*dEsc/qty")
+        -- mult = clamp(K_PRED * dCost/qty, 2, ceiling) = clamp(2.0 * 4 / 1, 2, 1024) = 8.
+        harness.assert_near(plan.keys[1].mult, 8, 1e-6, "priced at k*dCost/qty")
         harness.assert_eq(plan.keys[1].frozen, false, "not frozen")
     end,
 })

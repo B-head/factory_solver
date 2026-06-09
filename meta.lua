@@ -151,8 +151,8 @@ __factory_solver__storage = {}
 ---@class ObservePricePlan
 ---@field keys ObservePriceKey[]
 ---@field groups string[]  SCC group ids, in observe order.
----@field exclude table<string, true>  The plan's own shortage variable keys (for the escape-mass delta).
----@field esc_before number  Baseline other-escape mass.
+---@field exclude table<string, true>  The plan's own shortage variable keys (for the escape-cost delta).
+---@field escape_cost_before number  Baseline escape cost (escape_cost units), the dCost baseline.
 ---@field relax0 number  Baseline target-relaxation mass.
 ---@field threshold number  Baseline park threshold.
 
