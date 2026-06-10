@@ -16,7 +16,7 @@
 --   * every OTHER active elastic gets a hard upper-limit row at
 --     baseline*(1+CAP_MARGIN) (no whack-a-mole: the relief must not move to a
 --     neighbouring escape).
--- Two modes per candidate:
+-- Three modes per candidate:
 --   strict  pin all parked non-slack variables, cap all three elastic kinds.
 --           Pure within-support Pareto dominance.
 --   fab     the user's asymmetric improvement definition: parked recipes /
@@ -25,6 +25,14 @@
 --           dump is acceptable), only new imports (parked shortage_source) and
 --           target relaxation (parked elastic) stay pinned, and only active
 --           shortage/target elastics are capped.
+--   open    like fab but NEW imports are also free (only parked target
+--           relaxation stays pinned). Catches improvements fab cannot reach --
+--           mass-losing cycles whose makeup feed is a different material, and
+--           chains whose intermediate needs an auxiliary import. The cost of
+--           this freedom is import whack-a-mole, so a reduced open row is only
+--           meaningful against the NET shortage delta downstream (all
+--           shortage_source units share one price, so the mass total is the
+--           cost total there).
 -- min_e << base_e means a dominating solution exists under that mode's rules
 -- (subject to cap_viol staying at dust level) -- evidence the cost vector
 -- mispriced this escape. RAW numbers only, no verdict.
@@ -56,12 +64,15 @@ local PIN_KINDS = {
     strict = { recipe = true, bridge = true, shortage_source = true, surplus_sink = true,
         elastic = true, initial_source = true, final_sink = true },
     fab = { shortage_source = true, elastic = true },
+    open = { elastic = true },
 }
 -- Active-elastic kinds capped at baseline, per mode.
 local CAP_KINDS = {
     strict = { shortage_source = true, surplus_sink = true, elastic = true },
     fab = { shortage_source = true, elastic = true },
+    open = { shortage_source = true, elastic = true },
 }
+local MODES = { "strict", "fab", "open" }
 
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }) end
 
@@ -164,7 +175,7 @@ local function process(prob, label, emit)
     if state0 ~= "finished" then return end
 
     for _, cand in ipairs(candidates) do
-        for _, mode in ipairs({ "strict", "fab" }) do
+        for _, mode in ipairs(MODES) do
             -- Hard-pin baseline-parked variables of this mode's kinds by
             -- removing them from a restricted rebuild.
             local drop, npin = {}, 0
