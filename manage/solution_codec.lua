@@ -44,7 +44,10 @@ end
 ---Encode a list of Solutions into a shareable string.
 ---Only user-input fields (name, constraints, production_lines) are serialized;
 ---solver-derived data (quantity_of_machines_required, problem, raw_variables,
----solver_state) is reconstructed on import via the on_tick solve pump.
+---solver_state) is reconstructed on import via the on_tick solve pump. The one
+---exception is a FROZEN solution (solver_state == "freeze"): its machine
+---counts came from an external solver, not from the pump, so they ARE the
+---payload -- exported as `solved_machines` and reapplied verbatim on import.
 ---@param solutions Solution[]
 ---@return string
 function M.encode(solutions)
@@ -54,6 +57,8 @@ function M.encode(solutions)
             name = solution.name,
             constraints = solution.constraints,
             production_lines = solution.production_lines,
+            solved_machines = solution.solver_state == "freeze"
+                and solution.quantity_of_machines_required or nil,
         }
     end
     local envelope = {
@@ -99,6 +104,19 @@ function M.decode(s)
             or type(payload.production_lines) ~= "table"
         then
             return nil, { "factory-solver-import-error-structure" }
+        end
+        -- Optional frozen-solution values (see M.encode). Validated to a flat
+        -- string -> number dict; anything else rejects the whole string rather
+        -- than importing a solution that silently lost its frozen counts.
+        if payload.solved_machines ~= nil then
+            if type(payload.solved_machines) ~= "table" then
+                return nil, { "factory-solver-import-error-structure" }
+            end
+            for k, v in pairs(payload.solved_machines) do
+                if type(k) ~= "string" or type(v) ~= "number" then
+                    return nil, { "factory-solver-import-error-structure" }
+                end
+            end
         end
         migrate_typed_names(payload)
     end

@@ -10,7 +10,13 @@
 ---@alias TimeScale "second"|"five_seconds"|"minute"|"ten_minutes"|"hour"|"ten_hours"|"fifty_hours"|"two_hundred_fifty_hours"|"thousand_hours"
 ---@alias AmountUnit "time"|"belt"|"storage"
 ---@alias EnergyType "electric"|"burner"|"heat"|"fluid"|"void"
----@alias SolverState "ready"|"calculating"|"finished"|"unfinished"|"singular"|"unbounded"|"unfeasible"
+-- "freeze" marks a solution whose quantity_of_machines_required was imported
+-- from an external solver (the headless reference solver's shared strings):
+-- the on_tick pump skips it and bulk re-arms (configuration change, research
+-- bonus change) keep it frozen, so the imported values display as-is. Any
+-- user edit re-arms it to "ready" like every other solution, replacing the
+-- frozen values with a normal in-game solve.
+---@alias SolverState "ready"|"calculating"|"finished"|"unfinished"|"singular"|"unbounded"|"unfeasible"|"freeze"
 ---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
 -- Fluid temperature is carried range-only: a point temperature is the degenerate
 -- range minimum_temperature == maximum_temperature. There is no single-value

@@ -22,10 +22,19 @@
 -- no compression -- which is fine for hand-picking a handful of chains.
 --
 -- Usage (run from the repo root):
---   lua tests/bundle_solutions.lua <out.txt> <file-or-dir> [more...]
+--   lua tests/bundle_solutions.lua <out.txt> [--reference] <file-or-dir> [more...]
 --     * <out.txt>            where the shared string is written (no newline).
 --     * args ending in .lua  treated as dump files.
 --     * any other arg        treated as a directory; its *.lua files are added.
+--     * --reference          additionally solve each dump with the headless
+--       lexicographic reference solver (tests/research/reference_solver.lua)
+--       and embed the per-recipe machine counts as `solved_machines`; the mod
+--       imports such a solution FROZEN (solver_state="freeze", no re-solve)
+--       so the reference solution itself is what the GUI shows. The solution
+--       name gets a " (ref)" suffix for side-by-side comparison with a normal
+--       (re-solved) import of the same dump. Requires the full repo (pulls in
+--       tests/headless_env + the solver); without the flag this script stays
+--       a dependency-free standalone.
 --
 -- PowerShell glob expansion also works, e.g.:
 --   lua tests/bundle_solutions.lua S:\tmp\bundle.txt `
@@ -105,6 +114,8 @@ local function collect_files(inputs)
 end
 
 ---Load one dump file and return its embedded per-Solution payload JSON.
+---(The --reference path reloads the dump through tests/problem_dump instead,
+---sharing the validation every other headless driver uses.)
 ---@param path string
 ---@return string payload_json
 local function read_payload(path)
@@ -121,10 +132,75 @@ local function read_payload(path)
         die("'" .. path .. "' has no payload_json -- re-run the explorer "
             .. "(tests/explore_chains.ps1) to regenerate dumps with it")
     end
-    if payload:match("^%s*{") == nil then
+    payload = payload:gsub("%s+$", "")
+    if payload:match("^%s*{") == nil or payload:sub(-1) ~= "}" then
         die("'" .. path .. "' payload_json does not look like a JSON object")
     end
     return payload
+end
+
+-- ---------------------------------------------------------------------------
+-- --reference: solve the dump with the lexicographic reference solver and
+-- splice the frozen machine counts into the payload fragment
+-- ---------------------------------------------------------------------------
+
+---Minimal JSON string escaping for LP variable keys (plain ASCII in practice;
+---escape the two structural characters anyway).
+---@param s string
+---@return string
+local function json_escape(s)
+    return (s:gsub("\\", "\\\\"):gsub('"', '\\"'))
+end
+
+---Append " (ref)" to the payload's "name" value so a frozen reference import
+---sits next to a normal import of the same dump without a name clash suffix
+---hiding which is which.
+---@param payload string
+---@return string
+local function tag_name(payload)
+    local head = payload:find('"name":"', 1, true)
+    if not head then return payload end
+    local value_start = head + #'"name":"'
+    local value_end = payload:find('"', value_start, true)
+    if not value_end then return payload end
+    return payload:sub(1, value_end - 1) .. " (ref)" .. payload:sub(value_end)
+end
+
+---Solve the dump at `path` with the reference solver and splice its machine
+---counts into the payload JSON as `solved_machines`. Returns the payload
+---unchanged (with a warning) when the reference does not finish.
+---@param payload string
+---@param path string
+---@return string
+local function add_reference_solution(payload, path)
+    -- Lazy: only the --reference path drags in the solver stack.
+    require "tests/headless_env"
+    local reference_solver = require "tests/research/reference_solver"
+    local problem_dump = require "tests/problem_dump"
+
+    local prob, kind, detail = problem_dump.load_problem(path)
+    if not prob then
+        die("'" .. path .. "' failed to load for --reference: "
+            .. tostring(kind) .. " " .. tostring(detail))
+    end
+    local ok, r = pcall(reference_solver.solve_reference, prob.constraints, prob.normalized_lines)
+    if not ok or r.state ~= "finished" or not r.problem then
+        io.stderr:write(string.format(
+            "bundle_solutions: warning: reference solve %s on '%s'; bundling unsolved\n",
+            ok and tostring(r.state) or "raised", path))
+        return payload
+    end
+
+    local machines = r.problem:filter_result({ x = r.x, y = {}, s = {} })
+    local keys = {}
+    for k in pairs(machines) do keys[#keys + 1] = k end
+    table.sort(keys)
+    local parts = {}
+    for _, k in ipairs(keys) do
+        parts[#parts + 1] = string.format('"%s":%.17g', json_escape(k), machines[k])
+    end
+    return tag_name(payload:sub(1, -2))
+        .. ',"solved_machines":{' .. table.concat(parts, ",") .. "}}"
 end
 
 -- ---------------------------------------------------------------------------
@@ -226,8 +302,13 @@ if not out_path then
 end
 
 local inputs = {}
+local with_reference = false
 for k = 2, #arg do
-    inputs[#inputs + 1] = arg[k]
+    if arg[k] == "--reference" then
+        with_reference = true
+    else
+        inputs[#inputs + 1] = arg[k]
+    end
 end
 if #inputs == 0 then
     die("no input files given")
@@ -240,7 +321,11 @@ end
 
 local payloads = {}
 for _, path in ipairs(files) do
-    payloads[#payloads + 1] = read_payload(path)
+    local payload = read_payload(path)
+    if with_reference then
+        payload = add_reference_solution(payload, path)
+    end
+    payloads[#payloads + 1] = payload
 end
 
 -- Assemble the envelope JSON by pure concatenation -- the per-Solution fragments

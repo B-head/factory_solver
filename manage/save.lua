@@ -262,7 +262,12 @@ function M.reinit_force_data(force_index)
             -- variable keys may no longer match.
             solution.observe_price = nil
             solution.op_restart = nil
-            solution.solver_state = "ready"
+            -- A frozen solution's counts came from an external solver, not from
+            -- a Problem this configuration built, so there is nothing to
+            -- re-solve -- keep it frozen through the migration.
+            if solution.solver_state ~= "freeze" then
+                solution.solver_state = "ready"
+            end
             -- Normalize any legacy numeric solver_state from a save written
             -- before the integer iteration counter was split out into its own
             -- field. A "ready" solution ignores solver_iteration until the
@@ -409,7 +414,12 @@ function M.apply_research_bonuses(force_data, new_bonuses)
         -- observe-price plan so it does not resume against the rebuilt problem.
         solution.observe_price = nil
         solution.op_restart = nil
-        solution.solver_state = "ready"
+        -- Externally solved snapshots are not re-solvable; they stay frozen
+        -- (their displayed totals may diverge from the new bonuses -- frozen
+        -- data is the importer's responsibility).
+        if solution.solver_state ~= "freeze" then
+            solution.solver_state = "ready"
+        end
     end
 end
 
@@ -542,7 +552,12 @@ end
 ---Solution. Tries the payload's name as-is, falling back to "<name> N" only
 ---when the slot is taken so an import into an empty save preserves the
 ---original name. Derived state (solver caches, machine counts) is left at
----defaults and solver_state="ready" lets the on_tick pump fill it in.
+---defaults and solver_state="ready" lets the on_tick pump fill it in -- unless
+---the payload carries `solved_machines` (an externally solved snapshot, e.g.
+---the headless reference solver): those counts are applied verbatim and the
+---solution starts FROZEN ("freeze"), which the pump skips, so the GUI shows
+---the external solution instead of re-solving it. Editing re-arms to "ready"
+---as usual and replaces the frozen values.
 ---@param solutions table<string, Solution>
 ---@param payload table
 ---@return string
@@ -560,8 +575,8 @@ function M.import_solution(solutions, payload)
         name = new_solution_name,
         constraints = payload.constraints,
         production_lines = payload.production_lines,
-        quantity_of_machines_required = {},
-        solver_state = "ready",
+        quantity_of_machines_required = payload.solved_machines or {},
+        solver_state = payload.solved_machines and "freeze" or "ready",
     }
     solutions[new_solution_name] = solution
 

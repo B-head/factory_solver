@@ -370,6 +370,46 @@ fixtures.codec_solution_roundtrip = {
     end,
 }
 
+---Frozen-solution import: a payload carrying `solved_machines` (written by the
+---headless reference solver path, tests/bundle_solutions.lua --reference) must
+---materialize with solver_state = "freeze" and the counts applied verbatim,
+---and a frozen Solution must round-trip its counts through encode -> decode.
+---All assertions run synchronously here; the frozen copy is deleted before the
+---pump phase, which then just solves the ordinary iron-plate solution (the
+---pump skipping "freeze" is dispatch-level: it only picks ready/calculating).
+---Base game only.
+fixtures.codec_frozen_import = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        build_iron_plate_demand(solution)
+
+        -- Freeze the live solution with a synthetic count and round-trip it.
+        solution.quantity_of_machines_required = { ["recipe/iron-plate/normal"] = 1.25 }
+        solution.solver_state = "freeze"
+        local encoded = solution_codec.encode({ solution })
+        local payloads, err = solution_codec.decode(encoded)
+        assert(payloads, "frozen decode failed: " .. tostring(err and err[1]))
+        local payload = payloads[1]
+        assert(type(payload.solved_machines) == "table"
+            and payload.solved_machines["recipe/iron-plate/normal"] == 1.25,
+            "solved_machines not preserved across the round-trip")
+
+        local solutions = storage.forces[FORCE_INDEX].solutions
+        local imported_name = save.import_solution(solutions, payload)
+        local imported = assert(solutions[imported_name])
+        assert(imported.solver_state == "freeze",
+            "imported snapshot not frozen: " .. tostring(imported.solver_state))
+        assert(imported.quantity_of_machines_required["recipe/iron-plate/normal"] == 1.25,
+            "imported snapshot lost its counts")
+        save.delete_solution(solutions, imported_name)
+
+        -- Hand the ordinary solution to the pump phase (setup re-arms to
+        -- "ready" right after build).
+        solution.quantity_of_machines_required = {}
+    end,
+}
+
 ---Factory Planner interop round-trip: FS solution -> fp_codec.encode (FS->FP) ->
 ---decode -> factory_to_payload (FP->FS) -> solve. This drives the FP mapping in
 ---*both* directions through real Factorio (the layers the headless suite can't
