@@ -181,6 +181,20 @@ end
 ---surplus_sink for consumability); `demand_sign` is the synthetic probe's
 ---coefficient into the material row (-1 = a sink demanding net production,
 ---+1 = a source injecting a unit to absorb).
+---
+---Three phases (a joint demote-only sweep is ORDER-SENSITIVE: other demands
+---pull a bulk flow through an innocent member, it reads as the worst offender,
+---and once demoted it never recovers -- seed_109's water@[15,500], bridge-fed
+---from free water@15, was misclassified as makeup that way and blocked the
+---byproduct consumption the user expected):
+---  1 individual screening: one LP per material, only it priced and demanded.
+---    An individual failure can never pass under a stricter set (monotone), so
+---    those are demoted immediately and finally.
+---  2 joint demote-one over the survivors: only genuinely coupled ties remain
+---    (a 2+ member mass-losing cycle where each member passes individually by
+---    importing its partner); demoting the worst picks one makeup per tie.
+---  3 promotion sweeps: re-test each phase-2 demotion against the settled set
+---    (joint with it added back); promote when the WHOLE trial set is clean.
 ---@param constraints table
 ---@param lines NormalizedProductionLine[]
 ---@param priced_kind string
@@ -194,14 +208,21 @@ local function fixpoint_set(constraints, lines, priced_kind, demand_sign)
     end
     table.sort(mats)
 
-    local members = {}
-    for _, mat in ipairs(mats) do members[mat] = true end
-
+    local TOL = 1e-4
     local steps_total = 0
-    for _ = 1, #mats + 1 do
+    local TRACE = os.getenv("FS_REF_TRACE") ~= nil
+    local function trace(fmt, ...) if TRACE then io.stderr:write(fmt:format(...) .. "\n") end end
+
+    ---Price `priced_set` materials, demand one unit of each `demand_list`
+    ---material, solve, and return the per-material own-escape residuals
+    ---(nil when the solve did not finish).
+    ---@param priced_set table<string, true>
+    ---@param demand_list string[]
+    ---@return table<string, number>? own
+    local function joint_residuals(priced_set, demand_list)
         local p = create_problem.create_problem("fixtest", constraints, lines, nil, M.OPTS)
         for _, pr in pairs(p.primals) do
-            if pr.kind == priced_kind and members[pr.material] then
+            if pr.kind == priced_kind and priced_set[pr.material] then
                 pr.cost = 1
             elseif pr.kind == "recipe" or pr.kind == "bridge" then
                 pr.cost = EPS_RECIPE
@@ -209,35 +230,88 @@ local function fixpoint_set(constraints, lines, priced_kind, demand_sign)
                 pr.cost = 0
             end
         end
-        for _, mat in ipairs(mats) do
-            if members[mat] then
-                local probe = "|ref_fixtest_probe|" .. mat
-                p:add_objective(probe, 0, false, nil, mat)
-                p:add_subject_term(probe, mat, demand_sign)
-                local dual = "|ref_fixtest_demand|" .. mat
-                p:add_lower_limit_constraint(dual, 1)
-                p:add_subject_term(probe, dual, 1)
-            end
+        for _, mat in ipairs(demand_list) do
+            local probe = "|ref_fixtest_probe|" .. mat
+            p:add_objective(probe, 0, false, nil, mat)
+            p:add_subject_term(probe, mat, demand_sign)
+            local dual = "|ref_fixtest_demand|" .. mat
+            p:add_lower_limit_constraint(dual, 1)
+            p:add_subject_term(probe, dual, 1)
         end
-
         local ok, s, v, st = pcall(solve, p)
-        if not ok or s ~= "finished" then break end
+        if not ok or s ~= "finished" then return nil end
         steps_total = steps_total + st
-
         local own = {}
         for key, pr in pairs(p.primals) do
-            if pr.kind == priced_kind and members[pr.material] then
+            if pr.kind == priced_kind and priced_set[pr.material] then
                 own[pr.material] = (own[pr.material] or 0) + math.abs(v.x[key] or 0)
             end
         end
-        local worst, wamt = nil, 1e-4
+        return own
+    end
+
+    local function member_list(set)
+        local list = {}
+        for _, mat in ipairs(mats) do
+            if set[mat] then list[#list + 1] = mat end
+        end
+        return list
+    end
+
+    -- Phase 1: individual screening.
+    local members = {}
+    for _, mat in ipairs(mats) do
+        local own = joint_residuals({ [mat] = true }, { mat })
+        if own and (own[mat] or 0) <= TOL then
+            members[mat] = true
+        else
+            trace("[%s] phase1 FAIL %s (own=%s)", priced_kind, mat, own and tostring(own[mat]) or "unfinished")
+        end
+    end
+
+    -- Phase 2: joint demote-one over the coupled ties.
+    local tie_demoted = {}
+    for _ = 1, #mats + 1 do
+        local own = joint_residuals(members, member_list(members))
+        if not own then break end
+        local worst, wamt = nil, TOL
         for _, mat in ipairs(mats) do
             local amt = own[mat] or 0
             if members[mat] and amt > wamt then worst, wamt = mat, amt end
         end
         if not worst then break end
+        trace("[%s] phase2 demote %s (own=%g)", priced_kind, worst, wamt)
         members[worst] = nil
+        tie_demoted[#tie_demoted + 1] = worst
     end
+
+    -- Phase 3: promotion sweeps over the phase-2 demotions.
+    for _ = 1, #tie_demoted do
+        local promoted = false
+        for _, mat in ipairs(tie_demoted) do
+            if not members[mat] then
+                local trial = { [mat] = true }
+                for m in pairs(members) do trial[m] = true end
+                local own = joint_residuals(trial, member_list(trial))
+                if own then
+                    local clean, dirty, damt = true, nil, 0
+                    for m in pairs(trial) do
+                        if (own[m] or 0) > TOL then clean = false; dirty, damt = m, own[m]; break end
+                    end
+                    if clean then
+                        members[mat] = true; promoted = true
+                        trace("[%s] phase3 promote %s", priced_kind, mat)
+                    else
+                        trace("[%s] phase3 reject %s (dirty %s=%g)", priced_kind, mat, tostring(dirty), damt)
+                    end
+                else
+                    trace("[%s] phase3 reject %s (unfinished)", priced_kind, mat)
+                end
+            end
+        end
+        if not promoted then break end
+    end
+
     return members, #mats, steps_total
 end
 
