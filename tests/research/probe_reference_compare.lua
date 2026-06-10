@@ -75,8 +75,8 @@ local function solve_shipped(constraints, lines)
     return final_prob, "finished", final_x, solves
 end
 
-local COLS = { "label", "ref_state", "T_ref", "V_ref", "M_ref", "ref_steps",
-    "ship_state", "T_ship", "V_ship", "M_ship", "ship_solves" }
+local COLS = { "label", "n_mats", "ref_state", "T_ref", "Vp_ref", "Vf_ref", "M_ref", "S_ref", "ref_steps",
+    "ship_state", "T_ship", "Vp_ship", "Vf_ship", "M_ship", "S_ship", "ship_solves" }
 
 local function process(prob, label, emit)
     local r = ref.solve_reference(prob.constraints, prob.normalized_lines)
@@ -86,15 +86,17 @@ local function process(prob, label, emit)
     -- (violation_of counts those back in) so V is comparable across builds.
     local intermediates = ref.intermediates(prob.normalized_lines)
     local sp, sstate, sx, ssolves = solve_shipped(prob.constraints, prob.normalized_lines)
-    local T_s, V_s, M_s = -1, -1, -1
+    local T_s, Vp_s, Vf_s, M_s, S_s = -1, -1, -1, -1, -1
     if sstate == "finished" and sx then
         T_s = ref.total_of(sp, sx, ref.TARGET_KINDS)
-        V_s = ref.violation_of(sp, sx, intermediates)
+        Vp_s, Vf_s = ref.violation_split(sp, sx, intermediates, r.producible)
         M_s = ref.total_of(sp, sx, ref.MACHINE_KINDS)
+        S_s = ref.total_of(sp, sx, ref.SURPLUS_KINDS)
     end
 
-    emit({ label = label, ref_state = r.state, T_ref = r.T, V_ref = r.V, M_ref = r.M,
-        ref_steps = r.steps, ship_state = sstate, T_ship = T_s, V_ship = V_s, M_ship = M_s,
+    emit({ label = label, n_mats = r.n_mats, ref_state = r.state, T_ref = r.T, Vp_ref = r.Vp,
+        Vf_ref = r.Vf, M_ref = r.M, S_ref = r.S, ref_steps = r.steps, ship_state = sstate,
+        T_ship = T_s, Vp_ship = Vp_s, Vf_ship = Vf_s, M_ship = M_s, S_ship = S_s,
         ship_solves = ssolves })
 end
 
