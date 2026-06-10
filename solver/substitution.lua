@@ -195,8 +195,10 @@ end
 ---reconstruction chain is flat -- escape singletons never point at another
 ---eliminated variable -- but resolve transitively with memoisation anyway, to be
 ---robust). Dual (y) and slack (s) values for eliminated columns are left absent:
----only x is read for correctness (filter_result, diagnose, report), and the
----warm-start make_* helpers fall back to defaults for missing keys.
+---the consumers that read s (observe_price's idle certificate) only look at
+---recipe columns, which are never eliminated; everything else reads x only
+---(filter_result, diagnose, report), and the warm-start make_* helpers fall
+---back to defaults for missing keys.
 ---@param reduced_raw PackedVariables?
 ---@param reconstruction Reconstruction
 ---@return PackedVariables? #Full-space packed variables, or nil if the solve produced none.

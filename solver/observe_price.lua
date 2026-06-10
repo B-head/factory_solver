@@ -121,10 +121,30 @@ function M.escape_cost(primals, x, exclude)
     return s / ELASTIC_COST
 end
 
--- Recipe-flow variables internal to an SCC (>= 1 ingredient AND >= 1 product in
--- the SCC), summed -- the cycle's running flow (0 = idle).
-local function internal_flow(lines, scc_set, x)
-    local s = 0
+-- Is the SCC's internal recipe flow idle? Internal = >= 1 ingredient AND >= 1
+-- product in the SCC. Two tests, ORed, because their blind spots are disjoint:
+--
+--   * |flow| sum < IDLE_FLOW_EPS. Parked recipes read exactly 0 at normal
+--     solution scale (purify_zeros snaps them), so any flow at all means the
+--     cycle runs. But interior-point dust that escapes purification sits at an
+--     ABSOLUTE floor coupled to the solve tolerance (~1e-7..3e-6 measured),
+--     independent of solution scale: on a very small-scale plan (cycle flows
+--     below ~1e-6/s -- items-per-hour pins through deep chains) that dust
+--     crosses the epsilon and a truly idle cycle would read "running",
+--     silently dropping it from the plan.
+--   * Dual certificate: every internal recipe is exactly 0 or dual-dominated
+--     (reduced cost s > x, the same nonbasic test certify_zeros uses). The
+--     certificate is what purification itself failed to apply to that dust, so
+--     re-reading it here rescues the small-scale case; a genuinely basic
+--     (running) recipe has s -> 0 < x and never certifies.
+--
+-- The OR can only widen "idle", so it eliminates the unguarded failure (idle
+-- cycle missed -> cheat never repriced) at the cost of occasionally collecting
+-- a sub-tolerance running cycle -- that direction is bounded by the verify
+-- loop and the keep-best revert in pre_solve.
+local IDLE_FLOW_EPS = 1e-6
+local function cycle_idle(lines, scc_set, x, s)
+    local flow, certified = 0, true
     for _, line in ipairs(lines) do
         local hi = false
         for _, ing in ipairs(line.ingredients) do
@@ -137,10 +157,15 @@ local function internal_flow(lines, scc_set, x)
                 if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
             end
             if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then s = s + math.abs(x[tn.typed_name_to_variable_name(line.recipe_typed_name)] or 0) end
+            if hp then
+                local key = tn.typed_name_to_variable_name(line.recipe_typed_name)
+                local v = math.abs(x[key] or 0)
+                flow = flow + v
+                if v > 0 and (s[key] or 0) <= v then certified = false end
+            end
         end
     end
-    return s
+    return flow < IDLE_FLOW_EPS or certified
 end
 
 local function ceiling_for(qty)
@@ -160,9 +185,10 @@ end
 -- }
 ---@param primals table<string, Primal>
 ---@param x table<string, number>
+---@param s table<string, number> Dual slack (reduced cost) values from the same PackedVariables as `x`; cycle_idle's certificate reads them.
 ---@param lines NormalizedProductionLine[]
 ---@return table?
-function M.collect_plan(primals, x, lines)
+function M.collect_plan(primals, x, s, lines)
     local threshold = M.park_threshold(x, primals)
     local adj = material_cycles.build_material_graph(lines)
     local sccs = material_cycles.find_sccs(adj)
@@ -192,7 +218,7 @@ function M.collect_plan(primals, x, lines)
                 for _, mm in ipairs(active_mats) do
                     if not material_cycles.export_feasible(lines, mm) then fab = false; break end
                 end
-                if self_sust and fab and internal_flow(lines, scc_set, x) < 1e-6 then
+                if self_sust and fab and cycle_idle(lines, scc_set, x, s) then
                     local gid = "scc:" .. si
                     local added = false
                     for _, key in ipairs(active) do

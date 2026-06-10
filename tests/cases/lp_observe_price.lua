@@ -5,9 +5,11 @@
 -- end-to-end by the in-game smoke test and measured on the explorer corpus. What
 -- the headless suite pins here is the PURE logic the module owns: which cycles
 -- qualify, how the per-material override maps are built, and how the verify loop
--- bumps / freezes a key. These operate on constructed primal / x / line tables --
--- the same shapes pre_solve hands the module -- so no Factorio runtime or solve
--- is involved.
+-- bumps / freezes a key. These operate on constructed primal / x / s / line
+-- tables -- the same shapes pre_solve hands the module -- so no Factorio runtime
+-- or solve is involved. The s table is the dual slack (reduced cost) side of
+-- PackedVariables; collect_plan's idle certificate reads it, and an empty table
+-- (s unknown) degrades to the pure flow-epsilon test.
 --
 -- The qualifying shape: a self-sustaining, export-feasible cyclic SCC {A, B} that
 -- sits idle (its internal recipes carry no flow) while the demanded material A is
@@ -58,7 +60,7 @@ local cases = {}
 table.insert(cases, {
     name = "collect_plan qualifies an idle self-sustaining cyclic SCC with active shortage",
     run = function()
-        local plan = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         harness.assert_true(plan ~= nil, "expected a plan")
         harness.assert_eq(#plan.keys, 1, "one shortage key qualifies")
         local k = plan.keys[1]
@@ -77,8 +79,44 @@ table.insert(cases, {
     run = function()
         local running = { ["recipe/r1/normal"] = 1, ["recipe/r2/normal"] = 1,
             ["recipe/r3/normal"] = 1, [A_SHORTAGE] = 1 }
-        harness.assert_eq(op.collect_plan(base_primals(), running, cycle_lines()), nil,
+        harness.assert_eq(op.collect_plan(base_primals(), running, {}, cycle_lines()), nil,
             "a running internal cycle does not qualify")
+    end,
+})
+
+table.insert(cases, {
+    name = "collect_plan rescues an idle cycle whose dust escaped purification (dual certificate)",
+    run = function()
+        -- Small-scale regime: r1/r2 carry interior-point dust ABOVE the flow
+        -- epsilon (purify_zeros missed it), so the flow test alone would read
+        -- the cycle as running and silently drop it from the plan. Their reduced
+        -- costs dominate the dust (nonbasic side), so the dual certificate
+        -- recognises the park. Without s the same x is dropped -- the
+        -- certificate, not the flow test, is what rescues it.
+        local dusty = { ["recipe/r1/normal"] = 2e-6, ["recipe/r2/normal"] = 3e-6,
+            ["recipe/r3/normal"] = 1, [A_SHORTAGE] = 1 }
+        local duals = { ["recipe/r1/normal"] = 1e-3, ["recipe/r2/normal"] = 1e-3 }
+        local plan = op.collect_plan(base_primals(), dusty, duals, cycle_lines())
+        harness.assert_true(plan ~= nil, "certified dust reads as idle")
+        harness.assert_eq(plan.keys[1].material, "item/A/normal", "the cycle's shortage is planned")
+        harness.assert_eq(op.collect_plan(base_primals(), dusty, {}, cycle_lines()), nil,
+            "without duals the dust reads as running flow")
+    end,
+})
+
+table.insert(cases, {
+    name = "collect_plan widens idle to sub-epsilon flow even when the duals say basic",
+    run = function()
+        -- The OR of the two idle tests: a cycle whose genuine flow sits below the
+        -- flow epsilon (sub-tolerance running, only possible on extremely small
+        -- plans) is still collected, because dropping a truly idle cycle has no
+        -- safety net while collecting a running one is bounded by the verify
+        -- loop and pre_solve's keep-best revert. This pins that choice.
+        local tiny = { ["recipe/r1/normal"] = 1e-7, ["recipe/r2/normal"] = 1e-7,
+            ["recipe/r3/normal"] = 1e-7, [A_SHORTAGE] = 1e-7 }
+        local basic = { ["recipe/r1/normal"] = 0, ["recipe/r2/normal"] = 0 }
+        local plan = op.collect_plan(base_primals(), tiny, basic, cycle_lines())
+        harness.assert_true(plan ~= nil, "sub-epsilon flow reads as idle regardless of duals")
     end,
 })
 
@@ -87,7 +125,7 @@ table.insert(cases, {
     run = function()
         local no_short = { ["recipe/r1/normal"] = 0, ["recipe/r2/normal"] = 0,
             ["recipe/r3/normal"] = 1, [A_SHORTAGE] = 0 }
-        harness.assert_eq(op.collect_plan(base_primals(), no_short, cycle_lines()), nil,
+        harness.assert_eq(op.collect_plan(base_primals(), no_short, {}, cycle_lines()), nil,
             "no active shortage -> nothing to reprice")
     end,
 })
@@ -95,7 +133,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "observe_overrides raises the group to its ceiling",
     run = function()
-        local plan = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         local o = op.observe_overrides(plan, plan.groups[1])
         harness.assert_near(o["item/A/normal"], 1024, 1e-6, "observed at the ceiling")
     end,
@@ -104,7 +142,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "apply_observe prices a cleared cycle from the escape delta",
     run = function()
-        local plan = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         -- Observe solution: the shortage cleared (cycle fabricates A), no target
         -- relaxation, and the fabrication dumps 4 units of a byproduct at the flat
         -- elastic_cost -> cost-weighted dCost = elastic_cost*4 / elastic_cost = 4.
@@ -123,7 +161,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "apply_observe freezes a cone-over-promise cycle (shortage will not clear)",
     run = function()
-        local plan = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         -- Observe solution where the shortage stays active even at the ceiling:
         -- fabrication is infeasible, so import is correct -> FREEZE.
         local obs_primals = base_primals()
@@ -136,7 +174,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "verify_overrides omits frozen keys and reflects live mults",
     run = function()
-        local plan = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         plan.keys[1].mult = 8
         local live = op.verify_overrides(plan)
         harness.assert_near(live["item/A/normal"], 8, 1e-9, "live key at its mult")
@@ -150,21 +188,21 @@ table.insert(cases, {
     name = "apply_verify resolves, bumps, and freezes a key",
     run = function()
         -- Resolved: shortage parked -> records the round, no live straggler.
-        local plan = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         plan.keys[1].mult = 6
         local live = op.apply_verify(plan, { [A_SHORTAGE] = 0 }, 1)
         harness.assert_eq(live, false, "no straggler when shortage parks")
         harness.assert_eq(plan.keys[1].resolved_round, 1, "records the resolving round")
 
         -- Straggler below the ceiling -> bump x2, live.
-        local plan2 = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan2 = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         plan2.keys[1].mult = 6
         local live2 = op.apply_verify(plan2, { [A_SHORTAGE] = 1 }, 1)
         harness.assert_eq(live2, true, "still importing -> live straggler")
         harness.assert_near(plan2.keys[1].mult, 12, 1e-6, "bumped x2")
 
         -- Straggler at the ceiling -> freeze, not live.
-        local plan3 = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local plan3 = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         plan3.keys[1].mult = plan3.keys[1].ceiling
         local live3 = op.apply_verify(plan3, { [A_SHORTAGE] = 1 }, 2)
         harness.assert_eq(plan3.keys[1].frozen, true, "frozen at the ceiling")
@@ -189,8 +227,8 @@ table.insert(cases, {
 table.insert(cases, {
     name = "collect_plan is deterministic across runs",
     run = function()
-        local p1 = op.collect_plan(base_primals(), idle_x(), cycle_lines())
-        local p2 = op.collect_plan(base_primals(), idle_x(), cycle_lines())
+        local p1 = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
+        local p2 = op.collect_plan(base_primals(), idle_x(), {}, cycle_lines())
         harness.assert_eq(#p1.keys, #p2.keys, "same key count")
         harness.assert_eq(p1.keys[1].key, p2.keys[1].key, "same key")
         harness.assert_eq(p1.keys[1].group, p2.keys[1].group, "same group id")

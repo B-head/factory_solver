@@ -235,7 +235,7 @@ function M.observe_price_step(solution, lines)
         -- The diagnose is a structural import-seeder (it picks WHICH material to
         -- import), the same role deficit_seeding / catalyst_closure play, so it
         -- stays. Exclude observe-price's fabricate targets so the two don't fight.
-        local plan = observe_price.collect_plan(primals, x, lines)
+        local plan = observe_price.collect_plan(primals, x, solution.raw_variables.s, lines)
         local imports = create_problem.diagnose_avoidable_cheats(x, primals, lines)
         if plan then
             for _, k in ipairs(plan.keys) do imports[k.material] = nil end

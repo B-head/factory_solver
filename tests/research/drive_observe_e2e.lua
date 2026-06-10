@@ -52,7 +52,7 @@ local function build_solve(constraints, lines, overrides)
     if not ok then return nil, "build-error", nil end
     local s, v = solve(p)
     if s ~= "finished" then return p, s, nil end
-    return p, s, v.x
+    return p, s, v.x, v.s
 end
 
 local function surplus_mass(primals, x)
@@ -71,14 +71,14 @@ local COLS = {
 
 local function process(constraints, lines, label, emit)
     -- Baseline (soft-gate only).
-    local prob, state, x0 = build_solve(constraints, lines, nil)
+    local prob, state, x0, s0 = build_solve(constraints, lines, nil)
     if state ~= "finished" or not x0 then return end
     local primals = prob.primals
     local base = ed.detect({ x = x0 }, primals)
     local relax0 = op.target_relax(primals, x0)
     local surp0 = surplus_mass(primals, x0)
 
-    local plan = op.collect_plan(primals, x0, lines)
+    local plan = op.collect_plan(primals, x0, s0 or {}, lines)
     if not plan then return end -- nothing to fabricate; baseline stands
 
     local total_solves = 1
