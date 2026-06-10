@@ -331,6 +331,26 @@ function M.consumable_set(constraints, lines)
     return fixpoint_set(constraints, lines, "surplus_sink", 1)
 end
 
+---Count the solution's materially active violations (shortage, surplus, and
+---initial_source flows into intermediates above the dust threshold). NOT an
+---objective -- a diagnostic: by elastic necessity every unbalanceable
+---structure needs its own active hatch, so a healthy solution activates about
+---one violation per such structure, while a degenerate one collapses several
+---structures' imbalance into a single downstream hatch and counts LOW.
+---@param problem Problem
+---@param x table<string, number>
+---@param intermediates table<string, true>
+---@return integer
+function M.violation_count(problem, x, intermediates)
+    local n = 0
+    for key, p in pairs(problem.primals) do
+        local counts = p.kind == "shortage_source" or p.kind == "surplus_sink"
+            or (p.kind == "initial_source" and p.material and intermediates[p.material])
+        if counts and math.abs(x[key] or 0) > 1e-4 then n = n + 1 end
+    end
+    return n
+end
+
 ---Split a solution's boundary mass by legitimacy: defeat imports (producible
 ---material), defeat dumps (consumable material), legitimate makeup imports
 ---(non-producible). Imports count shortage_source plus initial_source flows
