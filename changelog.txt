@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.3
-Date: ????
+Date: 2026-06-11
   Bugfixes:
     - Fix a crash when adding the mod to a save that already has players, where
       on_init built the docked Build assistant (which reads force solution state)
