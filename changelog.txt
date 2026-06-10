@@ -1,23 +1,14 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.6.3
+Version: 0.6.4
 Date: ????
-  Optimizations:
-    - Shrink the solver's linear program before each solve by folding out the
-      bookkeeping "escape" variables (a material's external source / sink) that
-      are pinned to a single recipe's flow, removing both the variable and its
-      balance row. Solves run from a much smaller matrix -- on heavily cyclic
-      modpacks (pyanodon) the corpus solves about 5x faster, on Space Age about
-      1.75x. The objective is unchanged; the eliminated flows are reconstructed
-      for display after the solve.
   Changes:
-    - When several recipes or fluid-temperature routes are exactly tied, the
-      solver now settles on one canonical solution instead of letting the tied
-      flows drift, so the same factory always gives the same plan and a plan no
-      longer wobbles when you tweak and re-solve it. This mattered most for
-      temperature plumbing (boiler/heat-exchanger steam routed through several
-      equivalent temperature ranges), which previously had no tie-break at all.
-      The choice is a tiny deterministic nudge and never overrides a genuinely
-      better (more material-efficient or fewer-machine) recipe.
+---------------------------------------------------------------------------------------------------
+Version: 0.6.3
+Date: 2026-06-11
+  Bugfixes:
+    - Fix a crash when adding the mod to a save that already has players, where
+      on_init built the docked Build assistant (which reads force solution state)
+      before storage.forces was initialized. Force data is now set up first.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.2
 Date: 2026-06-04

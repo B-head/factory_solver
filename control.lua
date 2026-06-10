@@ -58,15 +58,12 @@ script.on_init(function()
 
     storage.virtuals = virtual.create_virtuals()
 
-    storage.players = {}
-    for _, player in pairs(game.players) do
-        save.init_player_data(player.index)
-        open_build_assistant_default(player)
-        if __DebugAdapter then
-            player.cheat_mode = true
-        end
-    end
-
+    -- Force data must exist before any GUI is built: open_build_assistant_default
+    -- renders the docked panel, whose make_build_table handler immediately reads
+    -- storage.forces via save.get_selected_solution. When the mod is added to an
+    -- existing save (players already present), the player loop below runs for real,
+    -- so storage.forces has to be ready first. (In a fresh world game.players is
+    -- empty at on_init time, which is why this ordering bug stayed hidden.)
     storage.forces = {}
     for _, force in pairs(game.forces) do
         save.init_force_data(force.index)
@@ -74,6 +71,15 @@ script.on_init(function()
             for _, quality in pairs(prototypes.quality) do
                 force.unlock_quality(quality)
             end
+        end
+    end
+
+    storage.players = {}
+    for _, player in pairs(game.players) do
+        save.init_player_data(player.index)
+        open_build_assistant_default(player)
+        if __DebugAdapter then
+            player.cheat_mode = true
         end
     end
 
