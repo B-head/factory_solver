@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.3
 Date: ????
-  Changes:
+  Bugfixes:
+    - Fix a crash when adding the mod to a save that already has players, where
+      on_init built the docked Build assistant (which reads force solution state)
+      before storage.forces was initialized. Force data is now set up first.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.2
 Date: 2026-06-04
