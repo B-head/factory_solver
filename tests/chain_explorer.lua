@@ -1328,10 +1328,29 @@ function M.explore_emit(args_str)
     -- values inside the single problem table the worker loadfile()s.
     local cons_lit = (create_problem.dump_constraints(solution.constraints):gsub("^return ", ""))
     local lines_lit = (create_problem.dump_normalized_lines(normalized_lines):gsub("^return ", ""))
-    local body = string.format("return {\n  meta = %s,\n  constraints = %s,\n  normalized_lines = %s,\n}\n",
-        serialize_meta(ctx), cons_lit, lines_lit)
 
     local tag = string.format("seed_%d_%s", ctx.seed, problem_tag(ctx))
+
+    -- Embed the real ProductionLine payload (machine / module / fuel choices
+    -- intact, NOT the normalized fold) as a finished JSON string. The offline
+    -- tests/bundle_solutions.lua splices these straight into a solution_codec
+    -- envelope without re-implementing JSON encoding, so the shared string it
+    -- builds imports as fully-formed Solutions the mod can re-solve. Shape
+    -- mirrors the {name, constraints, production_lines} per-solution payload
+    -- solution_codec.encode ships; `name` carries the tag so each bundled
+    -- Solution is identifiable in the Import dialog. normalized_lines is kept
+    -- as-is for the headless solver workers (solve_problem.lua), which only
+    -- read meta / constraints / normalized_lines and ignore this extra key.
+    local payload_json = assert(helpers.table_to_json({
+        name = tag,
+        constraints = solution.constraints,
+        production_lines = solution.production_lines,
+    }))
+
+    local body = string.format(
+        "return {\n  meta = %s,\n  constraints = %s,\n  normalized_lines = %s,\n  payload_json = %q,\n}\n",
+        serialize_meta(ctx), cons_lit, lines_lit, payload_json)
+
     helpers.write_file("explore_problems/" .. tag .. ".lua", body, false)
     return string.format("emit seed=%d tag=%s built=%d sr=%s tgt=%s",
         ctx.seed, tag, ctx.built, ctx.seed_recipe, ctx.target_label)
