@@ -191,6 +191,23 @@ end
 
 local handlers = {}
 
+---Reorder the four recipe-picker frames when the player has the "swap Product /
+---Ingredient placement" setting on. The static template builds them in
+---[product, spent, ingredient, fuel] order; swapping the output group
+---(product, spent) with the input group (ingredient, fuel) yields
+---[ingredient, fuel, product, spent], mirroring the column swap in the solution
+---editor. The frames are always built; we permute the already-built children.
+---@param event EventDataTrait
+function handlers.on_arrange_recipe_io_placement(event)
+    if not common.is_recipe_io_placement_swapped(event.player_index) then
+        return
+    end
+    local flow = event.element
+    -- [product, spent, ingredient, fuel] -> [ingredient, fuel, product, spent]
+    flow.swap_children(1, 3) -- -> [ingredient, spent, product, fuel]
+    flow.swap_children(2, 4) -- -> [ingredient, fuel, product, spent]
+end
+
 ---@param event EventDataTrait
 function handlers.on_init_choose_visiblity(event)
     local elem = event.element
@@ -573,6 +590,10 @@ return {
         direction = "vertical",
         {
             type = "flow",
+            name = "recipe_choose_flow",
+            handler = {
+                on_added = handlers.on_arrange_recipe_io_placement,
+            },
             {
                 type = "frame",
                 name = "recipe_for_product",

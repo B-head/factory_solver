@@ -25,6 +25,17 @@ function M.get_style(is_hidden, is_unresearched, filter_type)
     end
 end
 
+---True when the player has enabled the "swap Product / Ingredient placement"
+---per-player mod setting. Callers flip the order of the products/ingredients
+---sections in the solution editor and the add-production-line dialog. Reading a
+---per-player setting is MP-deterministic (settings are replicated), so it is
+---safe to consult inside a GUI build/handler path.
+---@param player_index integer
+---@return boolean
+function M.is_recipe_io_placement_swapped(player_index)
+    return settings.get_player_settings(player_index)["factory-solver-swap-recipe-io-placement"].value --[[@as boolean]]
+end
+
 ---comment
 ---@param is_hidden boolean
 ---@param is_unresearched boolean

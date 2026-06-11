@@ -178,6 +178,25 @@ script.on_event(defines.events.on_research_reversed, function(event)
     save.reinit_force_data(event.research.force.index)
 end)
 
+script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
+    if event.setting ~= "factory-solver-swap-recipe-io-placement" then
+        return
+    end
+    -- The production line table reads this per-player setting at build time, so
+    -- re-dispatching its rebuild event applies the new placement live (no
+    -- re-solve — that path runs in on_tick). Only the player who toggled the
+    -- setting needs refreshing; the add-production-line dialog already re-reads
+    -- the setting every time it is opened.
+    local player_index = event.player_index
+    if not player_index then
+        return
+    end
+    local window = game.players[player_index].gui.screen["factory_solver_main_window"]
+    if window then
+        fs_util.dispatch_to_subtree(window, "on_production_line_changed")
+    end
+end)
+
 script.on_event(defines.events.on_tick, function(event)
     flib_dictionary.on_tick()
 

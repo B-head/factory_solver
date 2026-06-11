@@ -1,6 +1,11 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.4
 Date: ????
+  Features:
+    - Add a per-player mod setting "Swap Product / Ingredient placement" that
+      flips the Products and Ingredients columns in the solution editor table and
+      swaps the output group (products, spent fuel) with the input group
+      (ingredients, fuel) in the add-production-line dialog.
   Changes:
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.3

@@ -56,7 +56,16 @@ function handlers.make_production_line_table(event)
         return
     end
 
-    for _, value in ipairs(headers) do
+    -- Per-player "swap Product / Ingredient placement": flips the Products (5)
+    -- and Ingredients (6) columns. Work on a local copy so the shared module
+    -- `headers` table is never mutated (it is read by every player's render).
+    local swap = common.is_recipe_io_placement_swapped(event.player_index)
+    local ordered_headers = flib_table.shallow_copy(headers)
+    if swap then
+        ordered_headers[5], ordered_headers[6] = ordered_headers[6], ordered_headers[5]
+    end
+
+    for _, value in ipairs(ordered_headers) do
         local def = {
             type = "label",
             style = "bold_label",
@@ -285,7 +294,7 @@ function handlers.make_production_line_table(event)
             fs_util.add_gui(elem, def)
         end
 
-        do
+        local function emit_products()
             local buttons = {}
             -- Mirror pre_solve.to_normalized_production_lines: split each
             -- product into the per-quality cascade the LP actually sees, so the
@@ -366,7 +375,7 @@ function handlers.make_production_line_table(event)
             fs_util.add_gui(elem, def)
         end
 
-        do
+        local function emit_ingredients()
             local buttons = {}
             for _, amount in ipairs(n.ingredients) do
                 local typed_name = tn.create_typed_name(
@@ -404,6 +413,16 @@ function handlers.make_production_line_table(event)
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
+        end
+
+        -- Emit the two slot columns in the order the swap setting dictates. The
+        -- header row above was reordered to match, so the columns stay aligned.
+        if swap then
+            emit_ingredients()
+            emit_products()
+        else
+            emit_products()
+            emit_ingredients()
         end
 
         do
