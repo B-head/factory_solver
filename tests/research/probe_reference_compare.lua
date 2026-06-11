@@ -25,6 +25,24 @@ local harness = require "tests/harness"
 local problem_dump = require "tests/problem_dump"
 local op = require "solver/observe_price"
 local ref = require "tests/research/reference_solver"
+local refcache = require "tests/research/reference_cache"
+
+---@param set table<string, true>
+---@return string[] sorted keys (sorted so the cached file is stable)
+local function set_to_list(set)
+    local t = {}
+    for k in pairs(set) do t[#t + 1] = k end
+    table.sort(t)
+    return t
+end
+
+---@param list string[]
+---@return table<string, true>
+local function list_to_set(list)
+    local s = {}
+    for _, k in ipairs(list) do s[k] = true end
+    return s
+end
 
 local TOL, ITER = 1e-7, 800
 local SOFT_GATE_K = 256
@@ -75,29 +93,50 @@ local function solve_shipped(constraints, lines)
     return final_prob, "finished", final_x, solves
 end
 
-local COLS = { "label", "n_mats", "ref_state", "T_ref", "Vp_ref", "Vc_ref", "Vf_ref", "M_ref", "S_ref", "Nv_ref", "ref_steps",
+local COLS = { "label", "n_mats", "ref_state", "T_ref", "Vp_ref", "Vc_ref", "Vf_ref", "M_ref", "S_ref", "Nv_ref", "ref_steps", "ref_cached",
     "ship_state", "T_ship", "Vp_ship", "Vc_ship", "Vf_ship", "M_ship", "S_ship", "Nv_ship", "ship_solves" }
 
-local function process(prob, label, emit)
-    local r = ref.solve_reference(prob.constraints, prob.normalized_lines)
-
+local function process(prob, label, path, emit)
     -- The shipped build's deficit promotion turns some intermediate violations
     -- into free |initial_source| flows; measure with the definition's yardstick
     -- (violation_of counts those back in) so V is comparable across builds.
     local intermediates = ref.intermediates(prob.normalized_lines)
+
+    -- The reference is a pure, deterministic function of (dump, definition); its
+    -- five staged LPs dominate the corpus runtime. Cache everything ship grading
+    -- needs from it -- the tier scalars plus the producible/consumable sets used
+    -- by violation_split -- so a re-run pays only for the shipped pipeline.
+    local entry = refcache.load(path)
+    local cached = entry ~= nil
+    if not entry then
+        local r = ref.solve_reference(prob.constraints, prob.normalized_lines)
+        local Nv_r = (r.state == "finished" and r.x)
+            and ref.violation_count(r.problem, r.x, intermediates) or -1
+        entry = {
+            state = r.state, n_mats = r.n_mats,
+            T = r.T, Vp = r.Vp, Vc = r.Vc, Vf = r.Vf, M = r.M, S = r.S,
+            Nv = Nv_r, steps = r.steps,
+            producible = set_to_list(r.producible),
+            consumable = set_to_list(r.consumable),
+        }
+        refcache.store(path, entry)
+    end
+    local producible = list_to_set(entry.producible)
+    local consumable = list_to_set(entry.consumable)
+
     local sp, sstate, sx, ssolves = solve_shipped(prob.constraints, prob.normalized_lines)
     local T_s, Vp_s, Vc_s, Vf_s, M_s, S_s, Nv_s = -1, -1, -1, -1, -1, -1, -1
     if sstate == "finished" and sx then
         T_s = ref.total_of(sp, sx, ref.TARGET_KINDS)
-        Vp_s, Vc_s, Vf_s = ref.violation_split(sp, sx, intermediates, r.producible, r.consumable)
+        Vp_s, Vc_s, Vf_s = ref.violation_split(sp, sx, intermediates, producible, consumable)
         M_s = ref.total_of(sp, sx, ref.MACHINE_KINDS)
         S_s = ref.total_of(sp, sx, ref.SURPLUS_KINDS)
         Nv_s = ref.violation_count(sp, sx, intermediates)
     end
-    local Nv_r = (r.state == "finished" and r.x) and ref.violation_count(r.problem, r.x, intermediates) or -1
 
-    emit({ label = label, n_mats = r.n_mats, ref_state = r.state, T_ref = r.T, Vp_ref = r.Vp,
-        Vc_ref = r.Vc, Vf_ref = r.Vf, M_ref = r.M, S_ref = r.S, Nv_ref = Nv_r, ref_steps = r.steps,
+    emit({ label = label, n_mats = entry.n_mats, ref_state = entry.state, T_ref = entry.T, Vp_ref = entry.Vp,
+        Vc_ref = entry.Vc, Vf_ref = entry.Vf, M_ref = entry.M, S_ref = entry.S, Nv_ref = entry.Nv,
+        ref_steps = entry.steps, ref_cached = cached and 1 or 0,
         ship_state = sstate, T_ship = T_s, Vp_ship = Vp_s, Vc_ship = Vc_s, Vf_ship = Vf_s,
         M_ship = M_s, S_ship = S_s, Nv_ship = Nv_s, ship_solves = ssolves })
 end
@@ -120,7 +159,7 @@ for _, path in ipairs(files) do
     local prob = problem_dump.load_problem(path)
     if prob then
         local label = "seed=" .. tostring(prob.meta and prob.meta.seed) .. "|" .. (path:match("([^/\\]+)%.lua$") or path)
-        local ok, err = pcall(process, prob, label, emit)
+        local ok, err = pcall(process, prob, label, path, emit)
         if not ok then sink("# ERROR " .. label .. ": " .. tostring(err) .. "\n") end
     end
 end
