@@ -16,7 +16,10 @@
 
 [CmdletBinding()]
 param(
-    [string] $DumpDir = (Join-Path $env:APPDATA "Factorio/script-output/explore_problems"),
+    # Canonical research corpus. No baked-in default -- defaults to the
+    # FS_CORPUS_DIR environment variable (like the other research launchers) and
+    # errors when neither is provided.
+    [string] $DumpDir = $env:FS_CORPUS_DIR,
     [string] $Out = "useful_corpus.tsv",
     [string] $LuaExe = ""
 )
@@ -27,6 +30,9 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 
 $LuaExe = Resolve-LuaExe $LuaExe
 
+if (-not $DumpDir) {
+    Write-Error "no corpus directory: set the FS_CORPUS_DIR environment variable or pass -DumpDir (see tests/research/README.md)"; exit 2
+}
 if (-not (Test-Path $DumpDir)) {
     Write-Error "dump dir not found: $DumpDir (run tests/explore_chains.ps1 first)"; exit 2
 }

@@ -37,11 +37,12 @@
 --       a dependency-free standalone.
 --
 -- PowerShell glob expansion also works -- against the last explorer run's
--- published dumps (tests/explore_problems/) or the canonical research corpus:
+-- published dumps (tests/explore_problems/) or the canonical research corpus
+-- ($env:FS_CORPUS_DIR):
 --   lua tests/bundle_solutions.lua out\bundle.txt `
 --     (Get-ChildItem tests\explore_problems\*.lua).FullName
 --   lua tests/bundle_solutions.lua out\bundle.txt `
---     (Get-ChildItem $env:APPDATA\Factorio\script-output\explore_problems\*.lua).FullName
+--     (Get-ChildItem $env:FS_CORPUS_DIR\*.lua).FullName
 
 local SIGNATURE = "factory_solver"
 local VERSION = 1

@@ -25,8 +25,11 @@ param(
     # tests/probe_force.lua). Receives one dump file path as its only argument.
     [Parameter(Mandatory = $true)]
     [string] $Driver,
-    # Directory of explorer-dumped problem files (chain_explorer's explore_emit).
-    [string] $DumpDir = (Join-Path $env:APPDATA 'Factorio/script-output/explore_problems'),
+    # Directory of explorer-dumped problem files: the canonical research corpus.
+    # No baked-in default -- defaults to the FS_CORPUS_DIR environment variable
+    # (shared with the other research launchers and research_lib.lua) and errors
+    # when neither is provided.
+    [string] $DumpDir = $env:FS_CORPUS_DIR,
     # Only run dumps whose file name contains this substring (e.g. a config tag like
     # 'ttrapdown_coff_h44'). Empty = every *.lua in the dir.
     [string] $Filter = '',
@@ -57,6 +60,11 @@ if (-not (Test-Path $driverArg)) { Write-Error "driver not found: $Driver"; exit
 # Resolve the Lua interpreter (LuaJIT preferred, then stock lua; see ps_lib.ps1).
 $LuaExe = Resolve-LuaExe $LuaExe
 if ($Workers -lt 1) { $Workers = 1 }
+
+if (-not $DumpDir) {
+    Write-Error "no corpus directory: set the FS_CORPUS_DIR environment variable or pass -DumpDir (see tests/research/README.md)"
+    exit 2
+}
 
 # Enumerate the dumps (optionally filtered by name substring).
 $files = @(Get-ChildItem (Join-Path $DumpDir '*.lua') -ErrorAction SilentlyContinue |

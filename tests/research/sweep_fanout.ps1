@@ -33,8 +33,10 @@ param(
     # both benefit from target-range sharding. Accepts the bare word or the flag.
     [ValidateSet('measure', 'ablate', '--measure', '--ablate')]
     [string] $Mode = 'measure',
-    # Directory of explorer-dumped problem files (chain_explorer's explore_emit).
-    [string] $DumpDir = (Join-Path $env:APPDATA 'Factorio/script-output/explore_problems'),
+    # Directory of explorer-dumped problem files: the canonical research corpus.
+    # No baked-in default -- defaults to the FS_CORPUS_DIR environment variable
+    # (like the other research launchers) and errors when neither is provided.
+    [string] $DumpDir = $env:FS_CORPUS_DIR,
     # Concurrent `lua` workers. Defaults to every logical core.
     [int] $Jobs = ([Environment]::ProcessorCount),
     # Target-count granularity per work item. Smaller = finer load balance but more
@@ -55,6 +57,10 @@ $modeFlag = if ($Mode -like '--*') { $Mode } else { "--$Mode" }
 $LuaExe = Resolve-LuaExe $LuaExe
 if ($Jobs -lt 1) { $Jobs = 1 }
 
+if (-not $DumpDir) {
+    Write-Error "no corpus directory: set the FS_CORPUS_DIR environment variable or pass -DumpDir (see tests/research/README.md)"
+    exit 2
+}
 $files = @(Get-ChildItem (Join-Path $DumpDir '*.lua') -ErrorAction SilentlyContinue)
 if ($files.Count -eq 0) {
     Write-Error "no dump files in $DumpDir"

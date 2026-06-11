@@ -24,10 +24,10 @@
 # Both produce the same status lines; "<<HIT" marks undesirable solutions, each
 # reproducible by re-running its seed.
 #
-# The research-side canonical corpus (%APPDATA%/Factorio/script-output/
-# explore_problems, the default read source of tests/research/*) is READ-ONLY
+# The research-side canonical corpus (the FS_CORPUS_DIR environment variable,
+# which the tests/research/* launchers read for their -DumpDir) is READ-ONLY
 # for this launcher: promote a run into it by hand with
-#   Copy-Item tests\explore_problems\*.lua "$env:APPDATA\Factorio\script-output\explore_problems\"
+#   Copy-Item tests\explore_problems\*.lua $env:FS_CORPUS_DIR
 # so a branch's regenerated dumps can never silently overwrite it.
 #
 # This shares the RCON transport / launch / mod-list machinery with
@@ -289,9 +289,12 @@ if ($ReuseProblems) {
     $problemFiles = @(Get-ChildItem (Join-Path $ProblemDir '*.lua') -ErrorAction SilentlyContinue |
         ForEach-Object { $_.FullName })
     if ($problemFiles.Count -eq 0) {
-        Write-Error ("no cached problem files in $ProblemDir -- run once without -ReuseProblems to generate them, " +
-            "or seed it from the canonical research corpus: " +
-            "Copy-Item `"`$env:APPDATA\Factorio\script-output\explore_problems\*.lua`" `"$ProblemDir`"")
+        $corpusHint = if ($env:FS_CORPUS_DIR) {
+            " or seed it from the canonical research corpus: Copy-Item `"$env:FS_CORPUS_DIR\*.lua`" `"$ProblemDir`""
+        } else {
+            " or copy a corpus into it (see tests/research/README.md)"
+        }
+        Write-Error ("no cached problem files in $ProblemDir -- run once without -ReuseProblems to generate them," + $corpusHint)
         exit 2
     }
     Write-Host "explore: reuse mode -- re-solving $($problemFiles.Count) cached problems with $Workers workers (no Factorio boot)"

@@ -49,10 +49,13 @@ M.park_threshold = ed.park_threshold
 M.is_recipe = ed.is_recipe
 M.CHEAT_EPS = ed.CHEAT_EPS
 
--- Default location of the explorer's dumped problems (chain_explorer's
--- explore_emit writes here via helpers.write_file). Drivers that enumerate the
--- corpus themselves can point at this; the run_corpus.ps1 launcher defaults to it.
-M.DUMP_DIR = (os.getenv("APPDATA") or "") .. "/Factorio/script-output/explore_problems"
+-- Location of the canonical research corpus (explorer-dumped problems, promoted
+-- by hand -- the explorer itself publishes to tests/explore_problems/). There is
+-- deliberately NO baked-in default: the corpus lives wherever the maintainer
+-- hosts it, named by the FS_CORPUS_DIR environment variable (the .ps1 research
+-- launchers honour the same variable for their -DumpDir). nil when unset --
+-- drivers that enumerate the corpus themselves must check before using it.
+M.DUMP_DIR = os.getenv("FS_CORPUS_DIR")
 
 ---Load and validate an explorer-dumped problem file, raising on failure (the
 ---research drivers want a hard stop, not the kind/detail split solve_problem uses).
