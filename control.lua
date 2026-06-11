@@ -58,6 +58,12 @@ script.on_init(function()
 
     storage.virtuals = virtual.create_virtuals()
 
+    -- New saves are born on the engine-aligned layout default, so they never get
+    -- the one-time "the default layout changed" notice. Pre-set the flag here;
+    -- existing saves (which reach on_configuration_changed instead) leave it nil
+    -- and get the notice once on first load after the update.
+    storage.layout_default_notice_shown = true
+
     -- Force data must exist before any GUI is built: open_build_assistant_default
     -- renders the docked panel, whose make_build_table handler immediately reads
     -- storage.forces via save.get_selected_solution. When the mod is added to an
@@ -101,6 +107,16 @@ script.on_configuration_changed(function(event)
     flib_dictionary.on_configuration_changed()
 
     storage.virtuals = virtual.create_virtuals()
+
+    -- One-time chat notice for existing saves: the layout default flipped to
+    -- follow Factorio's ingredient-to-product order. Guarded by a storage flag so
+    -- it prints exactly once per save (new saves pre-set it in on_init). The flag
+    -- is nil on saves created before this change, which is exactly who should be
+    -- told. Version-drift-proof: no version comparison needed.
+    if not storage.layout_default_notice_shown then
+        storage.layout_default_notice_shown = true
+        game.print({ "factory-solver-layout-default-changed" })
+    end
 
     for _, player in pairs(game.players) do
         save.reinit_player_data(player.index)
@@ -179,8 +195,8 @@ script.on_event(defines.events.on_research_reversed, function(event)
 end)
 
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
-    if event.setting ~= "factory-solver-swap-recipe-io-placement"
-        and event.setting ~= "factory-solver-reverse-production-line-order" then
+    if event.setting ~= "factory-solver-classic-recipe-io-placement"
+        and event.setting ~= "factory-solver-classic-production-line-order" then
         return
     end
     -- These per-player display settings are read at GUI build time, so

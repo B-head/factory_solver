@@ -25,27 +25,32 @@ function M.get_style(is_hidden, is_unresearched, filter_type)
     end
 end
 
----True when the player has enabled the "swap Product / Ingredient placement"
----per-player mod setting. Callers flip the order of the products/ingredients
----sections in the solution editor and the add-production-line dialog. Reading a
----per-player setting is MP-deterministic (settings are replicated), so it is
----safe to consult inside a GUI build/handler path.
+---True when the products/ingredients sections should be rendered ingredients-
+---first (the default, matching the engine's "ingredients -> product" reading
+---order): Ingredients column left of Products in the editor, input group above
+---output group in the adder. This is the INVERSE of the per-player
+---"classic-recipe-io-placement" opt-in, which restores the classic
+---factory_solver products-first placement when enabled. Reading a per-player
+---setting is MP-deterministic (settings are replicated), so it is safe to
+---consult inside a GUI build/handler path.
 ---@param player_index integer
 ---@return boolean
 function M.is_recipe_io_placement_swapped(player_index)
-    return settings.get_player_settings(player_index)["factory-solver-swap-recipe-io-placement"].value --[[@as boolean]]
+    return not settings.get_player_settings(player_index)["factory-solver-classic-recipe-io-placement"].value
 end
 
----True when the player has enabled the "reverse top-to-bottom production flow"
----per-player mod setting. Callers reverse the production line row order (solution
----editor and build assistant) and swap the Final products / Initial ingredients
----sections in the results panel. Display-only: the shared production_lines array
----is never mutated. MP-deterministic for the same reason as the swap setting
----above.
+---True when the production line rows should be rendered reversed (the default:
+---newly added lines on top, Initial ingredients above Final products in the
+---results panel). This is the INVERSE of the per-player
+---"classic-production-line-order" opt-in, which restores the classic order
+---(Final products on top) when enabled. Reverses the row order in the solution
+---editor and build assistant and swaps the results-panel sections. Display-only:
+---the shared production_lines array is never mutated. MP-deterministic for the
+---same reason as the placement setting above.
 ---@param player_index integer
 ---@return boolean
 function M.is_production_line_order_reversed(player_index)
-    return settings.get_player_settings(player_index)["factory-solver-reverse-production-line-order"].value --[[@as boolean]]
+    return not settings.get_player_settings(player_index)["factory-solver-classic-production-line-order"].value
 end
 
 ---comment

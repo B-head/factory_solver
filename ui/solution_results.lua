@@ -12,7 +12,8 @@ local production_line_adder = require "ui/production_line_adder"
 local handlers = {}
 
 ---Reorder the results panel's Final products and Initial ingredients sections to
----match the "reverse top-to-bottom production flow" per-player setting. The two
+---match the row order (Initial ingredients first by default; the "Classic
+---top-to-bottom order" setting opts out). The two
 ---sections are the first four children of the scroll-pane (final label/frame,
 ---then initial label/frame); the divider, totals and build-totals that follow
 ---stay put. Idempotent: it only swaps when the current first caption disagrees

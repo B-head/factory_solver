@@ -56,19 +56,23 @@ function handlers.make_production_line_table(event)
         return
     end
 
-    -- Per-player "swap Product / Ingredient placement": flips the Products (5)
-    -- and Ingredients (6) columns. Work on a local copy so the shared module
-    -- `headers` table is never mutated (it is read by every player's render).
+    -- Products (5) / Ingredients (6) column order. is_recipe_io_placement_swapped
+    -- is true by default (ingredients first, engine order) and false when the
+    -- player opts into "Classic Product / Ingredient placement". Work on a local
+    -- copy so the shared module `headers` table is never mutated (it is read by
+    -- every player's render).
     local swap = common.is_recipe_io_placement_swapped(event.player_index)
     local ordered_headers = flib_table.shallow_copy(headers)
     if swap then
         ordered_headers[5], ordered_headers[6] = ordered_headers[6], ordered_headers[5]
     end
 
-    -- Per-player "reverse top-to-bottom production flow": render the rows in
-    -- reverse so newly appended lines surface at the top. Display-only — the
-    -- shared production_lines array keeps its canonical order, and line_index
-    -- below stays the true array index so move/delete/add handlers are unaffected.
+    -- Row order. is_production_line_order_reversed is true by default (rows
+    -- reversed so newly appended lines surface at the top, engine ingredient-to-
+    -- product flow) and false when the player opts into "Classic top-to-bottom
+    -- order". Display-only — the shared production_lines array keeps its canonical
+    -- order, and line_index below stays the true array index so move/delete/add
+    -- handlers are unaffected.
     local reversed = common.is_production_line_order_reversed(event.player_index)
 
     for _, value in ipairs(ordered_headers) do

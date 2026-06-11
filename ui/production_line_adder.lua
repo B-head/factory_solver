@@ -191,11 +191,12 @@ end
 
 local handlers = {}
 
----Reorder the four recipe-picker frames when the player has the "swap Product /
----Ingredient placement" setting on. The static template builds them in
+---Reorder the four recipe-picker frames to input-group-first, the default
+---(is_recipe_io_placement_swapped is true unless the player opts into "Classic
+---Product / Ingredient placement"). The static template builds them in
 ---[product, spent, ingredient, fuel] order; swapping the output group
 ---(product, spent) with the input group (ingredient, fuel) yields
----[ingredient, fuel, product, spent], mirroring the column swap in the solution
+---[ingredient, fuel, product, spent], mirroring the column order in the solution
 ---editor. The frames are always built; we permute the already-built children.
 ---@param event EventDataTrait
 function handlers.on_arrange_recipe_io_placement(event)
