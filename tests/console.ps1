@@ -5,8 +5,11 @@
 # either interactively (a REPL) or one-shot (-Command). Handy for probing
 # prototype names, inspecting `storage`, trying `remote.call`s, and reading the
 # log, without writing a fixture. It reuses the smoke harness's plumbing:
-# factorioPath from .vscode/settings.json, modsPath from .vscode/launch.json,
-# the -Mods / mod-list.json backup-restore, and the Source RCON client.
+# factorioPath from .vscode/settings.json, modsPath from .vscode/launch.json
+# (with the worktree fallback), the per-run run workspace (scratch mods dir +
+# isolated write-data; the shared mod-list.json and %APPDATA%\Factorio are
+# never touched), and the Source RCON client. The boot banner prints the RCON
+# port and password, so a second terminal can attach with -Connect.
 #
 # Input conventions (per line, in both modes):
 #   /cmd...      send a raw console command verbatim (e.g. /c game.print("hi"))
@@ -36,29 +39,39 @@ param(
     # scenario is fastest and exposes the factory_solver_smoke interface; use
     # base/freeplay for a real map with surfaces and entities.
     [string] $Scenario = "factory_solver/smoke_rcon",
-    # Mods to enable for the run; everything else in mod-list.json is disabled.
-    # @() leaves mod-list.json untouched (loads the dev config as-is).
+    # Mods to enable for the run; everything else is explicitly disabled in the
+    # workspace's generated mod-list.json. @() mirrors the dev config (every
+    # shared mod linked, shared mod-list.json copied verbatim).
     [string[]] $Mods = @("base", "flib", "factory_solver"),
-    # host:port of an already-running RCON server to attach to instead of booting.
+    # host:port of an already-running RCON server to attach to instead of
+    # booting. Pass the booting terminal's banner password via -RconPassword.
     [string] $Connect = "",
-    [int] $RconPort = 27116,
-    [string] $RconPassword = "console",
+    # 0 = pick a free port (the banner prints the actual one for -Connect).
+    [int] $RconPort = 0,
+    # Empty = a per-run random password when booting; required with -Connect.
+    [string] $RconPassword = "",
     [int] $RconStartupSeconds = 120,
     # Print everything appended to the log since boot, then exit (one-shot aid).
-    [switch] $ShowLog
+    [switch] $ShowLog,
+    # Where run workspaces live; empty = $env:FS_RUN_ROOT, else $env:TEMP\fs_runs.
+    [string] $RunRoot = "",
+    # Keep the run workspace (mods junction, write-data, logs) after the session.
+    [switch] $KeepRun
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
-# Shared RCON transport / config resolution / mod-list control (also used by
-# tests/smoke_rcon.ps1 and tests/explore_chains.ps1).
+# Shared RCON transport / config resolution / run-workspace machinery (also
+# used by tests/smoke_rcon.ps1 and tests/explore_chains.ps1).
 . "$PSScriptRoot/rcon_lib.ps1"
 
 # -Mods comma/space normalization (see smoke_rcon.ps1 for why -File mangles it).
 $Mods = @($Mods | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
-$logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
+# Set when booting (the run workspace's per-run log); stays $null when
+# attaching, where the server's log lives wherever that server runs.
+$logFile = $null
 $booting = [string]::IsNullOrWhiteSpace($Connect)
 
 # RCON transport (Read-Exact / Send / Receive / Invoke-RconCommandDrain) comes
@@ -81,19 +94,23 @@ function ConvertTo-ConsoleCommand {
     return "/silent-command $Line"
 }
 
+# Prints via Write-Host: Invoke-Line's caller consumes the function's success
+# stream (`if ((Invoke-Line $line) -eq "QUIT")`), so pipeline output from here
+# would be swallowed by that comparison instead of reaching the console.
 function Show-Log {
     param([string] $Arg, [long] $PreBytes)
+    if (-not $logFile) { Write-Host "(no log available when attached with -Connect)"; return }
     if (-not (Test-Path $logFile)) { Write-Host "(no log file at $logFile)"; return }
     if ($Arg -eq "all") {
-        Get-Content $logFile
+        Get-Content $logFile | ForEach-Object { Write-Host $_ }
     } elseif ($Arg -match '^\d+$') {
-        Get-Content $logFile -Tail ([int]$Arg)
+        Get-Content $logFile -Tail ([int]$Arg) | ForEach-Object { Write-Host $_ }
     } else {
         # Appended since boot.
         $stream = [System.IO.File]::Open($logFile, 'Open', 'Read', 'ReadWrite')
         try {
             $stream.Seek($PreBytes, 'Begin') | Out-Null
-            (New-Object System.IO.StreamReader($stream)).ReadToEnd()
+            Write-Host (New-Object System.IO.StreamReader($stream)).ReadToEnd()
         } finally { $stream.Dispose() }
     }
 }
@@ -108,53 +125,35 @@ $helpText = @"
 "@
 
 # ---------------------------------------------------------------------------
-# Resolve Factorio + mods (only needed when booting).
+# Resolve Factorio + build the run workspace (only needed when booting).
 # ---------------------------------------------------------------------------
 $proc = $null
 $client = $null
 $stream = $null
-$modList = $null
-$preBytes = if (Test-Path $logFile) { (Get-Item $logFile).Length } else { 0 }
+$ws = $null
+$preBytes = 0   # the per-run log starts empty; ":log" with no arg shows it all
 $exitCode = 0
 
 try {
     if ($booting) {
+        if ($RconPort -eq 0) { $RconPort = Get-FreeTcpPort }
+        if (-not $RconPassword) { $RconPassword = [guid]::NewGuid().ToString('N') }
+        $runRoot = Resolve-RunRoot -RunRoot $RunRoot
+        Invoke-RunRootGc -RunRoot $runRoot
+
         $cfg = Resolve-FactorioConfig -RepoRoot $repoRoot.Path
-        $factorio = $cfg.Factorio
-        $modsDir = $cfg.ModsDir
+        $ws = New-RunWorkspace -Tag "console" -ServerName "factory_solver_console" -RunRoot $runRoot
+        Initialize-ScratchMods -Workspace $ws -SourceModsDir $cfg.ModsDir -RepoRoot $repoRoot.Path -Mods $Mods
+        $logFile = $ws.LogFile
 
-        $serverSettings = Join-Path $env:TEMP "factory_solver_console_server_settings.json"
-        @'
-{
-    "name": "factory_solver_console",
-    "description": "factory_solver dev console",
-    "visibility": { "public": false, "lan": false },
-    "require_user_verification": false,
-    "max_players": 1,
-    "allow_commands": "true"
-}
-'@ | Set-Content -Path $serverSettings -Encoding utf8
+        Write-Host "console: booting $Scenario  (mods: $(if ($Mods.Count) { $Mods -join ', ' } else { 'dev config mirrored' }))"
+        Write-Host "console: run dir = $($ws.Dir)"
+        Write-Host "console: rcon    = 127.0.0.1:$RconPort  (password $RconPassword)"
 
-        Write-Host "console: booting $Scenario  (mods: $(if ($Mods.Count) { $Mods -join ', ' } else { 'dev config unchanged' }))"
-
-        # Mod set control (shared; -Mods @() leaves the dev config untouched).
-        $modList = Set-ReproducibleModList -ModsDir $modsDir -Mods $Mods -BackupSuffix "console-bak"
-
-        $arguments = @(
-            "--start-server-load-scenario", $Scenario,
-            "--mod-directory", $modsDir,
-            "--server-settings", $serverSettings,
-            "--rcon-bind", "127.0.0.1:$RconPort",
-            "--rcon-password", $RconPassword,
-            "--no-log-rotation",
-            "--disable-audio"
-        )
+        $arguments = New-FactorioArgumentList -Workspace $ws -Scenario $Scenario `
+            -RconPort $RconPort -RconPassword $RconPassword
         $env:SteamAppId = "427520"
-        $lockFile = Join-Path $env:APPDATA "Factorio/.lock"
-        if ((Test-Path $lockFile) -and -not (Get-Process -Name "factorio" -ErrorAction SilentlyContinue)) {
-            Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
-        }
-        $proc = Start-Process -FilePath $factorio -ArgumentList $arguments -PassThru -NoNewWindow
+        $proc = Start-Process -FilePath $cfg.Factorio -ArgumentList $arguments -PassThru -NoNewWindow
 
         $connectHost = "127.0.0.1"
         $connectPort = $RconPort
@@ -166,24 +165,10 @@ try {
     }
 
     # --- Connect + authenticate -------------------------------------------
-    $connectDeadline = (Get-Date).AddSeconds($RconStartupSeconds)
-    while ($true) {
-        if ($proc -and $proc.HasExited) { throw "Factorio exited before RCON came up (code $($proc.ExitCode))" }
-        try {
-            $client = New-Object System.Net.Sockets.TcpClient
-            $client.Connect($connectHost, $connectPort)
-            $stream = $client.GetStream()
-            break
-        } catch {
-            if ($client) { $client.Dispose(); $client = $null }
-            if ((Get-Date) -gt $connectDeadline) { throw "RCON $connectHost`:$connectPort never opened within ${RconStartupSeconds}s" }
-            Start-Sleep -Milliseconds 500
-        }
-    }
-    Send-RconPacket -Stream $stream -Id 1 -Type 3 -Body $RconPassword
-    $auth = Receive-RconPacket -Stream $stream
-    if ($auth.Type -eq 0) { $auth = Receive-RconPacket -Stream $stream }
-    if ($auth.Id -eq -1) { throw "RCON auth failed (wrong password?)" }
+    $rcon = Connect-Rcon -ConnectHost $connectHost -Port $connectPort -Password $RconPassword `
+        -TimeoutSeconds $RconStartupSeconds -Proc $proc
+    $client = $rcon.Client
+    $stream = $rcon.Stream
     Write-Host "console: connected. Type :help for conventions, :quit to exit."
 
     # --- Run one line (shared by REPL and -Command) -----------------------
@@ -226,10 +211,10 @@ finally {
     if ($proc) {
         Start-Sleep -Milliseconds 500
         if (-not $proc.HasExited) { $proc.Kill(); Start-Sleep -Milliseconds 500 }
-        $smokeSave = Join-Path $env:APPDATA "Factorio/saves/$(($Scenario -split '/')[-1]).zip"
-        if (Test-Path $smokeSave) { Remove-Item $smokeSave -Force -ErrorAction SilentlyContinue }
     }
-    Restore-ModList -State $modList
+    # The autosave, log and .lock all live in the run workspace; remove it
+    # wholesale (kept on -KeepRun or a setup failure).
+    Remove-RunWorkspace -Workspace $ws -Keep:($KeepRun -or $exitCode -ne 0)
 }
 
 exit $exitCode

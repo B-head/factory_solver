@@ -10,16 +10,25 @@
 #
 # Two modes (Option A producer/consumer split):
 #   * DEFAULT (parallel): phase 1 boots Factorio ONCE and dumps each generated
-#     chain to script-output/explore_problems/*.lua (generation + normalization
-#     only -- no solve) via remote.call explore_emit; phase 2 quits Factorio and
-#     solves the dumped problems with a pool of standalone `lua` workers
-#     (tests/solve_problem.lua) in parallel across cores. The IPM solve is the
-#     dominant cost and is Factorio-free, so this is much faster than serial.
+#     chain (generation + normalization only -- no solve) via remote.call
+#     explore_emit into the run workspace's isolated script-output; phase 2
+#     quits Factorio and solves the dumped problems with a pool of standalone
+#     `lua` workers (tests/solve_problem.lua) in parallel across cores. The IPM
+#     solve is the dominant cost and is Factorio-free, so this is much faster
+#     than serial. After the pool drains, the dumps are PUBLISHED to
+#     -ProblemDir (default tests/explore_problems/, gitignored), replacing the
+#     previous run's snapshot there.
 #   * -Serial: the original single-boot in-engine RCON solve sweep (remote.call
 #     explore). Use when `lua` isn't available, or to cross-check that parallel
-#     and in-engine produce identical result lines.
+#     and in-engine produce identical result lines. Dumps nothing.
 # Both produce the same status lines; "<<HIT" marks undesirable solutions, each
 # reproducible by re-running its seed.
+#
+# The research-side canonical corpus (%APPDATA%/Factorio/script-output/
+# explore_problems, the default read source of tests/research/*) is READ-ONLY
+# for this launcher: promote a run into it by hand with
+#   Copy-Item tests\explore_problems\*.lua "$env:APPDATA\Factorio\script-output\explore_problems\"
+# so a branch's regenerated dumps can never silently overwrite it.
 #
 # This shares the RCON transport / launch / mod-list machinery with
 # tests/smoke_rcon.ps1; it is a separate file so the smoke gate stays a clean
@@ -45,9 +54,17 @@ param(
     # iterations, so a runaway solve can't hang forever, but a giant chain can
     # still take many seconds. No per-call deadline -- we wait for the response.
     [string[]] $Mods = @(),
-    [int] $RconPort = 27116,
-    [string] $RconPassword = "explore",
+    # 0 = pick a free port; empty password = a per-run random one.
+    [int] $RconPort = 0,
+    [string] $RconPassword = "",
     [string] $HitLog = "",
+    # Where the run's dumped problem files are published (and where
+    # -ReuseProblems reads them). Default: <repo>/tests/explore_problems.
+    [string] $ProblemDir = "",
+    # Where run workspaces live; empty = $env:FS_RUN_ROOT, else $env:TEMP\fs_runs.
+    [string] $RunRoot = "",
+    # Keep the run workspace (mods junction, write-data, logs) after a clean run.
+    [switch] $KeepRun,
     # Quality recycling mode: enable the quality mod, fill machine module slots
     # with quality modules, and target a high-quality item (drives the
     # upgrade-and-recycle loop -- this mod's USP and the hardest case for the IPM).
@@ -70,20 +87,21 @@ param(
     # Standalone Lua interpreter that runs tests/solve_problem.lua. Defaults to the
     # known install location, falling back to whatever `lua` is on PATH.
     [string] $LuaExe = "",
-    # Re-solve the problem files left in script-output by a previous run WITHOUT
-    # booting Factorio or regenerating. The dumped chains are deterministic for a
-    # (modset, seed, config) set, so this is the fast path when iterating on the
-    # solver against a fixed problem set: it skips the serial boot+generation floor
-    # (~the slow part) and runs only the parallel solve. Mutually exclusive with
-    # -Serial. Errors if no cached problems exist (run once without it first).
+    # Re-solve the problem files published to -ProblemDir by a previous run
+    # WITHOUT booting Factorio or regenerating. The dumped chains are
+    # deterministic for a (modset, seed, config) set, so this is the fast path
+    # when iterating on the solver against a fixed problem set: it skips the
+    # serial boot+generation floor (~the slow part) and runs only the parallel
+    # solve. Mutually exclusive with -Serial. Errors if no cached problems exist
+    # (run once without it first, or copy a corpus into -ProblemDir).
     [switch] $ReuseProblems
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
-# Shared RCON transport / config resolution / mod-list control (also used by
-# tests/smoke_rcon.ps1 and tests/console.ps1).
+# Shared RCON transport / config resolution / run-workspace machinery (also
+# used by tests/smoke_rcon.ps1 and tests/console.ps1).
 . "$PSScriptRoot/rcon_lib.ps1"
 
 try {
@@ -94,11 +112,11 @@ try {
 }
 $factorio = $cfg.Factorio
 $modsDir = $cfg.ModsDir
-$logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
-# Factorio writes helpers.write_file output under script-output. The producer
-# (explore_emit) dumps one problem per chain into explore_problems/ here; phase 2
-# globs this directory and feeds the files to the lua worker pool.
-$scriptOutputDir = Join-Path $env:APPDATA "Factorio/script-output/explore_problems"
+# Where the run's dumped problem files are published after the solve pool
+# drains, and where -ReuseProblems reads them. Repo-local (per checkout /
+# worktree) and gitignored; the canonical research corpus in %APPDATA% is
+# never written by this launcher.
+if (-not $ProblemDir) { $ProblemDir = Join-Path $repoRoot.Path "tests\explore_problems" }
 
 if ($ReuseProblems -and $Serial) {
     Write-Error "-ReuseProblems and -Serial are mutually exclusive (reuse re-solves dumped files with the lua pool; serial solves in-engine)."
@@ -153,29 +171,16 @@ if (-not $Mods -or $Mods.Count -eq 0) {
     $Mods = @($Mods | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
-if (-not $HitLog) { $HitLog = Join-Path $repoRoot.Path "..\explore_hits.log" }
+if (-not $HitLog) { $HitLog = Join-Path $repoRoot.Path "tests\explore_hits.log" }
 if (-not [System.IO.Path]::IsPathRooted($HitLog)) { $HitLog = Join-Path (Get-Location).Path $HitLog }
 $HitLog = [System.IO.Path]::GetFullPath($HitLog)
 
-# Minimal dedicated-server settings (same shape as smoke_rcon.ps1).
-$serverSettings = Join-Path $env:TEMP "factory_solver_explore_server_settings.json"
-@'
-{
-    "name": "factory_solver_explore",
-    "description": "factory_solver random-chain explorer",
-    "visibility": { "public": false, "lan": false },
-    "require_user_verification": false,
-    "max_players": 1,
-    "allow_commands": "true"
-}
-'@ | Set-Content -Path $serverSettings -Encoding utf8
-
 Write-Host "explore: factorio = $factorio"
-Write-Host "explore: mods     = $modsDir"
-Write-Host "explore: rcon     = 127.0.0.1:$RconPort"
+Write-Host "explore: mods     = $modsDir (linked into the run workspace)"
 Write-Host "explore: seeds    = $StartSeed .. $($StartSeed + $Seeds - 1)  (hops=$Hops)"
 Write-Host "explore: mod set  = $($Mods -join ', ')"
 Write-Host "explore: hit log  = $HitLog"
+Write-Host "explore: problems = $ProblemDir"
 
 # --- Result classification (shared by serial sweep and parallel phase 2) ------
 # A status line is one of: <<HIT (undesirable solution, any subclass), ERROR,
@@ -279,12 +284,14 @@ function Invoke-WorkerPool {
 # normal run has dumped them, the solver can be re-run against that exact set
 # without booting Factorio or regenerating -- skipping the serial boot+generation
 # floor and leaving only the parallel solve. This is the iterate-on-the-solver
-# fast path. It exits before any Factorio / mod-list machinery is touched.
+# fast path. It exits before any Factorio / run-workspace machinery is touched.
 if ($ReuseProblems) {
-    $problemFiles = @(Get-ChildItem (Join-Path $scriptOutputDir '*.lua') -ErrorAction SilentlyContinue |
+    $problemFiles = @(Get-ChildItem (Join-Path $ProblemDir '*.lua') -ErrorAction SilentlyContinue |
         ForEach-Object { $_.FullName })
     if ($problemFiles.Count -eq 0) {
-        Write-Error "no cached problem files in $scriptOutputDir -- run once without -ReuseProblems to generate them."
+        Write-Error ("no cached problem files in $ProblemDir -- run once without -ReuseProblems to generate them, " +
+            "or seed it from the canonical research corpus: " +
+            "Copy-Item `"`$env:APPDATA\Factorio\script-output\explore_problems\*.lua`" `"$ProblemDir`"")
         exit 2
     }
     Write-Host "explore: reuse mode -- re-solving $($problemFiles.Count) cached problems with $Workers workers (no Factorio boot)"
@@ -304,29 +311,33 @@ if ($ReuseProblems) {
     exit 0
 }
 
-# --- Launch (mirrors smoke_rcon.ps1) -----------------------------------------
-$arguments = @(
-    "--start-server-load-scenario", "factory_solver/smoke_rcon",
-    "--mod-directory", $modsDir,
-    "--server-settings", $serverSettings,
-    "--rcon-bind", "127.0.0.1:$RconPort",
-    "--rcon-password", $RconPassword,
-    "--no-log-rotation",
-    "--disable-audio"
-)
-$env:SteamAppId = "427520"
+# --- Launch (run workspace; mirrors smoke_rcon.ps1) ---------------------------
+if ($RconPort -eq 0) { $RconPort = Get-FreeTcpPort }
+if (-not $RconPassword) { $RconPassword = [guid]::NewGuid().ToString('N') }
+$runRoot = Resolve-RunRoot -RunRoot $RunRoot
 
-$lockFile = Join-Path $env:APPDATA "Factorio/.lock"
-if ((Test-Path $lockFile) -and -not (Get-Process -Name "factorio" -ErrorAction SilentlyContinue)) {
-    Write-Host "explore: clearing stale lock file"
-    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
+$ws = $null
+try {
+    Invoke-RunRootGc -RunRoot $runRoot
+    $ws = New-RunWorkspace -Tag "explore" -ServerName "factory_solver_explore" -RunRoot $runRoot
+    Initialize-ScratchMods -Workspace $ws -SourceModsDir $modsDir -RepoRoot $repoRoot.Path -Mods $Mods
+} catch {
+    Write-Error $_.Exception.Message
+    Remove-RunWorkspace -Workspace $ws
+    exit 2
 }
+# The producer (explore_emit) writes via helpers.write_file("explore_problems/
+# <tag>.lua"), which lands under the run workspace's isolated script-output;
+# phase 2 feeds those files to the lua worker pool, then publishes them to
+# $ProblemDir.
+$dumpDir = Join-Path $ws.ScriptOutputDir "explore_problems"
+$logFile = $ws.LogFile
+Write-Host "explore: run dir  = $($ws.Dir)"
+Write-Host "explore: rcon     = 127.0.0.1:$RconPort"
 
-# --- Mod set control (rewrite mod-list.json, restore in finally) -------------
-# Shared with the other launchers. The explorer always controls the mod set (the
-# default -Mods is the full pyanodon/quality set, never empty).
-$modList = Set-ReproducibleModList -ModsDir $modsDir -Mods $Mods -BackupSuffix "explore-bak" `
-    -RestoreMessage "explore: restoring mod-list.json from a prior run's backup"
+$arguments = New-FactorioArgumentList -Workspace $ws -Scenario "factory_solver/smoke_rcon" `
+    -RconPort $RconPort -RconPassword $RconPassword
+$env:SteamAppId = "427520"
 
 $proc = Start-Process -FilePath $factorio -ArgumentList $arguments -PassThru -NoNewWindow
 $client = $null; $stream = $null; $exitCode = 1
@@ -334,26 +345,9 @@ $hits = New-Object System.Collections.Generic.List[string]
 $errors = 0; $finished = 0
 
 try {
-    $connectDeadline = (Get-Date).AddSeconds($RconStartupSeconds)
-    while ($true) {
-        if ($proc.HasExited) { throw "Factorio exited before RCON came up (code $($proc.ExitCode))" }
-        try {
-            $client = New-Object System.Net.Sockets.TcpClient
-            $client.Connect("127.0.0.1", $RconPort)
-            $stream = $client.GetStream()
-            break
-        } catch {
-            if ($client) { $client.Dispose(); $client = $null }
-            if ((Get-Date) -gt $connectDeadline) { throw "RCON port $RconPort never opened within ${RconStartupSeconds}s" }
-            Start-Sleep -Milliseconds 500
-        }
-    }
-    Write-Host "explore: RCON connected"
-
-    Send-RconPacket -Stream $stream -Id 1 -Type 3 -Body $RconPassword
-    $auth = Receive-RconPacket -Stream $stream
-    if ($auth.Type -eq 0) { $auth = Receive-RconPacket -Stream $stream }
-    if ($auth.Id -eq -1) { throw "RCON auth failed (wrong password?)" }
+    $rcon = Connect-Rcon -Port $RconPort -Password $RconPassword -TimeoutSeconds $RconStartupSeconds -Proc $proc
+    $client = $rcon.Client
+    $stream = $rcon.Stream
     Write-Host "explore: RCON authenticated, sweeping configs x $Seeds seeds`n"
 
     "# explore run $(Get-Date -Format o)  mods=$($Mods -join ',')  hops=$Hops" | Out-File -FilePath $HitLog -Append -Encoding utf8
@@ -421,13 +415,10 @@ try {
     # while the solve pool chews through already-dumped files concurrently --
     # generation (Factorio, ~1 core) and solving (the workers) overlap, so the
     # solve hides under the serial generation instead of running after it. -Serial
-    # solves in-engine via explore. Clear stale dumps first either way.
+    # solves in-engine via explore. The dump dir is inside this run's fresh
+    # workspace, so there are no stale files to clear.
     if (-not $Serial) {
-        if (Test-Path $scriptOutputDir) {
-            Remove-Item (Join-Path $scriptOutputDir '*.lua') -Force -ErrorAction SilentlyContinue
-        } else {
-            New-Item -ItemType Directory -Force -Path $scriptOutputDir | Out-Null
-        }
+        New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
     }
     $remoteFn = if ($Serial) { 'explore' } else { 'explore_emit' }
     $pool = if ($Serial) { $null } else { New-SolvePool -LuaExe $LuaExe -WorkDir $repoRoot.Path -Workers $Workers }
@@ -478,7 +469,7 @@ try {
                     Write-Host "  $r" -ForegroundColor DarkYellow
                     $r | Out-File -FilePath $HitLog -Append -Encoding utf8
                 } elseif ($r -match 'tag=(\S+)') {
-                    [void]$pool.Queue.Enqueue((Join-Path $scriptOutputDir ($Matches[1] + '.lua')))
+                    [void]$pool.Queue.Enqueue((Join-Path $dumpDir ($Matches[1] + '.lua')))
                     $emitted++
                     Write-Host "  $r"
                 } else {
@@ -517,6 +508,16 @@ try {
         Write-Host ""
         $skipped = ($configs.Count * $Seeds) - $emitted
         Write-Host "`nexplore: done. $($hits.Count) HIT, $errors ERROR, $finished clean-finished of $emitted solved ($skipped skipped/errored)"
+
+        # Publish this run's dumps to $ProblemDir as the new "last run" snapshot
+        # (what -ReuseProblems re-solves), replacing the previous one. Only after
+        # a complete run -- a thrown run keeps its workspace, dumps included.
+        if ($emitted -gt 0) {
+            New-Item -ItemType Directory -Force -Path $ProblemDir | Out-Null
+            Remove-Item (Join-Path $ProblemDir '*.lua') -Force -ErrorAction SilentlyContinue
+            Move-Item (Join-Path $dumpDir '*.lua') $ProblemDir
+            Write-Host "explore: $emitted problem files published to $ProblemDir"
+        }
     }
     if ($hits.Count -gt 0) {
         Write-Host "explore: HITs (reproduce with the same seed):"
@@ -539,10 +540,10 @@ finally {
     Start-Sleep -Milliseconds 500
     if (-not $proc.HasExited) { $proc.Kill(); Start-Sleep -Milliseconds 500 }
 
-    $smokeSave = Join-Path $env:APPDATA "Factorio/saves/smoke_rcon.zip"
-    if (Test-Path $smokeSave) { Remove-Item $smokeSave -Force -ErrorAction SilentlyContinue }
-
-    Restore-ModList -State $modList
+    # The autosave, log, .lock and any unpublished dumps live in the run
+    # workspace; remove it wholesale. Kept on -KeepRun, and on any non-zero
+    # exit so a failed run's log and dumps survive for autopsy.
+    Remove-RunWorkspace -Workspace $ws -Keep:($KeepRun -or $exitCode -ne 0)
 }
 
 exit $exitCode

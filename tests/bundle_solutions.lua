@@ -36,8 +36,11 @@
 --       tests/headless_env + the solver); without the flag this script stays
 --       a dependency-free standalone.
 --
--- PowerShell glob expansion also works, e.g.:
---   lua tests/bundle_solutions.lua S:\tmp\bundle.txt `
+-- PowerShell glob expansion also works -- against the last explorer run's
+-- published dumps (tests/explore_problems/) or the canonical research corpus:
+--   lua tests/bundle_solutions.lua out\bundle.txt `
+--     (Get-ChildItem tests\explore_problems\*.lua).FullName
+--   lua tests/bundle_solutions.lua out\bundle.txt `
 --     (Get-ChildItem $env:APPDATA\Factorio\script-output\explore_problems\*.lua).FullName
 
 local SIGNATURE = "factory_solver"

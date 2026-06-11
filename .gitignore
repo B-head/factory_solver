@@ -2,3 +2,5 @@
 .vscode/
 .claude/
 tests/research/.refcache/
+tests/explore_problems/
+tests/explore_hits.log

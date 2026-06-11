@@ -38,9 +38,21 @@ shared libraries every driver here requires (`harness`, `headless_env`,
 
 ## Running
 
-The dumps these consume are written by the chain explorer to
-`%APPDATA%/Factorio/script-output/explore_problems/*.lua` (generate more with
-`pwsh tests/explore_chains.ps1 -Seeds N`). Then, from the repo root:
+The dumps these consume live in the **canonical corpus** at
+`%APPDATA%/Factorio/script-output/explore_problems/*.lua` — the default read
+source of every `-DumpDir` here, and read-only for the tooling. The chain
+explorer (`pwsh tests/explore_chains.ps1 -Seeds N`) publishes each run's dumps
+to the checkout-local `tests/explore_problems/` (gitignored, replaced per run);
+promote a run into the canonical corpus by hand when it should become the new
+analysis baseline:
+
+```powershell
+Copy-Item tests\explore_problems\*.lua "$env:APPDATA\Factorio\script-output\explore_problems\"
+```
+
+Dump generation is deterministic only per code version, so an unpromoted
+branch's run can never silently overwrite the corpus your analyses (and the
+refcache keys) are built on. Then, from the repo root:
 
 ```
 lua  tests/research/probe_force.lua <dump.lua>

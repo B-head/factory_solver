@@ -15,12 +15,18 @@
 # the "RCON client" region below so a future cross-platform launcher could swap
 # in mcrcon / a Python helper without touching the orchestration.
 #
-# Mod set: the launcher rewrites <mods>/mod-list.json to a reproducible set
-# (-Mods, default base+flib+factory_solver) and restores the original afterward.
-# The mods directory comes from .vscode/launch.json's modsPath -- the same value
-# the factoriomod-debug extension uses -- rather than being hardcoded. A fixture
-# that reads a mod's prototypes declares it in `requires` and is SKIPped (not
-# failed) when that mod isn't in the set.
+# Mod set: each run builds a throwaway "run workspace" (see rcon_lib.ps1) -- a
+# scratch mods dir holding a junction to this checkout plus links to the
+# requested mods (-Mods, default base+flib+factory_solver), with its own
+# generated mod-list.json, and an isolated Factorio write-data via --config.
+# The shared mods dir's mod-list.json and the user's %APPDATA%\Factorio are
+# never touched, runs work from a git worktree (the checkout's folder name does
+# not matter), and concurrent runs are safe (free RCON port + per-run random
+# password). The shared mods dir comes from .vscode/launch.json's modsPath --
+# the same value the factoriomod-debug extension uses -- read from this
+# checkout's .vscode, else the main checkout's. A fixture that reads a mod's
+# prototypes declares it in `requires` and is SKIPped (not failed) when that
+# mod isn't in the set.
 #
 # Exit codes: 0 = all fixtures PASS (skips are not failures), 1 = a fixture
 # FAILed (or no response), 2 = setup error (Factorio not found, RCON never came
@@ -29,6 +35,7 @@
 # Usage:
 #   pwsh tests/smoke_rcon.ps1
 #   pwsh tests/smoke_rcon.ps1 -Fixtures iron_plate -Mods base,flib,factory_solver,space-age,quality,elevated-rails
+#   pwsh tests/smoke_rcon.ps1 -KeepRun   # keep the run workspace for inspection
 
 [CmdletBinding()]
 param(
@@ -40,91 +47,74 @@ param(
         "catalyst_reclassify", "target_rescue",
         "migration_legacy_shape", "codec_solution_roundtrip", "codec_frozen_import",
         "codec_fp_roundtrip", "codec_helmod_roundtrip"),
-    # Mods to enable for the run; everything else in mod-list.json is disabled.
-    # Default is the vanilla minimal set. Pass @() to leave mod-list.json
-    # untouched (load whatever the dev config has enabled).
+    # Mods to enable for the run; everything else is explicitly disabled in the
+    # workspace's generated mod-list.json. Default is the vanilla minimal set.
+    # Pass @() to mirror the dev config (every shared mod linked, shared
+    # mod-list.json copied verbatim).
     [string[]] $Mods = @("base", "flib", "factory_solver"),
-    [int] $RconPort = 27115,
-    [string] $RconPassword = "smoke"
+    # 0 = pick a free port; a fixed port only matters for attaching from outside.
+    [int] $RconPort = 0,
+    # Empty = a per-run random password (fail-fast on cross-run misconnects).
+    [string] $RconPassword = "",
+    # Where run workspaces live; empty = $env:FS_RUN_ROOT, else $env:TEMP\fs_runs.
+    [string] $RunRoot = "",
+    # Keep the run workspace (mods junction, write-data, logs) after a green run.
+    # Failing runs always keep it for autopsy.
+    [switch] $KeepRun
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
-# Shared RCON transport / config resolution / mod-list control (also used by
-# tests/explore_chains.ps1 and tests/console.ps1).
+# Shared RCON transport / config resolution / run-workspace machinery (also
+# used by tests/explore_chains.ps1 and tests/console.ps1).
 . "$PSScriptRoot/rcon_lib.ps1"
 
-# Normalize -Mods to a clean string array. `powershell -File ... -Mods a,b,c`
-# binds the comma list as a SINGLE string (no split) rather than an array, which
-# would silently leave only base enabled; splitting on commas here makes both
-# comma- and space-separated forms work regardless of how -File bound them.
+# Normalize -Mods / -Fixtures to clean string arrays. `powershell -File ... -Mods
+# a,b,c` binds the comma list as a SINGLE string (no split) rather than an array,
+# which would silently leave only base enabled (and make a comma'd -Fixtures one
+# unknown fixture); splitting on commas here makes both comma- and
+# space-separated forms work regardless of how -File bound them.
 $Mods = @($Mods | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$Fixtures = @($Fixtures | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 # ---------------------------------------------------------------------------
-# Settings / paths (Resolve-FactorioConfig is shared with the other launchers)
+# Settings / run workspace (shared with the other launchers via rcon_lib.ps1)
 # ---------------------------------------------------------------------------
+if ($RconPort -eq 0) { $RconPort = Get-FreeTcpPort }
+if (-not $RconPassword) { $RconPassword = [guid]::NewGuid().ToString('N') }
+$runRoot = Resolve-RunRoot -RunRoot $RunRoot
+
+$ws = $null
 try {
+    Invoke-RunRootGc -RunRoot $runRoot
     $cfg = Resolve-FactorioConfig -RepoRoot $repoRoot.Path
+    $ws = New-RunWorkspace -Tag "smoke" -ServerName "factory_solver_smoke_rcon" -RunRoot $runRoot
+    Initialize-ScratchMods -Workspace $ws -SourceModsDir $cfg.ModsDir -RepoRoot $repoRoot.Path -Mods $Mods
 } catch {
     Write-Error $_.Exception.Message
+    Remove-RunWorkspace -Workspace $ws
     exit 2
 }
 $factorio = $cfg.Factorio
-$modsDir = $cfg.ModsDir
-$logFile = Join-Path $env:APPDATA "Factorio/factorio-current.log"
-
-# A dedicated server wants a server-settings file; the built-in defaults prompt
-# for things we do not want in a throwaway local run. Write a minimal one to
-# TEMP: private, no user verification, single slot. Missing fields fall back to
-# engine defaults.
-$serverSettings = Join-Path $env:TEMP "factory_solver_smoke_server_settings.json"
-@'
-{
-    "name": "factory_solver_smoke_rcon",
-    "description": "factory_solver RCON smoke test",
-    "visibility": { "public": false, "lan": false },
-    "require_user_verification": false,
-    "max_players": 1,
-    "allow_commands": "true"
-}
-'@ | Set-Content -Path $serverSettings -Encoding utf8
 
 Write-Host "smoke_rcon: factorio = $factorio"
-Write-Host "smoke_rcon: mods     = $modsDir"
+Write-Host "smoke_rcon: mods     = $($cfg.ModsDir) (linked into the run workspace)"
+Write-Host "smoke_rcon: run dir  = $($ws.Dir)"
 Write-Host "smoke_rcon: rcon     = 127.0.0.1:$RconPort"
 Write-Host "smoke_rcon: fixtures = $($Fixtures -join ', ')"
-Write-Host "smoke_rcon: mod set  = $(if ($Mods.Count) { $Mods -join ', ' } else { '(dev config unchanged)' })"
+Write-Host "smoke_rcon: mod set  = $(if ($Mods.Count) { $Mods -join ', ' } else { '(dev config mirrored)' })"
 
 # ---------------------------------------------------------------------------
-# Launch (Steam relaunch + stale lock handling mirror tests/smoke.ps1)
+# Launch
 # ---------------------------------------------------------------------------
-$arguments = @(
-    "--start-server-load-scenario", "factory_solver/smoke_rcon",
-    "--mod-directory", $modsDir,
-    "--server-settings", $serverSettings,
-    "--rcon-bind", "127.0.0.1:$RconPort",
-    "--rcon-password", $RconPassword,
-    "--no-log-rotation",
-    "--disable-audio"
-)
+$arguments = New-FactorioArgumentList -Workspace $ws -Scenario "factory_solver/smoke_rcon" `
+    -RconPort $RconPort -RconPassword $RconPassword
 
 # Steam-built factorio.exe relaunches itself via Steam unless it thinks Steam
 # launched it; setting SteamAppId makes the SDK skip the relaunch (same trick as
-# tests/smoke.ps1 and factoriomod-debug).
+# factoriomod-debug).
 $env:SteamAppId = "427520"
-
-$lockFile = Join-Path $env:APPDATA "Factorio/.lock"
-if ((Test-Path $lockFile) -and -not (Get-Process -Name "factorio" -ErrorAction SilentlyContinue)) {
-    Write-Host "smoke_rcon: clearing stale lock file"
-    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
-}
-
-# --- Mod set control (rewrite mod-list.json, restore in finally) ------------
-# Shared with the other launchers; -Mods @() opts out and leaves the dev config
-# untouched. A .smoke-bak left over by a crashed run is restored first.
-$modList = Set-ReproducibleModList -ModsDir $modsDir -Mods $Mods -BackupSuffix "smoke-bak" `
-    -RestoreMessage "smoke_rcon: restoring mod-list.json from a prior run's backup"
 
 $proc = Start-Process -FilePath $factorio -ArgumentList $arguments -PassThru -NoNewWindow
 
@@ -133,29 +123,10 @@ $stream = $null
 $exitCode = 1
 
 try {
-    # --- Wait for the server to open its RCON port -------------------------
-    $connectDeadline = (Get-Date).AddSeconds($RconStartupSeconds)
-    while ($true) {
-        if ($proc.HasExited) { throw "Factorio exited before RCON came up (code $($proc.ExitCode))" }
-        try {
-            $client = New-Object System.Net.Sockets.TcpClient
-            $client.Connect("127.0.0.1", $RconPort)
-            $stream = $client.GetStream()
-            break
-        } catch {
-            if ($client) { $client.Dispose(); $client = $null }
-            if ((Get-Date) -gt $connectDeadline) { throw "RCON port $RconPort never opened within ${RconStartupSeconds}s" }
-            Start-Sleep -Milliseconds 500
-        }
-    }
-    Write-Host "smoke_rcon: RCON connected"
-
-    # --- Authenticate ------------------------------------------------------
-    Send-RconPacket -Stream $stream -Id 1 -Type 3 -Body $RconPassword
-    $auth = Receive-RconPacket -Stream $stream
-    # Some servers emit an empty RESPONSE_VALUE before the AUTH_RESPONSE; skip it.
-    if ($auth.Type -eq 0) { $auth = Receive-RconPacket -Stream $stream }
-    if ($auth.Id -eq -1) { throw "RCON auth failed (wrong password?)" }
+    # --- Wait for RCON, connect, authenticate ------------------------------
+    $rcon = Connect-Rcon -Port $RconPort -Password $RconPassword -TimeoutSeconds $RconStartupSeconds -Proc $proc
+    $client = $rcon.Client
+    $stream = $rcon.Stream
     Write-Host "smoke_rcon: RCON authenticated"
 
     # --- Drive each fixture ------------------------------------------------
@@ -359,14 +330,14 @@ try {
 catch {
     Write-Host "SMOKE FAIL: $($_.Exception.Message)"
     Write-Host "smoke_rcon: last 30 lines of the Factorio log:"
-    if (Test-Path $logFile) {
-        Get-Content $logFile -Tail 30 | ForEach-Object { Write-Host "  $_" }
+    if (Test-Path $ws.LogFile) {
+        Get-Content $ws.LogFile -Tail 30 | ForEach-Object { Write-Host "  $_" }
     }
     $exitCode = 2
 }
 finally {
     # Try a clean server shutdown over RCON; fall back to killing the process
-    # (Factorio offers no in-Lua self-terminate -- see tests/smoke.ps1).
+    # (Factorio offers no in-Lua self-terminate).
     if ($stream) {
         try { Send-RconPacket -Stream $stream -Id 3 -Type 2 -Body "/quit" } catch {}
     }
@@ -377,15 +348,10 @@ finally {
         Start-Sleep -Milliseconds 500
     }
 
-    # A server autosaves the scenario on /quit, leaving saves/smoke_rcon.zip.
-    # It is overwritten each run (never accumulates) but clutters the in-game
-    # save list, so remove this throwaway test artifact. The name matches our
-    # scenario, so there is nothing of the user's to clobber.
-    $smokeSave = Join-Path $env:APPDATA "Factorio/saves/smoke_rcon.zip"
-    if (Test-Path $smokeSave) { Remove-Item $smokeSave -Force -ErrorAction SilentlyContinue }
-
-    # Restore the dev mod-list.json we rewrote for this run.
-    Restore-ModList -State $modList
+    # The autosave, the log, the .lock -- everything Factorio wrote -- lives in
+    # the run workspace, which is removed wholesale. Kept on -KeepRun, and on
+    # any non-zero exit so a FAIL's log survives for autopsy.
+    Remove-RunWorkspace -Workspace $ws -Keep:($KeepRun -or $exitCode -ne 0)
 }
 
 exit $exitCode
