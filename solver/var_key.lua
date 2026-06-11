@@ -31,6 +31,7 @@ local ELASTIC = "|elastic|"
 local BRIDGE = "|bridge|"
 local POS_SLACK = "%positive_slack%"
 local NEG_SLACK = "%negative_slack%"
+local TARGET_BUDGET = "|target_budget|"
 -- A bare |elastic| sits on a |limit| dual, so the composite a constraint
 -- relaxation carries is |elastic||limit|<material>.
 local ELASTIC_LIMIT = ELASTIC .. LIMIT
@@ -89,6 +90,11 @@ function M.elastic_limit(material) return ELASTIC_LIMIT .. material end
 function M.bridge(fluid, pmin, pmax, imin, imax)
     return string.format("%sfluid/%s@[%g,%g]->[%g,%g]", BRIDGE, fluid, pmin, pmax, imin, imax)
 end
+
+---The single dual row capping the summed target elastics (the target-rescue
+---lock; see create_problem's target_budget option).
+---@return string
+function M.target_budget() return TARGET_BUDGET end
 
 ---@param dual_variable string
 ---@return string

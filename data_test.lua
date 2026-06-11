@@ -849,6 +849,69 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     })
 end
 
+-- 8e3. Target-collapse loop -- the tier-1 all-zero collapse the target rescue
+--      (manage/pre_solve.lua M.target_rescue_step) exists to fix. A single
+--      weighted LP trades the target against violations at target_cost /
+--      elastic_cost = 2^10, so a target whose chain unavoidably forces more
+--      than 1024 violation units per target unit is rationally abandoned
+--      (every recipe parked, the target elastic paid in full). Shape:
+--        boot:  (nothing)         -> 1 copper-plate      (bootstrap source)
+--        a:     1 copper-plate    -> 1 iron-gear-wheel + 3000 stone
+--        b:     1 stone           -> 1 copper-plate
+--      stone is produced AND consumed (b is its consumer), so its overflow
+--      drains through the penalised |surplus_sink|, not a free terminal sink;
+--      meeting 1 gear/s forces ~3000 units/s of surplus (stone, or copper via
+--      b -- whichever side dumps) ~ 2.9x target_cost, so the baseline collapses
+--      to all-zero and the rescue must stage-1 + budget-lock it back. Mirrors
+--      tests/cases/lp_target_rescue.lua; asserted by smoke check_target_rescue
+--      (fixture target_rescue).
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"]
+    and raw.item and raw.item["copper-plate"] and raw.item["stone"]
+    and raw.item["iron-gear-wheel"] then
+    local collapse_machine = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+    collapse_machine.name = "fs-test-collapse-machine"
+    collapse_machine.localised_name = "fs-test-collapse-machine"
+    collapse_machine.minable = nil
+    collapse_machine.next_upgrade = nil
+    collapse_machine.placeable_by = nil
+    collapse_machine.crafting_categories = { "fs-test-collapse-cat" }
+    extend_test({
+        { type = "recipe-category", name = "fs-test-collapse-cat" },
+        collapse_machine,
+        {
+            type = "recipe",
+            name = "fs-test-collapse-boot",
+            category = "fs-test-collapse-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = {},
+            results = { { type = "item", name = "copper-plate", amount = 1 } },
+        },
+        {
+            type = "recipe",
+            name = "fs-test-collapse-a",
+            category = "fs-test-collapse-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "copper-plate", amount = 1 } },
+            results = {
+                { type = "item", name = "iron-gear-wheel", amount = 1 },
+                { type = "item", name = "stone", amount = 3000 },
+            },
+            main_product = "iron-gear-wheel",
+        },
+        {
+            type = "recipe",
+            name = "fs-test-collapse-b",
+            category = "fs-test-collapse-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "stone", amount = 1 } },
+            results = { { type = "item", name = "copper-plate", amount = 1 } },
+        },
+    })
+end
+
 -- 8f. Three general machines in one isolated category disagreeing on ingredient_count
 --     (item-ingredient cap; fluids exempt), with caps 2 / 4 / 10 and explicit order
 --     a/b/c so the preset sort is deterministic. factory_solver filters a machine out

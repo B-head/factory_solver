@@ -18,6 +18,28 @@ local observe_price_enabled = true
 -- minimum that clears every headless fixture (see project_tilted_cost memo).
 local soft_gate_k = 256
 
+-- Lexicographic target rescue (M.target_rescue_step). The single weighted LP
+-- trades the target against violations at the finite exchange rate
+-- target_cost / elastic_cost = 2^10, so a target whose chain forces more than
+-- 1024 violation units per target unit is rationally abandoned -- and since
+-- the trade is linear it is all-or-nothing (the all-zero collapse; 30/1678
+-- explorer corpus problems, the identical set under the hard and the soft
+-- gate). The rescue restores the problem definition's tier-1 absolutism (a
+-- reachable target is met no matter the violation bill) with two extra
+-- solves, paid only when the baseline actually relaxed a target: stage 1
+-- re-solves with a target-only objective (-> T_min, the least violation the
+-- build can structurally reach), then sum(elastic) <= budget(T_min) rides
+-- every later build as a hard row. Validated corpus-wide by
+-- tests/research/probe_target_rescue.lua: tier-1 losses 30 -> 0 under the
+-- soft gate (30 -> 2 under the legacy hard gate; those 2 are structural --
+-- the gate denied an escape the chain needs, so stage 1 itself cannot reach
+-- the target and the rescue correctly restores the baseline).
+local target_rescue_trigger = 1e-6
+-- Budget margin over the stage-1 optimum: relative slack for the IPM's
+-- relative-residual convergence plus an absolute floor when T_min = 0. Same
+-- values as the reference solver's stage budgets.
+local target_budget_rel, target_budget_abs = 1e-3, 1e-6
+
 -- Proportional row reduction: fold provably surplus-free producer/consumer
 -- doubletons out of the LP before the IPM solves it, then reconstruct the
 -- eliminated variables. The IPM works on the smaller reduced problem; the full
@@ -67,6 +89,16 @@ function M.forwerd_solve(force_data, solution)
     end
 
     if solution.solver_state == "ready" then
+        -- A fresh "ready" (edit / migration / new solution) drops in-flight
+        -- target-rescue state so the next solve restarts from a clean baseline.
+        -- The rescue's own restarts set tr_restart; the downstream loops'
+        -- restarts (op_restart / reclassify_pending) keep the settled budget so
+        -- their re-solves stay locked on the rescued target.
+        if not (solution.tr_restart or solution.op_restart or solution.reclassify_pending) then
+            solution.target_rescue = nil
+        end
+        solution.tr_restart = nil
+
         local options = nil
         if observe_price_enabled then
             -- Shipped path: replace the hard gate with the soft gate and apply the
@@ -111,6 +143,20 @@ function M.forwerd_solve(force_data, solution)
             end
             solution.reclassify_pending = nil
             solution.observe_price = nil
+        end
+
+        -- Target-rescue build shaping (config-independent; see
+        -- M.target_rescue_step): stage 1 measures T_min with a target-only
+        -- objective; once the budget is locked, EVERY later rebuild (observe /
+        -- verify / two-pass restarts included) carries the budget row so no
+        -- re-solve can fall back into the target collapse.
+        local rescue = solution.target_rescue
+        if rescue and rescue.phase == "stage1" then
+            options = options or {}
+            options.target_only_objective = true
+        elseif rescue and rescue.budget then
+            options = options or {}
+            options.target_budget = rescue.budget
         end
 
         solution.problem = create_problem.create_problem(
@@ -175,6 +221,13 @@ function M.forwerd_solve(force_data, solution)
 
     solution.quantity_of_machines_required = problem:filter_result(solution.raw_variables)
 
+    -- The lexicographic target rescue sits between the baseline and either
+    -- downstream loop: while it has a solve in flight (stage 1 / budget
+    -- re-solve / restore) the loops below wait for the rescued baseline.
+    if solution.solver_state == "finished" and M.target_rescue_step(solution) then
+        return
+    end
+
     if observe_price_enabled then
         -- observe-price fixed point (the shipped replacement for the two-pass).
         -- Each phase below is a full incremental solve; advancing it sets
@@ -203,6 +256,62 @@ function M.forwerd_solve(force_data, solution)
             end
         end
     end
+end
+
+---Advance the lexicographic target rescue one step after a finished solve.
+---Phases: a baseline that finished with active target relaxation arms
+---"stage1" (re-solve with create_problem's target_only_objective); stage 1
+---finished locks the budget and arms "resolve" (re-solve at ship costs under
+---it), or "restore" (plain re-solve) when stage 1 found no headroom -- the
+---stage-1 answer itself must never stand, its costs are not the ship's.
+---Mutates solution.target_rescue and, when another solve is needed, re-arms
+---solver_state="ready" with tr_restart set so the rebuild keeps the state.
+---Returns true while a rescue solve is in flight, so the caller defers the
+---downstream loops (observe-price / two-pass) to the rescued baseline.
+---@param solution Solution
+---@return boolean restarted
+function M.target_rescue_step(solution)
+    if not solution.raw_variables or not solution.problem then return false end
+    local rescue = solution.target_rescue
+    if rescue and rescue.phase == "done" then return false end
+    local primals = solution.problem.primals
+    local x = solution.raw_variables.x
+
+    local function restart()
+        solution.tr_restart = true
+        solution.solver_state = "ready"
+        solution.solver_iteration = nil
+    end
+
+    if not rescue then
+        -- The baseline just finished. No active target relaxation: park a
+        -- "done" sentinel so later finishes in this solve cycle skip the check.
+        local t0 = observe_price.target_relax(primals, x)
+        if t0 <= target_rescue_trigger then
+            solution.target_rescue = { phase = "done" }
+            return false
+        end
+        solution.target_rescue = { phase = "stage1", t0 = t0 }
+        restart()
+        return true
+    elseif rescue.phase == "stage1" then
+        local t_min = observe_price.target_relax(primals, x)
+        if t_min < rescue.t0 - target_rescue_trigger then
+            rescue.budget = t_min * (1 + target_budget_rel) + target_budget_abs
+            rescue.phase = "resolve"
+        else
+            -- No headroom: the target really is this far unreachable (e.g. the
+            -- hard gate denied an escape the chain needs). Re-solve plain to
+            -- restore the baseline answer.
+            rescue.phase = "restore"
+        end
+        restart()
+        return true
+    end
+    -- "resolve" / "restore" just finished: the rescued (or restored) baseline
+    -- stands and the downstream loops may proceed on it this tick.
+    rescue.phase = "done"
+    return false
 end
 
 ---Advance the observe-price fixed point one step after a baseline / observe /

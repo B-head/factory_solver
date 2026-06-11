@@ -571,6 +571,50 @@ fixtures.catalyst_reclassify = {
     end,
 }
 
+---Target rescue end-to-end through the incremental solver (manage/pre_solve.lua
+---M.target_rescue_step + create_problem's target_only_objective/target_budget).
+---Plant the data_test collapse loop -- boot: nothing -> copper, a: copper ->
+---gear + 3000 stone, b: stone -> copper -- and demand 1 gear/s. Meeting the
+---target forces ~3000 units/s of penalised surplus (~2.9x target_cost), so the
+---baseline LP rationally abandons it (the all-zero tier-1 collapse: every
+---recipe parked, elastic = 1). The shipped path must then run the rescue
+---across ticks: stage 1 (target-only objective -> T_min = 0), then re-solve
+---with the sum(elastic) <= budget row, then hand the rescued baseline to the
+---observe-price machine. The launcher polls state() until "finished" and calls
+---check_target_rescue -- a bare "finished" would also pass for the collapsed
+---all-zero answer, so the check asserts the rescue state, the met target, and
+---the running loop.
+fixtures.target_rescue = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        assert(prototypes.recipe["fs-test-collapse-a"] and prototypes.recipe["fs-test-collapse-b"]
+            and prototypes.recipe["fs-test-collapse-boot"],
+            "fs-test-collapse-* recipes missing -- data_test.lua not loaded?")
+
+        for _, recipe in ipairs({ "fs-test-collapse-boot", "fs-test-collapse-a", "fs-test-collapse-b" }) do
+            ---@type ProductionLine
+            local line = {
+                recipe_typed_name = tn.create_typed_name("recipe", recipe),
+                machine_typed_name = tn.create_typed_name("machine", "fs-test-collapse-machine"),
+                module_typed_names = {},
+                affected_by_beacons = {},
+            }
+            flib_table.insert(solution.production_lines, line)
+        end
+
+        ---@type Constraint
+        local constraint = {
+            type = "item",
+            name = "iron-gear-wheel",
+            quality = "normal",
+            limit_type = "equal",
+            limit_amount_per_second = 1,
+        }
+        flib_table.insert(solution.constraints, constraint)
+    end,
+}
+
 ---RCON entry point: clear any prior solution, build the named fixture, and hand
 ---it to the pump. Returns a status string the launcher reads via rcon.print --
 ---"OK: <solution name>", "SKIP: <detail>" (a required mod isn't loaded), or
@@ -712,6 +756,65 @@ function M.check_catalyst_reclassify()
     if cheat > 1e-3 then
         return "ERROR: residual cheat " .. string.format("%.4f", cheat) ..
             " -- the cycle material was neither fabricated nor cheap-imported"
+    end
+
+    return "OK"
+end
+
+---RCON entry point: assert the target rescue resolved the tier-1 collapse. The
+---launcher calls this after the target_rescue fixture converges -- a bare
+---"finished" can't tell the rescued answer from the collapsed all-zero one (the
+---collapse IS a finished solve). Asserts (a) "finished", (b) the rescue state
+---settled at "done" WITH a locked budget (a clean solve parks the sentinel with
+---no budget, so the budget is the proof the rescue actually fired), (c) the
+---target is met (elastic ~0 -- without the rescue it reads 1), and (d) the
+---collapse loop actually runs and pays its surplus instead of parking.
+---Returns "OK" or "ERROR: <detail>".
+---@return string
+function M.check_target_rescue()
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data and force_data.solutions
+    local _, solution = next(solutions or {})
+    if not solution then
+        return "ERROR: no solution"
+    end
+    if solution.solver_state ~= "finished" then
+        return "ERROR: solver_state is " .. tostring(solution.solver_state) .. ", not finished"
+    end
+
+    local rescue = solution.target_rescue
+    if not rescue then
+        return "ERROR: target_rescue state nil -- the rescue machine never started"
+    end
+    if rescue.phase ~= "done" then
+        return "ERROR: target_rescue phase is " .. tostring(rescue.phase) .. ", not done"
+    end
+    if not rescue.budget then
+        return "ERROR: target_rescue.budget nil -- the baseline never collapsed or stage 1 found no headroom"
+    end
+
+    local x = solution.raw_variables and solution.raw_variables.x or {}
+    local primals = solution.problem and solution.problem.primals or {}
+    local elastic, surplus = 0, 0
+    for k, v in pairs(x) do
+        local p = primals[k]
+        if p and p.kind == "elastic" then elastic = elastic + math.abs(v) end
+        if p and p.kind == "surplus_sink" then surplus = surplus + math.abs(v) end
+    end
+    if elastic > 1e-3 then
+        return "ERROR: target still relaxed by " .. string.format("%.4f", elastic)
+    end
+    -- x is the MACHINE count (1 gear/s on a crafting_speed-0.75 machine reads
+    -- 4/3), so don't pin an exact value here -- the met target is already
+    -- proven exactly by the elastic check above; this asserts the loop recipe
+    -- actually runs rather than the answer degenerating to pure import.
+    local gear = x["recipe/fs-test-collapse-a/normal"] or 0
+    if gear < 0.1 then
+        return "ERROR: collapse loop not running (recipe a at " .. string.format("%.4f", gear) .. ")"
+    end
+    if surplus <= 1024 then
+        return "ERROR: surplus " .. string.format("%.1f", surplus) ..
+            " -- the >1024-unit violation bill is not being carried"
     end
 
     return "OK"
@@ -1439,6 +1542,7 @@ function M.register()
         state = M.state,
         check_read_side = M.check_read_side,
         check_catalyst_reclassify = M.check_catalyst_reclassify,
+        check_target_rescue = M.check_target_rescue,
         check_force_caches = M.check_force_caches,
         check_fuel_reconciliation = M.check_fuel_reconciliation,
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,

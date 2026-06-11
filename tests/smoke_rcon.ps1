@@ -37,7 +37,7 @@ param(
     # Seconds to wait for the server to open its RCON port after launch.
     [int] $RconStartupSeconds = 90,
     [string[]] $Fixtures = @("iron_plate", "missing_prototype", "boiler_steam", "reactor_burnt_fuel",
-        "catalyst_reclassify",
+        "catalyst_reclassify", "target_rescue",
         "migration_legacy_shape", "codec_solution_roundtrip", "codec_frozen_import",
         "codec_fp_roundtrip", "codec_helmod_roundtrip"),
     # Mods to enable for the run; everything else in mod-list.json is disabled.
@@ -333,9 +333,20 @@ try {
             if ($reclassify -ne "OK") { $verdict = "FAIL" }
         }
 
+        # The target_rescue fixture additionally proves the lexicographic target
+        # rescue resolved the tier-1 collapse (budget locked, target met, loop
+        # running) -- the collapsed all-zero answer also reaches "finished".
+        $rescue = $null
+        if ($verdict -eq "PASS" -and $fixture -eq "target_rescue") {
+            $rescue = Invoke-RconCommand -Stream $stream `
+                -Command "/silent-command rcon.print(remote.call('$iface','check_target_rescue'))"
+            if ($rescue -ne "OK") { $verdict = "FAIL" }
+        }
+
         $detail = "solver_state=$state"
         if ($readSide) { $detail += "; read_side=$readSide" }
         if ($reclassify) { $detail += "; reclassify=$reclassify" }
+        if ($rescue) { $detail += "; rescue=$rescue" }
         Write-Host "SMOKE $verdict`: [$fixture] $detail"
         if ($verdict -ne "PASS") { $allPass = $false }
     }

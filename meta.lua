@@ -144,6 +144,13 @@ __factory_solver__storage = {}
 ---@field reclassify_pending boolean?  Legacy two-pass internal flag: set when the restart re-arms solver_state="ready" for pass 2, so forwerd_solve keeps forced_imports instead of clearing them as it would for a fresh solve.
 ---@field observe_price ObservePriceState?  In-flight observe-price fixed point (manage/pre_solve.lua / solver/observe_price.lua). nil before the baseline solve; a "done" sentinel once the loop settles. Plain tables only, so it rides storage without a metatable.
 ---@field op_restart boolean?  Internal flag: set when observe_price advances and re-arms solver_state="ready", so the rebuild keeps the in-flight plan instead of dropping it as it would for a fresh edit.
+---@field target_rescue TargetRescueState?  In-flight lexicographic target rescue (manage/pre_solve.lua M.target_rescue_step). nil before the baseline solve; a "done" sentinel once settled. Plain table, storage-safe.
+---@field tr_restart boolean?  Internal flag: set when the target rescue re-arms solver_state="ready", so the rebuild keeps the in-flight rescue state instead of dropping it as it would for a fresh edit.
+
+---@class TargetRescueState
+---@field phase "stage1"|"resolve"|"restore"|"done"  Which rescue stage the next finished solve belongs to. "resolve" is the budget-locked re-solve at ship costs; "restore" is the plain re-solve when stage 1 found no headroom; "done" is the settled sentinel.
+---@field t0 number?  The baseline target relaxation that triggered the rescue.
+---@field budget number?  The locked sum(elastic) cap (stage-1 optimum plus margin), threaded into every later rebuild as create_problem's target_budget. nil when no rescue was needed or no headroom was found.
 
 ---@class ObservePriceState
 ---@field phase "observe"|"verify"|"finalize"|"done"  Which loop stage the next finished solve belongs to. "finalize" is the single cheap-import-only solve when nothing qualifies to fabricate; "done" is the settled sentinel.

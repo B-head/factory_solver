@@ -52,6 +52,15 @@ local target_cost = 2 ^ 20
 -- tests/cases/lp_scale_invariance.lua.
 local recipe_epsilon = 2 ^ -10
 
+-- Recipe/bridge face regularizer for the target_only_objective build (the
+-- target-rescue stage 1). The stage is a pure measurement solve -- "how little
+-- target violation can this build reach?" -- so the regularizer only has to
+-- keep the optimal face bounded for the IPM (futile zero-cost loops would
+-- drift); it must never compete with one violation unit. Same value as the
+-- reference solver's stage epsilon, validated corpus-wide by
+-- tests/research/probe_target_rescue.lua.
+local target_rescue_epsilon = 2 ^ -20
+
 -- Per-recipe tie-break jitter. The flat recipe_epsilon above collapses futile
 -- activity, but it leaves genuine ties degenerate: when several recipes are
 -- equally good (identical conversion ratios, or whole equivalent sub-chains) the
@@ -724,6 +733,8 @@ end
 ---@field shortage_cost_fn (fun(constraint_name: string, is_reachable: boolean): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. is_reachable is create_problem's OWN reachability verdict (the same set the gate uses: active lines + deficit seeds + catalyst closure), so a "soft gate" can lift only reachable materials and leave unreachable ones their cheap import hatch. The caller may also close over any precomputed signal (e.g. M.compute_reachability_depth). nil leaves the flat elastic_cost in place.
 ---@field surplus_cost_fn (fun(constraint_name: string): number)?  Research only. Re-prices the |surplus_sink| (over-production / byproduct disposal) objective instead of the flat elastic_cost. Lowering surplus relative to shortage tests the "byproduct disposal is bookkeeping, not real economic cost" hypothesis: a chain whose cost is byproduct-dominated should beat the import, while a raw-dominated chain (genuine resource spend) is unaffected. nil leaves the flat elastic_cost in place.
 ---@field surplus_sink_gating boolean?   Default FALSE -- this is NOT shipped behaviour, a research probe (project_sink_side_reachability_gating). When on, gate |surplus_sink| on drainability (the backward dual of reachability): a material that can shed surplus to a free terminal sink loses its penalised over-production escape. Measured to change ~21% of the corpus and break convergence on a few, so it ships OFF; the switch only exists to reproduce that A/B. Off (default): every produced+consumed non-bridge material gets a |surplus_sink|.
+---@field target_only_objective boolean?  Target-rescue stage 1 (manage/pre_solve.lua M.target_rescue_step): re-cost the finished build so the target elastics (cost 1) are the ONLY objective; recipe/bridge keep a tiny face regularizer so the optimal face stays bounded for the IPM, everything else is free. The solve's summed |elastic| is T_min -- the least target violation this build can structurally reach (mirrors the reference solver's lexicographic stage 1). Build-only switch: combine with target_budget on the NEXT build to lock the optimum in.
+---@field target_budget number?  Target-rescue lock (manage/pre_solve.lua M.target_rescue_step): add one upper-limit row capping the summed target elastics at this value, so the solve keeps the stage-1 target optimum no matter how expensive the violations the chain forces. This fixes the all-zero target collapse: a single weighted LP trades the target against violations at the finite exchange rate target_cost / elastic_cost = 2^10, so any problem needing > 1024 violation units per target unit was rationally abandoned (T relaxed in full -- the trade is linear, hence all-or-nothing). 30/1678 corpus problems before the rescue, 0 after. nil adds no row.
 
 ---Create linear programming problems.
 ---@param solution_name string
@@ -1100,6 +1111,30 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             problem:add_subject_term(elastic_name, constraint_name, 1)
         else
             assert()
+        end
+    end
+
+    -- Target rescue (see CreateProblemOptions): the budget row locks the summed
+    -- target elastics at stage 1's optimum; the stage-1 re-cost makes them the
+    -- only objective. Last so every elastic above already exists.
+    if options.target_budget then
+        local budget_name = vk.target_budget()
+        problem:add_upper_limit_constraint(budget_name, options.target_budget)
+        for key, primal in pairs(problem.primals) do
+            if primal.kind == "elastic" then
+                problem:add_subject_term(key, budget_name, 1)
+            end
+        end
+    end
+    if options.target_only_objective then
+        for _, primal in pairs(problem.primals) do
+            if primal.kind == "elastic" then
+                primal.cost = 1
+            elseif primal.kind == "recipe" or primal.kind == "bridge" then
+                primal.cost = target_rescue_epsilon
+            else
+                primal.cost = 0
+            end
         end
     end
 
