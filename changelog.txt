@@ -6,6 +6,10 @@ Date: ????
       flips the Products and Ingredients columns in the solution editor table and
       swaps the output group (products, spent fuel) with the input group
       (ingredients, fuel) in the add-production-line dialog.
+    - Add a per-player mod setting "Reverse top-to-bottom production flow" that
+      flips the production line row order in the solution editor and build
+      assistant (newly added lines surface at the top) and shows Initial
+      ingredients above Final products in the results panel.
   Changes:
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.3

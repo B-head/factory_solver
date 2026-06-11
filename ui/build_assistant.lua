@@ -84,6 +84,9 @@ local function build_table_def()
             on_selected_solution_changed = handlers.make_build_table,
             on_machine_setups_changed = handlers.make_build_table,
             on_calculation_changed = handlers.make_build_table,
+            -- Re-render when the "reverse production flow" setting is toggled;
+            -- control.lua dispatches this to the build assistant window too.
+            on_production_line_changed = handlers.make_build_table,
         },
     }
 end
@@ -125,7 +128,15 @@ function handlers.make_build_table(event)
     -- temporary blueprint and shows the beacon column. Columns 1-3 are shared.
     local mode = save.get_player_data(event.player_index).build_assistant_mode or "manual"
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
-    for line_index, line in ipairs(solution.production_lines) do
+    -- Mirror the solution editor's row order under the "reverse top-to-bottom
+    -- production flow" setting. Display-only: line_index stays the true array
+    -- index so the done / pipette / module / beacon handlers reference the right
+    -- line.
+    local reversed = common.is_production_line_order_reversed(event.player_index)
+    local n_lines = #solution.production_lines
+    for k = 1, n_lines do
+        local line_index = reversed and (n_lines - k + 1) or k
+        local line = solution.production_lines[line_index]
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local count = save.get_quantity_of_machines_required(solution, line.recipe_typed_name)

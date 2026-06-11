@@ -65,6 +65,12 @@ function handlers.make_production_line_table(event)
         ordered_headers[5], ordered_headers[6] = ordered_headers[6], ordered_headers[5]
     end
 
+    -- Per-player "reverse top-to-bottom production flow": render the rows in
+    -- reverse so newly appended lines surface at the top. Display-only — the
+    -- shared production_lines array keeps its canonical order, and line_index
+    -- below stays the true array index so move/delete/add handlers are unaffected.
+    local reversed = common.is_production_line_order_reversed(event.player_index)
+
     for _, value in ipairs(ordered_headers) do
         local def = {
             type = "label",
@@ -75,7 +81,10 @@ function handlers.make_production_line_table(event)
     end
 
     local bonuses = save.get_research_bonuses(event.player_index)
-    for line_index, line in ipairs(solution.production_lines) do
+    local n_lines = #solution.production_lines
+    for k = 1, n_lines do
+        local line_index = reversed and (n_lines - k + 1) or k
+        local line = solution.production_lines[line_index]
         local recipe = tn.typed_name_to_recipe(line.recipe_typed_name)
         local machine = tn.typed_name_to_machine(line.machine_typed_name)
         local n, effectivity = acc.normalize_production_line(line, bonuses)
@@ -794,6 +803,14 @@ function handlers.on_move_production_line_click(event)
     local solution = assert(save.get_selected_solution(event.player_index))
     local from_line_index = tags.line_index --[[@as integer]]
     local direction = tags.direction
+
+    -- When the rows are rendered reversed, visual "up" is toward the higher
+    -- index, so flip the up/down intent here. Swapping the whole direction makes
+    -- the plain, shift (to extreme) and control (±5) branches all line up with
+    -- what the user sees.
+    if common.is_production_line_order_reversed(event.player_index) then
+        direction = direction == "up" and "down" or "up"
+    end
 
     if direction == "up" then
         local to_line_index

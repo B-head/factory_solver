@@ -36,6 +36,18 @@ function M.is_recipe_io_placement_swapped(player_index)
     return settings.get_player_settings(player_index)["factory-solver-swap-recipe-io-placement"].value --[[@as boolean]]
 end
 
+---True when the player has enabled the "reverse top-to-bottom production flow"
+---per-player mod setting. Callers reverse the production line row order (solution
+---editor and build assistant) and swap the Final products / Initial ingredients
+---sections in the results panel. Display-only: the shared production_lines array
+---is never mutated. MP-deterministic for the same reason as the swap setting
+---above.
+---@param player_index integer
+---@return boolean
+function M.is_production_line_order_reversed(player_index)
+    return settings.get_player_settings(player_index)["factory-solver-reverse-production-line-order"].value --[[@as boolean]]
+end
+
 ---comment
 ---@param is_hidden boolean
 ---@param is_unresearched boolean

@@ -179,21 +179,29 @@ script.on_event(defines.events.on_research_reversed, function(event)
 end)
 
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
-    if event.setting ~= "factory-solver-swap-recipe-io-placement" then
+    if event.setting ~= "factory-solver-swap-recipe-io-placement"
+        and event.setting ~= "factory-solver-reverse-production-line-order" then
         return
     end
-    -- The production line table reads this per-player setting at build time, so
-    -- re-dispatching its rebuild event applies the new placement live (no
-    -- re-solve — that path runs in on_tick). Only the player who toggled the
-    -- setting needs refreshing; the add-production-line dialog already re-reads
-    -- the setting every time it is opened.
+    -- These per-player display settings are read at GUI build time, so
+    -- re-dispatching the production-line rebuild event applies them live (no
+    -- re-solve — that path runs in on_tick). The reverse-order setting also
+    -- affects the build assistant rows and the results-panel section order, so
+    -- refresh both windows (the editor table, results panel and BA table all
+    -- listen to on_production_line_changed). Only the toggling player needs it;
+    -- the add-production-line dialog re-reads the setting whenever it is opened.
     local player_index = event.player_index
     if not player_index then
         return
     end
-    local window = game.players[player_index].gui.screen["factory_solver_main_window"]
+    local player = game.players[player_index]
+    local window = player.gui.screen["factory_solver_main_window"]
     if window then
         fs_util.dispatch_to_subtree(window, "on_production_line_changed")
+    end
+    local build_window = player.gui.left["factory_solver_build_assistant"]
+    if build_window then
+        fs_util.dispatch_to_subtree(build_window, "on_production_line_changed")
     end
 end)
 

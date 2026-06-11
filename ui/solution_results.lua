@@ -11,6 +11,24 @@ local production_line_adder = require "ui/production_line_adder"
 
 local handlers = {}
 
+---Reorder the results panel's Final products and Initial ingredients sections to
+---match the "reverse top-to-bottom production flow" per-player setting. The two
+---sections are the first four children of the scroll-pane (final label/frame,
+---then initial label/frame); the divider, totals and build-totals that follow
+---stay put. Idempotent: it only swaps when the current first caption disagrees
+---with the wanted order, so it can re-fire on on_production_line_changed when the
+---setting is toggled without ping-ponging.
+---@param event EventDataTrait
+function handlers.on_arrange_result_sections(event)
+    local scroll = event.element
+    local want_initial_first = common.is_production_line_order_reversed(event.player_index)
+    local first_is_initial = scroll.children[1].name == "initial_ingredients_caption"
+    if want_initial_first ~= first_is_initial then
+        scroll.swap_children(1, 3) -- label(final) <-> label(initial)
+        scroll.swap_children(2, 4) -- frame(final) <-> frame(initial)
+    end
+end
+
 ---Run `add` over every entry of each total bucket, passing that bucket's
 ---largest gross_per_second so the callback can floor out IPM-residual materials
 ---(acc.is_residual_gross). max_gross is computed PER bucket rather than across
@@ -319,11 +337,17 @@ return {
     direction = "vertical",
     {
         type = "scroll-pane",
+        name = "result_sections_scroll",
         style = "factory_solver_right_panel_scroll_pane",
         horizontal_scroll_policy = "never",
         vertical_scroll_policy = "auto",
+        handler = {
+            on_added = handlers.on_arrange_result_sections,
+            on_production_line_changed = handlers.on_arrange_result_sections,
+        },
         {
             type = "label",
+            name = "final_products_caption",
             style = "caption_label",
             caption = { "factory-solver-final-products" },
         },
@@ -345,6 +369,7 @@ return {
         },
         {
             type = "label",
+            name = "initial_ingredients_caption",
             style = "caption_label",
             caption = { "factory-solver-initial-ingredients" },
         },
