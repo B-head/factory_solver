@@ -1,5 +1,5 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.6.4
+Version: 0.6.5
 Date: ????
   Features:
     - The default layout now follows Factorio's ingredient-to-product order:
@@ -9,6 +9,13 @@ Date: ????
       Product / Ingredient placement" and "Classic top-to-bottom order", restore
       the previous layout. Existing saves get a one-time chat notice on update.
   Changes:
+---------------------------------------------------------------------------------------------------
+Version: 0.6.4
+Date: 2026-06-12
+  Bugfixes:
+    - Order recipes from a Helmod import by their intended row order
+      (product-first) instead of an arbitrary one, so an imported production
+      line keeps the same layout as in Helmod.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.3
 Date: 2026-06-11
