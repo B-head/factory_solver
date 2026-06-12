@@ -90,6 +90,29 @@ function M.group_visible(group_infos, group_name, player_data)
     end
 end
 
+---Substring name filter shared by the constraint and production-line pickers.
+---`needle` must already be folded via helpers.multilingual_to_lower; "" matches
+---everything. Matches the internal name first, then the locale-resolved display
+---name (nil while the flib dictionary has not finished translating, so callers
+---degrade to name-only filtering). Uses helpers.multilingual_to_lower so case is
+---folded for non-Latin scripts too, and a plain (non-pattern) string.find.
+---@param needle string
+---@param name string
+---@param localised string?
+---@return boolean
+function M.name_filter_matches(needle, name, localised)
+    if needle == "" then
+        return true
+    end
+    if string.find(helpers.multilingual_to_lower(name), needle, 1, true) then
+        return true
+    end
+    if localised and string.find(helpers.multilingual_to_lower(localised), needle, 1, true) then
+        return true
+    end
+    return false
+end
+
 ---Format a power / energy value with an SI prefix. Negative values are treated
 ---as generation and shown with a leading "+". The unit suffix defaults to "J"
 ---(energy per the selected time unit, as shown in the UI); pass "W" for the

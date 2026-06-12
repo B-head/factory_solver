@@ -131,24 +131,6 @@ function handlers.on_make_constraint_picker(event)
         or "virtual" -- virtual_recipe / external both draw from storage.virtuals
     local locale_dict = (needle ~= "") and flib_dictionary.get(event.player_index, dict_name) or nil
 
-    ---@param name string
-    ---@return boolean
-    local function passes_filter(name)
-        if needle == "" then
-            return true
-        end
-        if string.find(helpers.multilingual_to_lower(name), needle, 1, true) then
-            return true
-        end
-        if locale_dict then
-            local localised = locale_dict[name]
-            if localised and string.find(helpers.multilingual_to_lower(localised), needle, 1, true) then
-                return true
-            end
-        end
-        return false
-    end
-
     ---comment
     ---@param typed_name TypedName
     ---@param is_hidden boolean
@@ -161,7 +143,7 @@ function handlers.on_make_constraint_picker(event)
         if not common.craft_visible(is_hidden, is_unresearched, player_data) then
             return
         end
-        if not passes_filter(filter_name) then
+        if not common.name_filter_matches(needle, filter_name, locale_dict and locale_dict[filter_name] or nil) then
             return
         end
 
@@ -394,9 +376,9 @@ return {
         {
             type = "textfield",
             name = "constraint_filter_textfield",
-            style = "factory_solver_constraint_filter_textfield",
+            style = "factory_solver_name_filter_textfield",
             clear_and_focus_on_right_click = true,
-            tooltip = { "factory-solver-constraint-filter-tooltip" },
+            tooltip = { "factory-solver-name-filter-tooltip" },
             handler = {
                 on_added = handlers.on_init_constraint_filter_textfield,
                 [defines.events.on_gui_text_changed] = handlers.on_constraint_filter_textfield_changed,

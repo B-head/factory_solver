@@ -1,4 +1,5 @@
 local flib_table = require "__flib__/table"
+local flib_dictionary = require "__flib__/dictionary"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local save = require "manage/save"
@@ -266,6 +267,17 @@ function handlers.on_make_choose_table(event)
     local choose_typed_name = dialog_tags.typed_name --[[@as TypedName]]
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
+    -- Name filter (title-bar textfield). Recipes here are real (prototypes.recipe,
+    -- dictionary "recipe") or virtual (storage.virtuals.recipe, dictionary
+    -- "virtual"); both share the same picker, so look up the display name in the
+    -- right dictionary per entry. The dictionaries are the ones already built for
+    -- the constraint adder. get returns nil until the player's language finishes
+    -- translating, so the filter degrades to name-only meanwhile.
+    local raw_filter = dialog_tags.filter_text --[[@as string?]] or ""
+    local needle = (raw_filter ~= "") and helpers.multilingual_to_lower(raw_filter) or ""
+    local recipe_dict = (needle ~= "") and flib_dictionary.get(event.player_index, "recipe") or nil
+    local virtual_dict = (needle ~= "") and flib_dictionary.get(event.player_index, "virtual") or nil
+
     local relation_to_recipe
     if choose_typed_name.type == "item" then
         relation_to_recipe = relation_to_recipes.item[choose_typed_name.name]
@@ -331,6 +343,12 @@ function handlers.on_make_choose_table(event)
                 local is_hidden = acc.is_hidden(recipe)
                 local is_unresearched = acc.is_unresearched(recipe, relation_to_recipes)
                 if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+                    goto inner_continue
+                end
+                -- A real recipe is a LuaRecipePrototype (object_name set); a virtual
+                -- is a plain table. They live in different dictionaries.
+                local dict = (recipe.object_name ~= nil) and recipe_dict or virtual_dict
+                if not common.name_filter_matches(needle, recipe.name, dict and dict[recipe.name] or nil) then
                     goto inner_continue
                 end
 
@@ -535,6 +553,22 @@ function handlers.on_production_line_picker_button_click(event)
     fs_util.dispatch_to_subtree(root, "on_production_line_changed")
 end
 
+---@param event EventDataTrait
+function handlers.on_init_name_filter_textfield(event)
+    local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
+    event.element.text = dialog.tags.filter_text --[[@as string?]] or ""
+end
+
+---@param event EventData.on_gui_text_changed
+function handlers.on_name_filter_textfield_changed(event)
+    local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
+    local dialog_tags = dialog.tags
+    dialog_tags.filter_text = event.element.text
+    dialog.tags = dialog_tags -- tags are a snapshot; reassign the whole table to persist.
+
+    fs_util.dispatch_to_subtree(dialog, "on_filter_text_changed")
+end
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -565,6 +599,17 @@ return {
             type = "empty-widget",
             style = "flib_titlebar_drag_handle",
             ignored_by_interaction = true,
+        },
+        {
+            type = "textfield",
+            name = "name_filter_textfield",
+            style = "factory_solver_name_filter_textfield",
+            clear_and_focus_on_right_click = true,
+            tooltip = { "factory-solver-name-filter-tooltip" },
+            handler = {
+                on_added = handlers.on_init_name_filter_textfield,
+                [defines.events.on_gui_text_changed] = handlers.on_name_filter_textfield_changed,
+            },
         },
         {
             type = "sprite-button",
@@ -628,6 +673,7 @@ return {
                         handler = {
                             on_added = handlers.on_make_choose_table,
                             on_craft_visible_changed = handlers.on_make_choose_table,
+                            on_filter_text_changed = handlers.on_make_choose_table,
                         },
                     },
                 },
@@ -665,6 +711,7 @@ return {
                         handler = {
                             on_added = handlers.on_make_choose_table,
                             on_craft_visible_changed = handlers.on_make_choose_table,
+                            on_filter_text_changed = handlers.on_make_choose_table,
                         },
                     },
                 },
@@ -702,6 +749,7 @@ return {
                         handler = {
                             on_added = handlers.on_make_choose_table,
                             on_craft_visible_changed = handlers.on_make_choose_table,
+                            on_filter_text_changed = handlers.on_make_choose_table,
                         },
                     },
                 },
@@ -739,6 +787,7 @@ return {
                         handler = {
                             on_added = handlers.on_make_choose_table,
                             on_craft_visible_changed = handlers.on_make_choose_table,
+                            on_filter_text_changed = handlers.on_make_choose_table,
                         },
                     },
                 },

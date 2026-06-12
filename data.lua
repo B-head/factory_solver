@@ -629,11 +629,12 @@ styles.factory_solver_rename_textfield = {
     width = 224,
 }
 
--- factory_solver_constraint_filter_textfield --
--- Title-bar name filter for the constraint adder. Sits between the drag handle
--- and the close button, so it is kept narrow.
+-- factory_solver_name_filter_textfield --
+-- Title-bar name filter shared by the constraint adder and production-line
+-- adder. Sits between the drag handle and the close button, so it is kept
+-- narrow.
 
-styles.factory_solver_constraint_filter_textfield = {
+styles.factory_solver_name_filter_textfield = {
     type = "textbox_style",
     width = 180,
 }
