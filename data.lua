@@ -153,6 +153,24 @@ styles.factory_solver_shallow_frame_in_shallow_frame = {
     vertically_stretchable = "on",
 }
 
+-- Hover-highlight slot styles. The "same kind" highlight reuses each slot
+-- button's own hovered graphic as its resting graphic, so a highlighted slot
+-- looks exactly like the one the cursor is actually over (no separate orange
+-- tint, which reads as a distinct state rather than "related to what I'm
+-- hovering"). One per base colour get_style can return (default / blue / grey /
+-- yellow); the runtime swaps a slot to its matching *_highlighted style on
+-- hover and back on leave. flib's slot button styles are registered in the data
+-- stage before this mod (flib is a dependency), so their hovered_graphical_set
+-- is readable here.
+for _, color in ipairs({ "default", "blue", "grey", "yellow" }) do
+    local base_name = "flib_slot_button_" .. color
+    styles["factory_solver_slot_button_" .. color .. "_highlighted"] = {
+        type = "button_style",
+        parent = base_name,
+        default_graphical_set = styles[base_name].hovered_graphical_set,
+    }
+end
+
 styles.factory_solver_slot_background_frame = {
     type = "frame_style",
     parent = "slot_button_deep_frame",

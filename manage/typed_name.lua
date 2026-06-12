@@ -151,6 +151,32 @@ function M.equals_typed_name(value1, value2, ignore_quality)
     return true
 end
 
+---Whether two TypedNames are "the same kind" for the hover-highlight feature.
+---Non-fluids match on exact type/name/quality. Fluids match when they share a
+---name and their temperature ranges overlap, so a slot highlights every other
+---slot whose fluid it could accept or be accepted by (a point temperature is the
+---degenerate range [T,T]; a bare typed_name with no temperature is temperature-
+---independent and acts as a wildcard). The interval-overlap test
+---`a_lo <= b_hi and b_lo <= a_hi` is symmetric, so acceptance is bidirectional
+---and we need not distinguish ingredient (intake) from product (output) sides.
+---@param a TypedName
+---@param b TypedName
+---@return boolean
+function M.matches_for_highlight(a, b)
+    if not b or a.type ~= b.type or a.name ~= b.name then
+        return false
+    end
+    if a.type ~= "fluid" then
+        return a.quality == b.quality
+    end
+    local a_lo, a_hi = a.minimum_temperature, a.maximum_temperature
+    local b_lo, b_hi = b.minimum_temperature, b.maximum_temperature
+    if a_lo == nil or b_lo == nil then
+        return true
+    end
+    return a_lo <= b_hi and b_lo <= a_hi
+end
+
 ---comment
 ---@param typed_name TypedName?
 ---@return boolean

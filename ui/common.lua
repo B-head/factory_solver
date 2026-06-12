@@ -15,7 +15,7 @@ function M.get_style(is_hidden, is_unresearched, filter_type)
     if is_hidden then
         return "flib_slot_button_grey"
     elseif is_unresearched then
-        return "flib_slot_button_orange"
+        return "flib_slot_button_yellow"
     else
         if filter_type == "recipe" or filter_type == "virtual_recipe" then
             return "flib_slot_button_blue"
@@ -240,16 +240,34 @@ function M.create_decorated_sprite_button(data)
         })
     end
 
+    -- Hover-highlight wiring. `base_style` records the resting style so
+    -- on_slot_leave can restore it, and `highlight_typed_name` is the identity
+    -- on_slot_hover matches against (so handlers never need to know which slot
+    -- role this button plays). The tags are shallow-copied because some callers
+    -- (e.g. solution_settings) pass a storage object straight through as
+    -- data.tags, and mutating it would leak these UI-only fields into storage.
+    -- raise_hover_events can be set directly in the def. Hover/leave handlers are
+    -- merged in for every decorated slot, including read-only ones that pass no
+    -- handler of their own.
+    local style = M.get_style(is_hidden, is_unresearched, typed_name.type)
+    local tags = data.tags and flib_table.shallow_copy(data.tags) or {}
+    tags.highlight_typed_name = typed_name
+    tags.base_style = style
+    local handler = data.handler or {}
+    handler[defines.events.on_gui_hover] = M.on_slot_hover
+    handler[defines.events.on_gui_leave] = M.on_slot_leave
+
     return {
         type = "sprite-button",
-        style = M.get_style(is_hidden, is_unresearched, typed_name.type),
+        style = style,
         sprite = tn.get_sprite_path(typed_name),
         quality = typed_name.quality,
         tooltip = tn.typed_name_to_tooltip(typed_name),
         elem_tooltip = tn.typed_name_to_elem_id(typed_name),
         number = data.number,
-        tags = data.tags,
-        handler = data.handler,
+        raise_hover_events = true,
+        tags = tags,
+        handler = handler,
         children = children
     }
 end
@@ -763,6 +781,75 @@ function M.on_toggle_name_filter(event)
         root_tags.filter_text = ""
         root.tags = root_tags
         fs_util.dispatch_to_subtree(root, "on_filter_text_changed")
+    end
+end
+
+---Maps a resting slot style (what get_style returns) to its hover-highlight
+---variant, defined in data.lua: the same button showing its hovered graphic at
+---rest. Slots whose base_style is not a recognised slot button are left as-is.
+M.highlight_style_by_base = {
+    ["flib_slot_button_default"] = "factory_solver_slot_button_default_highlighted",
+    ["flib_slot_button_blue"] = "factory_solver_slot_button_blue_highlighted",
+    ["flib_slot_button_grey"] = "factory_solver_slot_button_grey_highlighted",
+    ["flib_slot_button_yellow"] = "factory_solver_slot_button_yellow_highlighted",
+}
+
+---Resolve the root element the hover-highlight should scan within. The three
+---highlight panels (solution_editor / solution_settings / solution_results) all
+---live under factory_solver_main_window, so a hover in one lights up matching
+---slots in the others. A decorated slot inside some other dialog falls back to
+---that dialog's top-level element, so highlighting stays contained there.
+---@param elem LuaGuiElement
+---@return LuaGuiElement
+function M.find_highlight_root(elem)
+    local root = elem
+    for e in fs_util.follow_upper(elem) do
+        if e.name == "factory_solver_main_window" then
+            return e
+        end
+        root = e
+    end
+    return root
+end
+
+---on_gui_hover for decorated slots: paint every other slot in the same root that
+---represents the same material/machine/module/recipe (fluids: an overlapping
+---acceptance range) with flib_slot_button_orange, and reset non-matching slots
+---to their base_style. Only buttons carrying base_style (i.e. decorated slots)
+---are touched. The hovered button itself is skipped — the engine already
+---highlights it. Resetting non-matches in the same pass keeps things consistent
+---when the engine delivers hover before the previous slot's leave.
+---@param event EventData.on_gui_hover
+function M.on_slot_hover(event)
+    local hovered = event.element
+    local hovered_tn = hovered.tags.highlight_typed_name --[[@as TypedName?]]
+    if not hovered_tn then
+        return
+    end
+    local root = M.find_highlight_root(hovered)
+    for e in fs_util.dfs_lower(root) do
+        if e.type == "sprite-button" and e.tags.base_style then
+            local base = e.tags.base_style --[[@as string]]
+            local highlight = M.highlight_style_by_base[base]
+            if highlight and e ~= hovered
+                and tn.matches_for_highlight(hovered_tn, e.tags.highlight_typed_name --[[@as TypedName]]) then
+                e.style = highlight
+            else
+                e.style = base
+            end
+        end
+    end
+end
+
+---on_gui_leave for decorated slots: restore every decorated slot in the same
+---root to its base_style, clearing any highlight.
+---@param event EventData.on_gui_leave
+function M.on_slot_leave(event)
+    local root = M.find_highlight_root(event.element)
+    for e in fs_util.dfs_lower(root) do
+        if e.type == "sprite-button" and e.tags.base_style then
+            e.style = e.tags.base_style --[[@as string]]
+        end
     end
 end
 
