@@ -77,18 +77,23 @@
 --                 mini = the consumability MIRROR of the reference's joint
 --                 fixpoint on the surplus side (inject one unit of M;
 --                 consumable iff the lines net-absorb it without dumping M
---                 itself), prescreen-accelerated over the FULL sink
---                 universe: one joint prescreen replaces the reference's
---                 per-material phase 1, violators pay the individual
---                 screen, then joint demote-one + promotion exactly as the
---                 reference. Unlike the Vp classifier the universe must NOT
---                 be restricted to the flowing dumps: the demote-one's
---                 whack-a-mole victim selection is jointly coupled across
---                 ALL sinks, and a partial universe both over-demotes
---                 (collateral of doomed co-demands it cannot demote -- the
---                 missing holes the stage then dumps through at zero price)
---                 and under-demotes (ties whose partner is outside) -- see
---                 the rescue_vc comment for the measured failure modes.
+--                 itself) over the FULL sink universe with the reference's
+--                 real per-material phase 1, joint demote-one + promotion.
+--                 Bit-identical to the oracle on the corpus, but the cost
+--                 scales with the sink count and the classification only
+--                 depends on the recipe set -- which a real factory
+--                 re-shapes on every edit, so it cannot ship (no cache ever
+--                 hits). Kept as the in-probe reference implementation.
+--                 approx = the SHIPPED-COST candidate: individual tests
+--                 only (the reference's phase 1, trustworthy both ways)
+--                 over the flowing dumps + one support probe's discoveries;
+--                 never-flowed sinks priced wholesale; NO joint phase --
+--                 the joint demote-one is what mis-demoted innocents on a
+--                 partial universe (the v1 regressions), so dropping it
+--                 removes the regression mechanism and the price is the
+--                 reference's joint refinements (coupled ties keep both
+--                 partners priced = no-headroom misses; phase-3 promotions
+--                 stay free). See the rescue_vc comments.
 --   FS_POLISH     off (default) | on   The lexicographic machine polish =
 --                 reference stage 3: under the target + Vp + Vf + Vc budgets
 --                 (every lock threaded at its current level even when its
@@ -163,7 +168,8 @@ local RECIPE_EPS = tonumber(os.getenv("FS_RECIPE_EPS") or "") -- nil = shipped 2
 assert(CONFIG == "observer" or CONFIG == "hardgate", "FS_VP_CONFIG must be observer|hardgate")
 assert(CLASS == "approx" or CLASS == "oracle" or CLASS == "mini" or CLASS == "miniflat",
     "FS_VP_CLASS must be approx|oracle|mini|miniflat")
-assert(VC == "off" or VC == "oracle" or VC == "flat" or VC == "mini", "FS_VC must be off|oracle|flat|mini")
+assert(VC == "off" or VC == "oracle" or VC == "flat" or VC == "mini" or VC == "approx",
+    "FS_VC must be off|oracle|flat|mini|approx")
 
 local TOL, ITER = tonumber(os.getenv("FS_TOL") or "") or 1e-7, 800
 local SOFT_GATE_K = 256
@@ -769,7 +775,7 @@ local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
     table.sort(entries, function(a, b) return a.key < b.key end)
 
     local priced = {}
-    if VC == "mini" then
+    if VC == "mini" or VC == "approx" then
         -- The consumability mirror (see the FS_VC header note). Trigger
         -- pre-check on the FLAT sum first: the priced subset can only be
         -- smaller, so below the trigger the adjudication is not worth its
@@ -802,35 +808,115 @@ local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
             return prob, x
         end
 
-        -- The universe is EVERY sink material, not the flowing subset, and
-        -- fixpoint_over runs the reference's real per-material phase 1 for
-        -- this mirror (see its phase-1 note). The cheaper variants were
-        -- built and measured first and each failure mode was traced:
-        -- flowing-restricted + support probe + never-flowed priced
-        -- wholesale = tier2c 169 -> 30 with 4 outright regressions (partial
-        -- universe mis-demotes: seed_88's hydrogen-chloride is collateral
-        -- of a doomed co-demand the partial universe cannot demote, becomes
-        -- a zero-price hole, and the stage dumps 78 units through it); a
-        -- co-demand CONTEXT variant (outsiders demanded but not demotable)
-        -- leaves that trace bit-identical (the fix requires DEMOTING the
-        -- doomed outsider); a full-universe joint prescreen still admits
-        -- reference-non-consumable sinks (seed_104) because the injection
-        -- joint is generous in a way no member subset cures. Full universe
-        -- with real phase 1 retires the support probe, the wholesale
-        -- never-flowed pricing, and both misclassification directions; the
-        -- cost scales with the sink count, but the fixpoint depends only on
-        -- the problem structure, so a shipped implementation computes it
-        -- once per recipe set and caches (storage), not per solve.
-        local U = {}
-        for _, e in ipairs(entries) do U[e.material] = true end
+        local U, members
+        if VC == "approx" then
+            -- approx = the shipped-cost candidate: per-material INDIVIDUAL
+            -- tests only, over the flowing dumps plus one support probe's
+            -- discoveries; never-flowed sinks stay priced wholesale
+            -- (hole-safe). Why no joint phase: the individual test is the
+            -- reference's own phase 1 -- trustworthy in both directions
+            -- (seed_104's prescreen leaks are individual FAILs; seed_88's
+            -- hydrogen-chloride is an individual PASS) -- while the joint
+            -- demote-one is precisely what mis-demoted innocents on a
+            -- partial universe (the v1 regression family: a doomed co-demand
+            -- the partial universe cannot demote reads its collateral onto
+            -- an innocent member). Dropping the joint removes the regression
+            -- MECHANISM rather than patching its symptoms. What is lost is
+            -- the reference's joint refinements, in both directions:
+            -- EXTRA -- a true coupled tie (a mass-positive pair absorbing
+            -- each other's overflow) keeps both partners priced, so the
+            -- stage refuses their shuffle = a no-headroom miss, never a
+            -- hole; MISSING -- the reference's phase-3 promotions
+            -- (individual-FAIL materials revived in a joint context) stay
+            -- free here. The corpus arbitrates what either costs; the
+            -- classification needs no cache and prices at flowing-count
+            -- individual solves plus one probe.
+            U, members = {}, {}
+            local p1 = {}
+            local function individual(mat)
+                if p1[mat] == nil then
+                    r.vcfp_solves = r.vcfp_solves + 1
+                    r.solves = r.solves + 1
+                    local own = fix_test(constraints, lines, { [mat] = true }, { mat }, "surplus_sink", 1)
+                    p1[mat] = { pass = own ~= nil and (own[mat] or 0) <= FIX_TOL }
+                end
+                return p1[mat].pass
+            end
+            for _, e in ipairs(entries) do
+                if not U[e.material] and math.abs(x[e.key] or 0) > FLOW_TH then
+                    U[e.material] = true
+                    if individual(e.material) then members[e.material] = true end
+                end
+            end
+            if next(members) then
+                -- Support probe: members priced under the full lock set (the
+                -- stage's own environment), all else free; where the
+                -- displaced surplus flows is the support to adjudicate.
+                local pf = with_locks(build_ship(constraints, lines, t_limit))
+                if pf then
+                    local member_keys = {}
+                    for _, e in ipairs(entries) do
+                        if members[e.material] then member_keys[e.key] = true end
+                    end
+                    for key, pr in pairs(pf.primals) do
+                        if member_keys[key] then
+                            pr.cost = 1
+                        elseif pr.kind == "recipe" or pr.kind == "bridge" then
+                            pr.cost = EPS_RECIPE
+                        else
+                            pr.cost = 0
+                        end
+                    end
+                    r.solves = r.solves + 1
+                    local sf, vf2 = solve(pf)
+                    if sf == "finished" then
+                        for _, e in ipairs(entries) do
+                            if not U[e.material] and math.abs(vf2.x[e.key] or 0) > FLOW_TH then
+                                U[e.material] = true
+                                if individual(e.material) then members[e.material] = true end
+                            end
+                        end
+                    end
+                end
+            end
+            for _, e in ipairs(entries) do
+                if members[e.material] or not U[e.material] then
+                    priced[#priced + 1] = e.key
+                end
+            end
+        else
+            -- mini: the universe is EVERY sink material, not the flowing
+            -- subset, and fixpoint_over runs the reference's real
+            -- per-material phase 1 for this mirror (see its phase-1 note).
+            -- The cheaper variants measured along the way: flowing-restricted
+            -- + support probe + never-flowed priced wholesale = tier2c 169 ->
+            -- 30 with 4 outright regressions (partial universe mis-demotes:
+            -- seed_88's hydrogen-chloride is collateral of a doomed co-demand
+            -- the partial universe cannot demote, becomes a zero-price hole,
+            -- and the stage dumps 78 units through it); a co-demand CONTEXT
+            -- variant (outsiders demanded but not demotable) leaves that
+            -- trace bit-identical (the fix requires DEMOTING the doomed
+            -- outsider); a full-universe joint prescreen still admits
+            -- reference-non-consumable sinks (seed_104) because the
+            -- injection joint is generous in a way no member subset cures.
+            -- Full universe with real phase 1 retires the support probe, the
+            -- wholesale never-flowed pricing, and both misclassification
+            -- directions, at a cost scaling with the sink count per build --
+            -- which is why FS_VC=approx exists: real factories re-shape the
+            -- recipe set on every edit, so a per-recipe-set cache never hits
+            -- and the full fixpoint cannot ship as a per-solve cost.
+            U = {}
+            for _, e in ipairs(entries) do U[e.material] = true end
 
-        local p1 = {}
-        local members, fp = fixpoint_over(constraints, lines, U, p1, "surplus_sink", 1)
-        r.vcfp_solves = r.vcfp_solves + fp
-        r.solves = r.solves + fp
+            local p1 = {}
+            local fp
+            members, fp = fixpoint_over(constraints, lines, U, p1, "surplus_sink", 1)
+            r.vcfp_solves = r.vcfp_solves + fp
+            r.solves = r.solves + fp
 
-        for _, e in ipairs(entries) do
-            if members[e.material] then priced[#priced + 1] = e.key end
+            for _, e in ipairs(entries) do
+                if members[e.material] then priced[#priced + 1] = e.key end
+            end
         end
         local F = set_to_list(U)
         r.n_vcuniv = #F
