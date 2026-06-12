@@ -577,7 +577,7 @@ styles.factory_solver_filter_picker_frame = {
     top_padding = 4,
     right_padding = 0,
     left_padding = 0,
-    bottom_padding = 4,
+    bottom_padding = 12,
     graphical_set = tabbed_pane_graphical_set
 }
 

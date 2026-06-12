@@ -57,46 +57,49 @@ return {
     type = "frame",
     name = "common_settings",
     style = "inside_shallow_frame_with_padding",
-    direction = "vertical",
     {
-        type = "label",
-        style = "caption_label",
-        caption = { "factory-solver-time-scale" },
-    },
-    {
-        type = "drop-down",
-        items = {
-            { "time-symbol-seconds-short", 1 },
-            { "time-symbol-seconds-short", 5 },
-            { "time-symbol-minutes-short", 1 },
-            { "time-symbol-minutes-short", 10 },
-            { "time-symbol-hours-short",   1 },
-            { "time-symbol-hours-short",   10 },
-            { "time-symbol-hours-short",   50 },
-            { "time-symbol-hours-short",   250 },
-            { "time-symbol-hours-short",   1000 },
+        type = "flow",
+        direction = "vertical",
+        {
+            type = "label",
+            style = "caption_label",
+            caption = { "factory-solver-time-scale" },
         },
-        handler = {
-            [defines.events.on_gui_selection_state_changed] = handlers.on_time_scale_selection_state_changed,
-            on_added = handlers.on_time_scale_dropdown_added,
-        }
-    },
-    {
-        type = "line",
-        style = "factory_solver_line",
-    },
-    {
-        type = "button",
-        caption = { "factory-solver-machine-presets" },
-        handler = {
-            [defines.events.on_gui_click] = handlers.on_open_machine_preset_dialog_button_click,
+        {
+            type = "drop-down",
+            items = {
+                { "time-symbol-seconds-short", 1 },
+                { "time-symbol-seconds-short", 5 },
+                { "time-symbol-minutes-short", 1 },
+                { "time-symbol-minutes-short", 10 },
+                { "time-symbol-hours-short",   1 },
+                { "time-symbol-hours-short",   10 },
+                { "time-symbol-hours-short",   50 },
+                { "time-symbol-hours-short",   250 },
+                { "time-symbol-hours-short",   1000 },
+            },
+            handler = {
+                [defines.events.on_gui_selection_state_changed] = handlers.on_time_scale_selection_state_changed,
+                on_added = handlers.on_time_scale_dropdown_added,
+            }
         },
-    },
-    {
-        type = "button",
-        caption = { "factory-solver-research-bonuses" },
-        handler = {
-            [defines.events.on_gui_click] = handlers.on_open_research_bonuses_dialog_button_click,
+        {
+            type = "line",
+            style = "factory_solver_line",
+        },
+        {
+            type = "button",
+            caption = { "factory-solver-machine-presets" },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_open_machine_preset_dialog_button_click,
+            },
+        },
+        {
+            type = "button",
+            caption = { "factory-solver-research-bonuses" },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_open_research_bonuses_dialog_button_click,
+            },
         },
     },
 }

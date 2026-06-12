@@ -89,7 +89,7 @@ return {
         {
             type = "label",
             style = "frame_title",
-            caption = { "factory_solver_title" },
+            caption = { "mod-name.factory_solver" },
             ignored_by_interaction = true,
         },
         {

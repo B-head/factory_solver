@@ -172,6 +172,7 @@ function handlers.on_import_textbox_changed(event)
     local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
     local error_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_error"))
     local empty_label = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_empty"))
+    local select_all_checkbox = assert(fs_util.find_lower(dialog, "factory_solver_solution_import_select_all"))
 
     error_label.visible = false
     error_label.caption = ""
@@ -180,6 +181,7 @@ function handlers.on_import_textbox_changed(event)
     if text == "" then
         clear_list(dialog)
         empty_label.visible = true
+        select_all_checkbox.visible = false
         return
     end
 
@@ -187,12 +189,14 @@ function handlers.on_import_textbox_changed(event)
     if not payloads then
         clear_list(dialog)
         empty_label.visible = false
+        select_all_checkbox.visible = false
         error_label.caption = err or { "factory-solver-import-error-structure" }
         error_label.visible = true
         return
     end
 
     empty_label.visible = false
+    select_all_checkbox.visible = true
     populate_list(dialog, payloads)
 end
 
@@ -296,55 +300,63 @@ return {
     {
         type = "frame",
         style = "inside_shallow_frame_with_padding",
-        direction = "vertical",
         {
-            type = "text-box",
-            name = "factory_solver_solution_import_textbox",
-            elem_mods = {
-                word_wrap = true,
-            },
-            style_mods = {
-                width = 480,
-                height = 140,
-            },
-            handler = {
-                on_added = handlers.on_init_import_textbox,
-                [defines.events.on_gui_text_changed] = handlers.on_import_textbox_changed,
-            },
-        },
-        {
-            type = "checkbox",
-            name = "factory_solver_solution_import_select_all",
-            state = false,
-            caption = { "factory-solver-import-choose-factories" },
-            handler = {
-                [defines.events.on_gui_checked_state_changed] = handlers.on_select_all_import,
-            },
-        },
-        {
-            type = "scroll-pane",
-            style_mods = {
-                width = 480,
-                maximal_height = 200,
+            type = "flow",
+            direction = "vertical",
+            {
+                type = "text-box",
+                name = "factory_solver_solution_import_textbox",
+                elem_mods = {
+                    word_wrap = true,
+                },
+                style_mods = {
+                    width = 640,
+                    height = 360,
+                },
+                handler = {
+                    on_added = handlers.on_init_import_textbox,
+                    [defines.events.on_gui_text_changed] = handlers.on_import_textbox_changed,
+                },
             },
             {
-                type = "flow",
-                name = "factory_solver_solution_import_list",
-                direction = "vertical",
+                type = "line",
+                style = "factory_solver_line",
             },
-        },
-        {
-            type = "label",
-            name = "factory_solver_solution_import_empty",
-            caption = { "factory-solver-import-empty-hint" },
-            visible = true,
-        },
-        {
-            type = "label",
-            name = "factory_solver_solution_import_error",
-            style = "bold_red_label",
-            caption = "",
-            visible = false,
+            {
+                type = "checkbox",
+                name = "factory_solver_solution_import_select_all",
+                state = false,
+                caption = { "factory-solver-import-choose-factories" },
+                visible = false,
+                handler = {
+                    [defines.events.on_gui_checked_state_changed] = handlers.on_select_all_import,
+                },
+            },
+            {
+                type = "scroll-pane",
+                style_mods = {
+                    width = 480,
+                    maximal_height = 200,
+                },
+                {
+                    type = "flow",
+                    name = "factory_solver_solution_import_list",
+                    direction = "vertical",
+                },
+            },
+            {
+                type = "label",
+                name = "factory_solver_solution_import_empty",
+                caption = { "factory-solver-import-empty-hint" },
+                visible = true,
+            },
+            {
+                type = "label",
+                name = "factory_solver_solution_import_error",
+                style = "bold_red_label",
+                caption = "",
+                visible = false,
+            },
         },
     },
     {

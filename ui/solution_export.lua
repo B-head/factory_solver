@@ -284,82 +284,89 @@ return {
     {
         type = "frame",
         style = "inside_shallow_frame_with_padding",
-        direction = "vertical",
         {
             type = "flow",
-            direction = "horizontal",
-            {
-                type = "radiobutton",
-                name = "factory_solver_solution_export_format_native",
-                caption = { "factory-solver-export-format-native" },
-                state = true,
-                handler = {
-                    [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_native,
-                },
-            },
-            {
-                type = "radiobutton",
-                name = "factory_solver_solution_export_format_fp",
-                caption = { "factory-solver-export-format-factoryplanner" },
-                state = false,
-                handler = {
-                    [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_fp,
-                },
-            },
-            {
-                type = "radiobutton",
-                name = "factory_solver_solution_export_format_helmod",
-                caption = { "factory-solver-export-format-helmod" },
-                state = false,
-                handler = {
-                    [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_helmod,
-                },
-            },
-        },
-        {
-            type = "checkbox",
-            name = "factory_solver_solution_export_select_all",
-            state = false,
-            caption = { "factory-solver-export-choose-factories" },
-            handler = {
-                [defines.events.on_gui_checked_state_changed] = handlers.on_select_all_export,
-            },
-        },
-        {
-            type = "scroll-pane",
-            style_mods = {
-                width = 480,
-                maximal_height = 200,
-            },
+            direction = "vertical",
             {
                 type = "flow",
-                name = "factory_solver_solution_export_list",
-                direction = "vertical",
-                handler = {
-                    on_added = handlers.on_export_list_added,
+                direction = "horizontal",
+                {
+                    type = "radiobutton",
+                    name = "factory_solver_solution_export_format_native",
+                    caption = { "factory-solver-export-format-native" },
+                    state = true,
+                    handler = {
+                        [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_native,
+                    },
+                },
+                {
+                    type = "radiobutton",
+                    name = "factory_solver_solution_export_format_fp",
+                    caption = { "factory-solver-export-format-factoryplanner" },
+                    state = false,
+                    handler = {
+                        [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_fp,
+                    },
+                },
+                {
+                    type = "radiobutton",
+                    name = "factory_solver_solution_export_format_helmod",
+                    caption = { "factory-solver-export-format-helmod" },
+                    state = false,
+                    handler = {
+                        [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_helmod,
+                    },
                 },
             },
-        },
-        {
-            type = "label",
-            name = "factory_solver_solution_export_empty",
-            style = "bold_red_label",
-            caption = { "factory-solver-export-no-selection" },
-            visible = false,
-        },
-        {
-            type = "text-box",
-            name = "factory_solver_solution_export_textbox",
-            elem_mods = {
-                read_only = true,
-                word_wrap = true,
+            {
+                type = "checkbox",
+                name = "factory_solver_solution_export_select_all",
+                state = false,
+                caption = { "factory-solver-export-choose-factories" },
+                handler = {
+                    [defines.events.on_gui_checked_state_changed] = handlers.on_select_all_export,
+                },
             },
-            style_mods = {
-                width = 480,
-                height = 140,
+            {
+                type = "scroll-pane",
+                style_mods = {
+                    width = 480,
+                    maximal_height = 200,
+                },
+                {
+                    type = "flow",
+                    name = "factory_solver_solution_export_list",
+                    direction = "vertical",
+                    handler = {
+                        on_added = handlers.on_export_list_added,
+                    },
+                },
             },
-            handler = {
-                on_added = handlers.on_init_export_textbox,
+            {
+                type = "label",
+                name = "factory_solver_solution_export_empty",
+                style = "bold_red_label",
+                caption = { "factory-solver-export-no-selection" },
+                visible = false,
+            },
+            {
+                type = "line",
+                style = "factory_solver_line",
+            },
+            {
+                type = "text-box",
+                name = "factory_solver_solution_export_textbox",
+                elem_mods = {
+                    read_only = true,
+                    word_wrap = true,
+                },
+                style_mods = {
+                    width = 640,
+                    height = 360,
+                },
+                handler = {
+                    on_added = handlers.on_init_export_textbox,
+                },
             },
         },
     },

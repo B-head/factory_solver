@@ -128,6 +128,15 @@ return {
         {
             type = "sprite-button",
             style = "tool_button",
+            sprite = "utility/import_slot",
+            tooltip = { "factory-solver-import-from-string" },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_import_solution,
+            },
+        },
+        {
+            type = "sprite-button",
+            style = "tool_button",
             sprite = "utility/export_slot",
             tooltip = { "factory-solver-export-to-string" },
             handler = {
@@ -139,15 +148,6 @@ return {
         {
             type = "empty-widget",
             style = "flib_horizontal_pusher",
-        },
-        {
-            type = "sprite-button",
-            style = "tool_button",
-            sprite = "utility/import_slot",
-            tooltip = { "factory-solver-import-from-string" },
-            handler = {
-                [defines.events.on_gui_click] = handlers.on_import_solution,
-            },
         },
         {
             type = "sprite-button",
