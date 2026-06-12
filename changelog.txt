@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.4
-Date: ????
+Date: 2026-06-12
   Bugfixes:
     - Order recipes from a Helmod import by their intended row order
       (product-first) instead of an arbitrary one, so an imported production
