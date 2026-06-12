@@ -7,6 +7,7 @@ local fs_util = require "fs_util"
 local save = require "manage/save"
 local pre_solve = require "manage/pre_solve"
 local virtual = require "manage/virtual"
+local dictionary = require "manage/dictionary"
 local common = require "ui/common"
 local main_window = require "ui/main_window"
 local build_assistant = require "ui/build_assistant"
@@ -57,6 +58,10 @@ script.on_init(function()
     flib_dictionary.on_init()
 
     storage.virtuals = virtual.create_virtuals()
+    -- Locale dictionaries for the constraint-adder name filter. Must be built
+    -- here (and in on_configuration_changed), before flib's first on_tick marks
+    -- the dictionary module initialized.
+    dictionary.build()
 
     -- New saves are born on the engine-aligned layout default, so they never get
     -- the one-time "the default layout changed" notice. Pre-set the flag here;
@@ -107,6 +112,9 @@ script.on_configuration_changed(function(event)
     flib_dictionary.on_configuration_changed()
 
     storage.virtuals = virtual.create_virtuals()
+    -- flib resets its dictionary storage on on_configuration_changed, so the
+    -- name-filter dictionaries must be re-declared here too.
+    dictionary.build()
 
     -- One-time chat notice for existing saves: the layout default flipped to
     -- follow Factorio's ingredient-to-product order. Guarded by a storage flag so

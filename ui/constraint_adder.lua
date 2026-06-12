@@ -1,4 +1,5 @@
 local flib_table = require "__flib__/table"
+local flib_dictionary = require "__flib__/dictionary"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local save = require "manage/save"
@@ -114,12 +115,53 @@ function handlers.on_make_constraint_picker(event)
     local player_data = save.get_player_data(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
+    local filter_type = player_data.selected_filter_type
+
+    -- Name filter (title-bar textfield). Matches against both the internal name
+    -- and the locale-resolved display name. helpers.multilingual_to_lower folds
+    -- case for non-Latin scripts too (string.lower is ASCII-only). The display
+    -- name comes from the flib dictionary keyed by filter type; it returns nil
+    -- until the player's language finishes translating, so we degrade to
+    -- name-only filtering meanwhile.
+    local raw_filter = player_data.constraint_filter_text or ""
+    local needle = (raw_filter ~= "") and helpers.multilingual_to_lower(raw_filter) or ""
+    local dict_name = (filter_type == "item" and "item")
+        or (filter_type == "fluid" and "fluid")
+        or (filter_type == "recipe" and "recipe")
+        or "virtual" -- virtual_recipe / external both draw from storage.virtuals
+    local locale_dict = (needle ~= "") and flib_dictionary.get(event.player_index, dict_name) or nil
+
+    ---@param name string
+    ---@return boolean
+    local function passes_filter(name)
+        if needle == "" then
+            return true
+        end
+        if string.find(helpers.multilingual_to_lower(name), needle, 1, true) then
+            return true
+        end
+        if locale_dict then
+            local localised = locale_dict[name]
+            if localised and string.find(helpers.multilingual_to_lower(localised), needle, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
     ---comment
     ---@param typed_name TypedName
     ---@param is_hidden boolean
     ---@param is_unresearched boolean
-    function add(typed_name, is_hidden, is_unresearched)
+    ---@param filter_name string Name of the enumerated craft itself (the picker
+    --- entry), used for the name filter. This is the dictionary key and differs
+    --- from typed_name.name for fluid-temperature virtual materials, whose
+    --- typed_name resolves to the underlying fluid.
+    function add(typed_name, is_hidden, is_unresearched, filter_name)
         if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+            return
+        end
+        if not passes_filter(filter_name) then
             return
         end
 
@@ -137,7 +179,6 @@ function handlers.on_make_constraint_picker(event)
         fs_util.add_gui(elem, def)
     end
 
-    local filter_type = player_data.selected_filter_type
     local group = prototypes.item_group[player_data.selected_filter_group[filter_type]]
     local subgroups = {}
     if group then
@@ -157,7 +198,7 @@ function handlers.on_make_constraint_picker(event)
                     local is_hidden = acc.is_hidden(value)
                     local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
                     local typed_name = tn.craft_to_typed_name(value)
-                    add(typed_name, is_hidden, is_unresearched)
+                    add(typed_name, is_hidden, is_unresearched, value.name)
                 end
             end
         elseif filter_type == "fluid" then
@@ -171,7 +212,7 @@ function handlers.on_make_constraint_picker(event)
                     local is_hidden = acc.is_hidden(value)
                     local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
                     local typed_name = tn.craft_to_typed_name(value)
-                    add(typed_name, is_hidden, is_unresearched)
+                    add(typed_name, is_hidden, is_unresearched, value.name)
                 end
             end
         elseif filter_type == "recipe" then
@@ -185,7 +226,7 @@ function handlers.on_make_constraint_picker(event)
                     local is_hidden = acc.is_hidden(value)
                     local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
                     local typed_name = tn.craft_to_typed_name(value)
-                    add(typed_name, is_hidden, is_unresearched)
+                    add(typed_name, is_hidden, is_unresearched, value.name)
                 end
             end
         elseif filter_type == "virtual_recipe" then
@@ -210,7 +251,7 @@ function handlers.on_make_constraint_picker(event)
                 local is_hidden = acc.is_hidden(value)
                 local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
                 local typed_name = tn.craft_to_typed_name(value)
-                add(typed_name, is_hidden, is_unresearched)
+                add(typed_name, is_hidden, is_unresearched, value.name)
             end
         elseif filter_type == "external" then
             ---@type VirtualRecipe[]
@@ -227,7 +268,7 @@ function handlers.on_make_constraint_picker(event)
                 local is_hidden = acc.is_hidden(value)
                 local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
                 local typed_name = tn.craft_to_typed_name(value)
-                add(typed_name, is_hidden, is_unresearched)
+                add(typed_name, is_hidden, is_unresearched, value.name)
             end
         else
             assert()
@@ -304,6 +345,21 @@ function handlers.on_constraint_picker_button_click(event)
     end
 end
 
+---@param event EventDataTrait
+function handlers.on_init_constraint_filter_textfield(event)
+    local player_data = save.get_player_data(event.player_index)
+    event.element.text = player_data.constraint_filter_text or ""
+end
+
+---@param event EventData.on_gui_text_changed
+function handlers.on_constraint_filter_textfield_changed(event)
+    local player_data = save.get_player_data(event.player_index)
+    player_data.constraint_filter_text = event.element.text
+
+    local root = assert(fs_util.find_upper(event.element, "factory_solver_constraint_adder"))
+    fs_util.dispatch_to_subtree(root, "on_filter_text_changed")
+end
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -334,6 +390,17 @@ return {
             type = "empty-widget",
             style = "flib_titlebar_drag_handle",
             ignored_by_interaction = true,
+        },
+        {
+            type = "textfield",
+            name = "constraint_filter_textfield",
+            style = "factory_solver_constraint_filter_textfield",
+            clear_and_focus_on_right_click = true,
+            tooltip = { "factory-solver-constraint-filter-tooltip" },
+            handler = {
+                on_added = handlers.on_init_constraint_filter_textfield,
+                [defines.events.on_gui_text_changed] = handlers.on_constraint_filter_textfield_changed,
+            },
         },
         {
             type = "sprite-button",
@@ -522,6 +589,7 @@ return {
                                 on_filter_type_changed = handlers.on_make_constraint_picker,
                                 on_filter_group_changed = handlers.on_make_constraint_picker,
                                 on_craft_visible_changed = handlers.on_make_constraint_picker,
+                                on_filter_text_changed = handlers.on_make_constraint_picker,
                             },
                         },
                     },

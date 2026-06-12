@@ -29,6 +29,7 @@ function M.init_player_data(player_index)
             },
             unresearched_craft_visible = __DebugAdapter ~= nil,
             hidden_craft_visible = __DebugAdapter ~= nil,
+            constraint_filter_text = "",
             time_scale = "minute",
             amount_unit = "time",
             build_assistant_mode = "manual",
@@ -65,6 +66,9 @@ function M.reinit_player_data(player_index)
         if not player_data.build_assistant_mode then
             player_data.build_assistant_mode = "manual"
         end
+        -- The constraint-adder name filter was added later; backfill so older
+        -- saves get an empty filter rather than a nil read in the picker.
+        player_data.constraint_filter_text = player_data.constraint_filter_text or ""
         local presets = player_data.presets
         if presets then
             presets.fuel = preset.create_fuel_presets(presets.fuel)
