@@ -424,6 +424,73 @@ fixtures.codec_helmod_roundtrip = {
     end,
 }
 
+---Helmod import ordering: walk_blocks must take `block.children` in `index`
+---ascending order (product-first), not raw `pairs()` order. A hand-built model
+---stores three recipes whose `index` deliberately disagrees with their dict-key
+---order, so a regression to unordered iteration surfaces here. Asserts the
+---decoded production_lines come out in index order, then leaves the solution
+---solvable (iron-plate demand) so the on_tick pump + check_read_side still run.
+---Base game only.
+fixtures.codec_helmod_import_order = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        save.init_player_data(PLAYER_INDEX)
+
+        -- index order (copper-plate=0, iron-gear-wheel=1, iron-plate=2) is the
+        -- reverse of the R1/R2/R3 id order, so the expected result only holds if
+        -- walk_blocks sorts by index rather than trusting dict iteration.
+        local model = {
+            class = "Model",
+            time = 1,
+            block_root = {
+                class = "Block",
+                id = "block_1",
+                by_product = true,
+                children = {
+                    R1 = { class = "Recipe", id = "R1", name = "iron-plate",
+                        type = "recipe", index = 2, factory = { name = "electric-furnace" } },
+                    R2 = { class = "Recipe", id = "R2", name = "copper-plate",
+                        type = "recipe", index = 0, factory = { name = "electric-furnace" } },
+                    R3 = { class = "Recipe", id = "R3", name = "iron-gear-wheel",
+                        type = "recipe", index = 1, factory = { name = "assembling-machine-2" } },
+                },
+                products = {},
+                ingredients = {},
+            },
+            blocks = {},
+        }
+
+        local payload = helmod_codec.model_to_payload(model, PLAYER_INDEX)
+        local got = {}
+        for _, line in ipairs(payload.production_lines) do
+            got[#got + 1] = line.recipe_typed_name.name
+        end
+        local expected = { "copper-plate", "iron-gear-wheel", "iron-plate" }
+        assert(#got == #expected,
+            "expected 3 imported lines, got " .. #got)
+        for i = 1, #expected do
+            assert(got[i] == expected[i], string.format(
+                "Helmod import order wrong at %d: expected '%s', got '%s'",
+                i, expected[i], tostring(got[i])))
+        end
+
+        -- Leave it solvable so the downstream solve + read-side path still runs.
+        -- The payload already carries the iron-plate line, so add only a lower
+        -- bound (not build_iron_plate_demand, which would insert a duplicate
+        -- iron-plate line and trip the add_objective same-name assert).
+        solution.constraints = payload.constraints
+        solution.production_lines = payload.production_lines
+        flib_table.insert(solution.constraints, {
+            type = "item",
+            name = "iron-plate",
+            quality = "normal",
+            limit_type = "lower",
+            limit_amount_per_second = 1,
+        })
+    end,
+}
+
 ---Spent-fuel (burnt_result) crediting -- the one read-side path no other
 ---fixture reaches. boiler_steam burns coal (no burnt_result) and every other
 ---fixture is electric or fuel-less, so accessor.normalize_production_line's

@@ -37,7 +37,8 @@ param(
     # Seconds to wait for the server to open its RCON port after launch.
     [int] $RconStartupSeconds = 90,
     [string[]] $Fixtures = @("iron_plate", "missing_prototype", "boiler_steam", "reactor_burnt_fuel",
-        "migration_legacy_shape", "codec_solution_roundtrip", "codec_fp_roundtrip", "codec_helmod_roundtrip"),
+        "migration_legacy_shape", "codec_solution_roundtrip", "codec_fp_roundtrip", "codec_helmod_roundtrip",
+        "codec_helmod_import_order"),
     # Mods to enable for the run; everything else in mod-list.json is disabled.
     # Default is the vanilla minimal set. Pass @() to leave mod-list.json
     # untouched (load whatever the dev config has enabled).
