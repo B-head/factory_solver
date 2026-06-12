@@ -372,6 +372,15 @@ end
 ---scan their `products` / `ingredients` for user-set `.input` values —
 ---Helmod stores those on whatever block the user navigated into when
 ---they typed the number, not always on `block_root`.
+---
+---`block.children` is a dict keyed by id string ("R1", "block_1", ...), so
+---raw `pairs()` iteration would yield neither Helmod's intended row order
+---(child.index ascending — which is product-first, matching its default
+---by_product=true display) nor an MP-deterministic order. We collect the
+---children and sort by `index` (id as a stable tiebreaker for a missing /
+---equal index) before walking, so the imported production_lines come out
+---product-first and order-stable, symmetric with the FP import path
+---(collect_leaf_lines preserves the packed linked-list order via ipairs).
 ---@param block any
 ---@param recipes_out table[]
 ---@param blocks_out table[]
@@ -380,14 +389,26 @@ local function walk_blocks(block, recipes_out, blocks_out, flatten_seen)
     if type(block) ~= "table" then return end
     blocks_out[#blocks_out + 1] = block
     if type(block.children) ~= "table" then return end
+
+    local ordered = {}
     for _, child in pairs(block.children) do
-        if type(child) == "table" then
-            if child.class == "Block" or child.children then
-                flatten_seen.nested = true
-                walk_blocks(child, recipes_out, blocks_out, flatten_seen)
-            elseif child.class == "Recipe" or child.factory then
-                recipes_out[#recipes_out + 1] = child
-            end
+        if type(child) == "table" then ordered[#ordered + 1] = child end
+    end
+    -- Blocks and recipes share the same children dict and both carry `index`,
+    -- so a single sort keeps subfloors interleaved at their intended spots.
+    table.sort(ordered, function(a, b)
+        local ai = tonumber(a.index) or math.huge
+        local bi = tonumber(b.index) or math.huge
+        if ai ~= bi then return ai < bi end
+        return tostring(a.id) < tostring(b.id)
+    end)
+
+    for _, child in ipairs(ordered) do
+        if child.class == "Block" or child.children then
+            flatten_seen.nested = true
+            walk_blocks(child, recipes_out, blocks_out, flatten_seen)
+        elseif child.class == "Recipe" or child.factory then
+            recipes_out[#recipes_out + 1] = child
         end
     end
 end
