@@ -12,6 +12,11 @@ local handlers = {}
 function handlers.on_main_window_added(event)
     local player = game.players[event.player_index]
     player.set_shortcut_toggled("factory-solver-toggle-main-window", true)
+
+    -- Fullscreen: stretch the window to fill the whole display. Sizing it here
+    -- (before open_gui's force_auto_center) makes the subsequent centering land at
+    -- {0, 0}. control.lua keeps it refit on resolution / UI-scale changes.
+    common.resize_window_to_screen(player, event.element)
 end
 
 ---@param event EventDataTrait
@@ -80,21 +85,18 @@ return {
         type = "flow",
         name = "title_bar",
         style = "flib_titlebar_flow",
-        tags = {
-            drag_target = "factory_solver_main_window",
-        },
-        handler = {
-            on_added = common.on_init_drag_target
-        },
         {
             type = "label",
             style = "frame_title",
             caption = { "mod-name.factory_solver" },
             ignored_by_interaction = true,
         },
+        -- The window is fullscreen and pinned to {0, 0}, so it is not draggable:
+        -- no drag handle and no drag_target wiring. This plain stretchable spacer
+        -- just keeps the action buttons pushed to the top-right corner.
         {
             type = "empty-widget",
-            style = "flib_titlebar_drag_handle",
+            style_mods = { horizontally_stretchable = true },
             ignored_by_interaction = true,
         },
         {

@@ -229,6 +229,27 @@ script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)
     end
 end)
 
+-- The main window is sized to fill the whole display (see ui/main_window.lua),
+-- which is computed from the player's resolution / UI scale at build time. When
+-- either changes while the window is open it would otherwise keep the old size
+-- and overflow (or underfill) the screen, so refit it live. Only the affected
+-- player's window needs it.
+local function refit_main_window(player_index)
+    local player = game.players[player_index]
+    local window = player.gui.screen["factory_solver_main_window"]
+    if window then
+        common.resize_window_to_screen(player, window)
+    end
+end
+
+script.on_event(defines.events.on_player_display_resolution_changed, function(event)
+    refit_main_window(event.player_index)
+end)
+
+script.on_event(defines.events.on_player_display_scale_changed, function(event)
+    refit_main_window(event.player_index)
+end)
+
 script.on_event(defines.events.on_tick, function(event)
     flib_dictionary.on_tick()
 

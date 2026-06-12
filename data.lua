@@ -299,6 +299,7 @@ styles.factory_solver_right_panel = {
     type = "vertical_flow_style",
     width = 344,
     horizontally_stretchable = "off",
+    vertically_stretchable = "on",
 }
 
 -- solution_editor --
@@ -308,6 +309,7 @@ styles.factory_solver_solution_editor_scroll_pane = {
     parent = "scroll_pane",
     vertically_stretchable = "on",
     horizontally_stretchable = "on",
+    vertical_flow_style = styles.factory_solver_centering_vertical_flow,
 }
 
 styles.factory_solver_production_line_table = {
@@ -387,6 +389,7 @@ styles.factory_solver_production_line_header_label = {
 
 styles.factory_solver_getting_started_flow = {
     type = "vertical_flow_style",
+    maximal_width = 640,
     vertical_spacing = 8,
     padding = 12,
     horizontal_align = "left",
@@ -424,8 +427,8 @@ styles.factory_solver_solution_list = {
 
 -- right panel shared --
 
--- Both right-panel sections (constraints + results) use this one frame style, so
--- they end up the same fixed height and read as two equal halves of the column.
+-- The constraints (top) section keeps this fixed height; the results (bottom)
+-- section uses the stretchable variants below to fill the remaining column height.
 -- Parent is inside_shallow_frame (no padding): the padding lives on the scroll-
 -- pane inside, not the frame, so the scrollbar tracks the frame edge instead of
 -- floating in an outer padding gap.
@@ -433,6 +436,14 @@ styles.factory_solver_right_panel_half_frame = {
     type = "frame_style",
     parent = "inside_shallow_frame",
     height = 334,
+}
+
+-- Results-section frame: same as the half-frame but stretches vertically to take
+-- up whatever column height is left below the fixed-height constraints section.
+styles.factory_solver_right_panel_result_frame = {
+    type = "frame_style",
+    parent = "inside_shallow_frame",
+    vertically_stretchable = "on",
 }
 
 -- Borderless, backgroundless scroll-pane: naked_scroll_pane draws no graphical_set
@@ -444,6 +455,15 @@ styles.factory_solver_right_panel_scroll_pane = {
     type = "scroll_pane_style",
     parent = "naked_scroll_pane",
     padding = 12,
+}
+
+-- Results-section scroll-pane: stretches to fill the taller result frame so the
+-- background and scrollbar gutter extend the full height instead of stopping at
+-- the content.
+styles.factory_solver_right_panel_result_scroll_pane = {
+    type = "scroll_pane_style",
+    parent = "factory_solver_right_panel_scroll_pane",
+    vertically_stretchable = "on",
 }
 
 -- solution_settings

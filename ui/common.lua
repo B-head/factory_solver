@@ -681,6 +681,22 @@ function M.on_init_drag_target(event)
     elem.drag_target = target
 end
 
+---Resize a free-floating screen window to fill the whole display and pin it to
+---the top-left. display_resolution is in physical pixels while GUI element sizes
+---are logical (the engine multiplies by display_scale when rendering), so divide
+---to get the logical size. Re-pinning the location keeps it aligned after a
+---resolution / UI-scale change. Called both at build time and from the
+---resolution / scale change handlers so an open window refits live.
+---@param player LuaPlayer
+---@param window LuaGuiElement
+function M.resize_window_to_screen(player, window)
+    local resolution = player.display_resolution
+    local scale = player.display_scale
+    window.style.width = resolution.width / scale
+    window.style.height = resolution.height / scale
+    window.location = { 0, 0 }
+end
+
 ---comment
 ---@param event EventDataTrait
 function M.on_close_self(event)

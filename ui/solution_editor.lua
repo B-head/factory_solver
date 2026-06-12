@@ -210,7 +210,7 @@ function handlers.make_production_line_table(event)
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
-                        tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
+                    tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
                     handler = {
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                     },
@@ -219,7 +219,8 @@ function handlers.make_production_line_table(event)
                 flib_table.insert(buttons, def)
             end
 
-            local total_modules = acc.get_total_modules(machine, line.machine_typed_name.quality, line.module_typed_names, line.affected_by_beacons)
+            local total_modules = acc.get_total_modules(machine, line.machine_typed_name.quality, line
+                .module_typed_names, line.affected_by_beacons)
             local split = acc.split_total_modules_by_effectiveness(recipe, machine, total_modules)
 
             for name, qualities in pairs(split) do
@@ -234,7 +235,7 @@ function handlers.make_production_line_table(event)
                         local def = common.create_decorated_sprite_button {
                             typed_name = module_typed_name,
                             number = counts.effective,
-                                        tags = module_tags,
+                            tags = module_tags,
                             handler = {
                                 [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                             },
@@ -247,7 +248,7 @@ function handlers.make_production_line_table(event)
                             typed_name = module_typed_name,
                             number = counts.ineffective,
                             top_right_sprite = "utility/warning_icon",
-                                        tags = module_tags,
+                            tags = module_tags,
                             handler = {
                                 [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                             },
@@ -327,7 +328,7 @@ function handlers.make_production_line_table(event)
                         typed_name = typed_name,
                         is_hidden = is_hidden,
                         is_unresearched = is_unresearched,
-                                tags = {
+                        tags = {
                             line_index = line_index,
                             typed_name = typed_name,
                             is_product = true,
@@ -382,7 +383,7 @@ function handlers.make_production_line_table(event)
 
             local def = {
                 type = "table",
-                column_count = 4,
+                column_count = 8,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
@@ -402,7 +403,7 @@ function handlers.make_production_line_table(event)
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
-                        tags = {
+                    tags = {
                         line_index = line_index,
                         typed_name = typed_name,
                         is_product = false,
@@ -422,7 +423,7 @@ function handlers.make_production_line_table(event)
 
             local def = {
                 type = "table",
-                column_count = 4,
+                column_count = 8,
                 children = buttons,
             }
             fs_util.add_gui(elem, def)
@@ -472,7 +473,7 @@ function handlers.make_production_line_table(event)
                     typed_name = ftn,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
-                        tags = {
+                    tags = {
                         line_index = line_index,
                         typed_name = ftn,
                         is_product = false,
@@ -924,6 +925,6 @@ return {
                 on_constraint_changed = handlers.make_getting_started_guide,
                 on_production_line_changed = handlers.make_getting_started_guide,
             },
-        }
+        },
     },
 }

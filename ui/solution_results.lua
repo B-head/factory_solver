@@ -334,12 +334,12 @@ fs_util.add_handlers(handlers)
 return {
     type = "frame",
     name = "solution_result",
-    style = "factory_solver_right_panel_half_frame",
+    style = "factory_solver_right_panel_result_frame",
     direction = "vertical",
     {
         type = "scroll-pane",
         name = "result_sections_scroll",
-        style = "factory_solver_right_panel_scroll_pane",
+        style = "factory_solver_right_panel_result_scroll_pane",
         horizontal_scroll_policy = "never",
         vertical_scroll_policy = "auto",
         handler = {
