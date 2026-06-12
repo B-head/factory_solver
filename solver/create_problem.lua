@@ -731,6 +731,7 @@ end
 ---@field reachability_soft_gate_k number?  SOFT gate (the shipped replacement for the hard reachability_gating): instead of denying the hatch to a reachable material, emit its |shortage_source| at elastic_cost * k (k >> 1), so running the chain beats the penalised import. Reproduces the gate as a cost using create_problem's OWN reachability verdict (active lines + deficit seeds + catalyst closure). k must stay below target_cost/elastic_cost (= 2^10) so a reachable shortage never undercuts target relaxation; the shipped value is 256. Applies only to reachable, non-deficit materials; unreachable materials keep the flat elastic_cost hatch (their import-vs-fabricate is observe_price's job via shortage_cost_overrides). nil leaves the hatch flat.
 ---@field shortage_cost_overrides table<string, number>?  Per-material multiplier on the |shortage_source| objective (cost = elastic_cost * mult), keyed by material variable name. Plain string-keyed table, storage-safe and deterministic. Applied regardless of gating and takes precedence over reachability_soft_gate_k. This is solver/observe_price's production channel: it reprices the unreachable self-sustaining catalyst shortages so the placed cycle fabricates instead of penalty-importing. Absent materials keep their gate/flat cost. nil leaves costs unchanged.
 ---@field shortage_cost_fn (fun(constraint_name: string, is_reachable: boolean): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. is_reachable is create_problem's OWN reachability verdict (the same set the gate uses: active lines + deficit seeds + catalyst closure), so a "soft gate" can lift only reachable materials and leave unreachable ones their cheap import hatch. The caller may also close over any precomputed signal (e.g. M.compute_reachability_depth). nil leaves the flat elastic_cost in place.
+---@field deficit_exclude table<string, true>?  Research only. Materials never to seed as deficits / closure primers, even when the heuristics pick them. Lets a probe ask the leave-one-out reachability question -- is a seeded material reachable WITHOUT its own seed (a seed otherwise extends reachability to itself, so the shipped build cannot answer it). The excluded material keeps its plain |shortage_source| hatch, so shortage_cost_fn fires for it and reports the leave-one-out verdict. nil excludes nothing.
 ---@field surplus_cost_fn (fun(constraint_name: string): number)?  Research only. Re-prices the |surplus_sink| (over-production / byproduct disposal) objective instead of the flat elastic_cost. Lowering surplus relative to shortage tests the "byproduct disposal is bookkeeping, not real economic cost" hypothesis: a chain whose cost is byproduct-dominated should beat the import, while a raw-dominated chain (genuine resource spend) is unaffected. nil leaves the flat elastic_cost in place.
 ---@field surplus_sink_gating boolean?   Default FALSE -- this is NOT shipped behaviour, a research probe (project_sink_side_reachability_gating). When on, gate |surplus_sink| on drainability (the backward dual of reachability): a material that can shed surplus to a free terminal sink loses its penalised over-production escape. Measured to change ~21% of the corpus and break convergence on a few, so it ships OFF; the switch only exists to reproduce that A/B. Off (default): every produced+consumed non-bridge material gets a |surplus_sink|.
 ---@field target_only_objective boolean?  Target-rescue stage 1 (manage/pre_solve.lua M.target_rescue_step): re-cost the finished build so the target elastics (cost 1) are the ONLY objective; recipe/bridge keep a tiny face regularizer so the optimal face stays bounded for the IPM, everything else is free. The solve's summed |elastic| is T_min -- the least target violation this build can structurally reach (mirrors the reference solver's lexicographic stage 1). Build-only switch: combine with target_budget on the NEXT build to lock the optimum in.
@@ -846,6 +847,13 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         end
     end
 
+    -- Research-only leave-one-out hole (see CreateProblemOptions): drop the
+    -- excluded materials from the seed set before reachability is derived.
+    local opt_deficit_exclude = options.deficit_exclude
+    if opt_deficit_exclude then
+        for name in pairs(opt_deficit_exclude) do deficits[name] = nil end
+    end
+
     local reachable = M.compute_reachable_materials(all_lines, deficits)
 
     -- Catalyst-loop closure (purely additive over the mass-losing deficits
@@ -865,6 +873,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         local pick = nil
         for name in pairs(seed_candidates) do
             if not reachable[name] and not deficits[name]
+                and not (opt_deficit_exclude and opt_deficit_exclude[name])
                 and (not pick or name < pick) then
                 pick = name
             end
