@@ -13,6 +13,7 @@ local handlers = {}
 ---@param event EventDataTrait
 function handlers.on_make_machine_table(event)
     local elem = event.element
+    local player_data = save.get_player_data(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
@@ -25,6 +26,10 @@ function handlers.on_make_machine_table(event)
         local typed_name = tn.craft_to_typed_name(machine)
         local is_hidden = acc.is_hidden(machine)
         local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
+
+        if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+            goto continue
+        end
 
         local def = common.create_decorated_sprite_button {
             typed_name = typed_name,
@@ -39,6 +44,7 @@ function handlers.on_make_machine_table(event)
             },
         }
         fs_util.add_gui(elem, def)
+        ::continue::
     end
 
     local no_machine_label = elem.parent.parent.no_machine_label
@@ -701,7 +707,8 @@ function handlers.on_make_total_effectivity(event)
     local recipe = tn.typed_name_to_recipe(recipe_typed_name)
     local module_typed_names = dialog.tags.module_typed_names --[[@as table<string, TypedName>]]
     local affected_by_beacons = dialog.tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
-    local total_modules = acc.get_total_modules(machine, machine_typed_name.quality, module_typed_names, affected_by_beacons)
+    local total_modules = acc.get_total_modules(machine, machine_typed_name.quality, module_typed_names,
+        affected_by_beacons)
     local split = acc.split_total_modules_by_effectiveness(recipe, machine, total_modules)
 
     elem.clear()
@@ -755,6 +762,7 @@ end
 ---@param event EventDataTrait
 function handlers.on_make_fuel_table(event)
     local elem = event.element
+    local player_data = save.get_player_data(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
     local dialog_tags = dialog.tags
@@ -797,10 +805,17 @@ function handlers.on_make_fuel_table(event)
 
         local function add_button(craft)
             local typed_name = tn.craft_to_typed_name(craft)
+            local is_hidden = acc.is_hidden(craft)
+            local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+
+            if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+                return
+            end
+
             local def = common.create_decorated_sprite_button {
                 typed_name = typed_name,
-                is_hidden = acc.is_hidden(craft),
-                is_unresearched = acc.is_unresearched(craft, relation_to_recipes),
+                is_hidden = is_hidden,
+                is_unresearched = is_unresearched,
                 tags = {
                     typed_name = typed_name,
                 },
@@ -945,6 +960,10 @@ return {
     {
         type = "frame",
         style = "inside_shallow_frame",
+        direction = "vertical",
+        style_mods = {
+            bottom_padding = 12,
+        },
         {
             type = "scroll-pane",
             style = "factory_solver_dialog_fit_scroll_pane",
@@ -978,6 +997,7 @@ return {
                     column_count = 6,
                     handler = {
                         on_added = handlers.on_make_machine_table,
+                        on_craft_visible_changed = handlers.on_make_machine_table,
                     },
                 },
             },
@@ -1163,6 +1183,7 @@ return {
                         column_count = 6,
                         handler = {
                             on_machine_setup_changed = handlers.on_make_fuel_table,
+                            on_craft_visible_changed = handlers.on_make_fuel_table,
                         },
                     },
                 },
@@ -1183,6 +1204,59 @@ return {
                         handler = {
                             on_fuel_setup_changed = handlers.on_make_fuel_quality_buttons,
                         },
+                    },
+                },
+            },
+        },
+        -- One craft-visibility control governs both the machine and fuel slot
+        -- tables in this dialog; toggling dispatches on_craft_visible_changed to
+        -- the root, which both tables listen for and rebuild from.
+        {
+            type = "flow",
+            style = "factory_solver_craft_visible_control_flow",
+            {
+                type = "table",
+                name = "craft_visible_control",
+                style = "factory_solver_craft_visible_control_table",
+                column_count = 2,
+                {
+                    type = "label",
+                    caption = { "factory-solver-unresearched" },
+                },
+                {
+                    type = "switch",
+                    name = "craft_visible_unresearched_switch",
+                    switch_state = "right",
+                    left_label_caption = { "factory-solver-show" },
+                    right_label_caption = { "factory-solver-hide" },
+                    tags = {
+                        root_gui = "factory_solver_machine_setups",
+                        state_name = "unresearched_craft_visible",
+                    },
+                    handler = {
+                        [defines.events.on_gui_switch_state_changed] = common
+                            .on_craft_visible_switch_state_changed,
+                        on_added = common.on_craft_visible_switch_added,
+                    },
+                },
+                {
+                    type = "label",
+                    caption = { "factory-solver-hidden" },
+                },
+                {
+                    type = "switch",
+                    name = "craft_visible_hidden_switch",
+                    switch_state = "right",
+                    left_label_caption = { "factory-solver-show" },
+                    right_label_caption = { "factory-solver-hide" },
+                    tags = {
+                        root_gui = "factory_solver_machine_setups",
+                        state_name = "hidden_craft_visible",
+                    },
+                    handler = {
+                        [defines.events.on_gui_switch_state_changed] = common
+                            .on_craft_visible_switch_state_changed,
+                        on_added = common.on_craft_visible_switch_added,
                     },
                 },
             },

@@ -14,6 +14,11 @@ Date: ????
       more machines than necessary (up to several times the minimum); these are
       now collapsed, so production lines list closer to the fewest machines that
       meet the targets. Throughput results are unchanged.
+  Gui:
+    - The machine and fuel pickers in the machine setup window, and every table in
+      the machine presets window, now carry the same "show / hide unresearched" and
+      "show / hide hidden" filter switches as the recipe and item pickers. Preset
+      rows left empty by the active filter are hidden.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.4
 Date: 2026-06-12

@@ -22,7 +22,14 @@ end
 function handlers.on_make_preset_tables(event)
     local elem = event.element
     local preset_type = elem.tags.preset_type
+    local player_data = save.get_player_data(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
+
+    -- This runs both on_added (initial build) and on_craft_visible_changed (filter
+    -- toggle), so it must clear prior rows first; otherwise every toggle appends a
+    -- fresh, unfiltered copy on top of the old one — the filter appears inert and
+    -- the table grows without bound.
+    elem.clear()
 
     local categories
     if preset_type == "fuel" then
@@ -56,14 +63,23 @@ function handlers.on_make_preset_tables(event)
         -- ingredient_count tiers, each its own row and key (preset.machine_preset_tiers).
         local rows
         if preset_type == "fuel" then
-            rows = { { key = category_name, caption = category_name,
-                crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]]) } }
+            rows = { {
+                key = category_name,
+                caption = category_name,
+                crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]])
+            } }
         elseif preset_type == "fluid_fuel" then
-            rows = { { key = category_name, caption = category_name,
-                crafts = acc.get_any_fluid_fuels() } }
+            rows = { {
+                key = category_name,
+                caption = category_name,
+                crafts = acc.get_any_fluid_fuels()
+            } }
         elseif preset_type == "resource" then
-            rows = { { key = category_name, caption = category_name,
-                crafts = acc.get_machines_in_resource_category(category_name) } }
+            rows = { {
+                key = category_name,
+                caption = category_name,
+                crafts = acc.get_machines_in_resource_category(category_name)
+            } }
         elseif preset_type == "machine" then
             -- Tier machine lists already exclude fixed_recipe machines: those are
             -- offered per-recipe, never as a category default.
@@ -78,14 +94,52 @@ function handlers.on_make_preset_tables(event)
             -- One row per recipe craftable only by >=2 fixed_recipe machines; key is
             -- the recipe name and the choices are exactly those fixed machines.
             local recipe = prototypes.recipe[category_name]
-            rows = { { key = category_name, caption = recipe.localised_name,
-                crafts = acc.get_machines_for_recipe(recipe) } }
+            rows = { {
+                key = category_name,
+                caption = recipe.localised_name,
+                crafts = acc.get_machines_for_recipe(recipe)
+            } }
         else
             assert()
         end
 
         for _, row in ipairs(rows) do
             if #row.crafts <= 1 then
+                goto continue_row
+            end
+
+            -- Build the buttons first so a row whose every choice is filtered out
+            -- by the visibility switches contributes nothing: no label and no empty
+            -- slot frame are emitted, and it does not count toward rows_emitted.
+            local def_buttons = {}
+            for _, craft in ipairs(row.crafts) do
+                local typed_name = tn.craft_to_typed_name(craft)
+                local is_hidden = acc.is_hidden(craft)
+                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+
+                if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+                    goto continue_button
+                end
+
+                local def = common.create_decorated_sprite_button {
+                    typed_name = typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
+                    tags = {
+                        typed_name = typed_name,
+                        category_name = row.key,
+                        preset_type = preset_type,
+                    },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_preset_button_click,
+                        on_preset_changed = handlers.on_preset_change_toggle,
+                    },
+                }
+                flib_table.insert(def_buttons, def)
+                ::continue_button::
+            end
+
+            if #def_buttons == 0 then
                 goto continue_row
             end
             rows_emitted = rows_emitted + 1
@@ -104,29 +158,6 @@ function handlers.on_make_preset_tables(event)
             end
 
             do
-                local def_buttons = {}
-                for _, craft in ipairs(row.crafts) do
-                    local typed_name = tn.craft_to_typed_name(craft)
-                    local is_hidden = acc.is_hidden(craft)
-                    local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
-
-                    local def = common.create_decorated_sprite_button {
-                        typed_name = typed_name,
-                        is_hidden = is_hidden,
-                        is_unresearched = is_unresearched,
-                        tags = {
-                            typed_name = typed_name,
-                            category_name = row.key,
-                            preset_type = preset_type,
-                        },
-                        handler = {
-                            [defines.events.on_gui_click] = handlers.on_preset_button_click,
-                            on_preset_changed = handlers.on_preset_change_toggle,
-                        },
-                    }
-                    flib_table.insert(def_buttons, def)
-                end
-
                 local def_table = {
                     type = "frame",
                     style = "factory_solver_slot_background_frame",
@@ -147,10 +178,12 @@ function handlers.on_make_preset_tables(event)
     -- The Fixed-recipe machines section is empty for vanilla and most mods (no
     -- recipe has >=2 fixed_recipe machines), so hide its whole frame rather than
     -- leave a bare heading. Its table is the only child of its section frame, so
-    -- hiding the parent is safe; the fuel section shares one frame across two
-    -- tables and is never empty, so it is not affected.
-    if preset_type == "fixed_recipe" and rows_emitted == 0 then
-        elem.parent.visible = false
+    -- toggling the parent is safe; the fuel section shares one frame across two
+    -- tables and is never empty, so it is not affected. Set both ways: a filter
+    -- switch can empty the section and a later toggle can repopulate it, so the
+    -- frame must be able to come back.
+    if preset_type == "fixed_recipe" then
+        elem.parent.visible = rows_emitted > 0
     end
 
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
@@ -262,6 +295,10 @@ return {
     {
         type = "frame",
         style = "inside_shallow_frame",
+        direction = "vertical",
+        style_mods = {
+            bottom_padding = 12,
+        },
         {
             type = "scroll-pane",
             style = "factory_solver_preset_scroll_pane",
@@ -286,6 +323,7 @@ return {
                     },
                     handler = {
                         on_added = handlers.on_make_preset_tables,
+                        on_craft_visible_changed = handlers.on_make_preset_tables,
                     },
                 },
                 {
@@ -297,6 +335,7 @@ return {
                     },
                     handler = {
                         on_added = handlers.on_make_preset_tables,
+                        on_craft_visible_changed = handlers.on_make_preset_tables,
                     },
                 },
             },
@@ -318,6 +357,7 @@ return {
                     },
                     handler = {
                         on_added = handlers.on_make_preset_tables,
+                        on_craft_visible_changed = handlers.on_make_preset_tables,
                     },
                 },
             },
@@ -339,6 +379,7 @@ return {
                     },
                     handler = {
                         on_added = handlers.on_make_preset_tables,
+                        on_craft_visible_changed = handlers.on_make_preset_tables,
                     },
                 },
             },
@@ -360,6 +401,60 @@ return {
                     },
                     handler = {
                         on_added = handlers.on_make_preset_tables,
+                        on_craft_visible_changed = handlers.on_make_preset_tables,
+                    },
+                },
+            },
+        },
+        -- One craft-visibility control governs all five preset tables; toggling
+        -- dispatches on_craft_visible_changed to the root, which every table listens
+        -- for and rebuilds from.
+        {
+            type = "flow",
+            style = "factory_solver_craft_visible_control_flow",
+            {
+                type = "table",
+                name = "craft_visible_control",
+                style = "factory_solver_craft_visible_control_table",
+                column_count = 2,
+                {
+                    type = "label",
+                    caption = { "factory-solver-unresearched" },
+                },
+                {
+                    type = "switch",
+                    name = "craft_visible_unresearched_switch",
+                    switch_state = "right",
+                    left_label_caption = { "factory-solver-show" },
+                    right_label_caption = { "factory-solver-hide" },
+                    tags = {
+                        root_gui = "factory_solver_machine_presets",
+                        state_name = "unresearched_craft_visible",
+                    },
+                    handler = {
+                        [defines.events.on_gui_switch_state_changed] = common
+                            .on_craft_visible_switch_state_changed,
+                        on_added = common.on_craft_visible_switch_added,
+                    },
+                },
+                {
+                    type = "label",
+                    caption = { "factory-solver-hidden" },
+                },
+                {
+                    type = "switch",
+                    name = "craft_visible_hidden_switch",
+                    switch_state = "right",
+                    left_label_caption = { "factory-solver-show" },
+                    right_label_caption = { "factory-solver-hide" },
+                    tags = {
+                        root_gui = "factory_solver_machine_presets",
+                        state_name = "hidden_craft_visible",
+                    },
+                    handler = {
+                        [defines.events.on_gui_switch_state_changed] = common
+                            .on_craft_visible_switch_state_changed,
+                        on_added = common.on_craft_visible_switch_added,
                     },
                 },
             },
