@@ -64,6 +64,7 @@ end
 -- LuaFileSystem available portably.
 local case_files = {
     "csr_basics",
+    "bareiss",
     "lp_direct",
     "lp_short_loop",
     "lp_quality_cascade",

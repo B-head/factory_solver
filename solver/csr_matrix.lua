@@ -616,6 +616,215 @@ function M.to_list_of_list(matrix)
     return matrix.width, list_of_values, list_of_column_indexes
 end
 
+---Reference implementation.
+---@param matrix CsrMatrix
+---@param augment_column CsrMatrix?
+---@return CsrMatrix
+function M.bareiss_algorithm_reference(matrix, augment_column)
+    local raw_matrix = M.to_matrix(matrix)
+    local height, width = #matrix.row_ranges - 1, matrix.width
+
+    if augment_column then
+        local aug = augment_column:to_list()
+        for y = 1, #aug do
+            table.insert(raw_matrix[y], 1, aug[y])
+        end
+        width = width + 1
+    end
+
+    local prev_kk, py = 1, height
+    for px = width, 1, -1 do
+        local max_pivot = 0
+        local mpy = int_max
+        for y = 1, py do
+            local a = math.abs(raw_matrix[y][px])
+            if max_pivot < a then
+                max_pivot = a
+                mpy = y
+            end
+        end
+
+        if max_pivot == 0 then
+            goto continue
+        end
+
+        raw_matrix[py], raw_matrix[mpy] = raw_matrix[mpy], raw_matrix[py]
+
+        for y = 1, py - 1 do
+            for x = 1, px - 1 do
+                raw_matrix[y][x] = (raw_matrix[y][x] * raw_matrix[py][px] -
+                    raw_matrix[y][px] * raw_matrix[py][x]) / prev_kk
+            end
+            raw_matrix[y][px] = 0
+        end
+        prev_kk = raw_matrix[py][px]
+
+        py = py - 1
+        if py == 1 then
+            break
+        end
+        ::continue::
+    end
+    return M.from_matrix(raw_matrix)
+end
+
+---Reference implementation.
+---@param matrix CsrMatrix
+---@param tolerance number
+---@return CsrMatrix
+function M.reduce_echelon_reference(matrix, tolerance)
+    local raw_matrix = M.to_matrix(matrix)
+    local height, width = #matrix.row_ranges - 1, matrix.width
+
+    local py = height
+    for px = width, 1, -1 do
+        if raw_matrix[py][px] == 0 then
+            goto continue
+        end
+
+        for y = py + 1, height do
+            if raw_matrix[y][px] ~= 0 then
+                local m = raw_matrix[y][px] / raw_matrix[py][px]
+                for x = 1, px - 1 do
+                    raw_matrix[y][x] = raw_matrix[y][x] - raw_matrix[py][x] * m
+                end
+            end
+            raw_matrix[y][px] = 0
+        end
+
+        py = py - 1
+        if py == 0 then
+            break
+        end
+        ::continue::
+    end
+
+    py = height
+    for px = width, 1, -1 do
+        if raw_matrix[py][px] == 0 then
+            goto continue
+        end
+
+        for x = 1, px - 1 do
+            local a = raw_matrix[py][x] / raw_matrix[py][px]
+            raw_matrix[py][x] = (math.abs(a) < tolerance) and 0 or a
+        end
+        raw_matrix[py][px] = 1
+
+        py = py - 1
+        if py == 0 then
+            break
+        end
+        ::continue::
+    end
+
+    return M.from_matrix(raw_matrix)
+end
+
+---Reduce the matrix into reduced row echelon form.
+---@param matrix CsrMatrix
+---@param augment_column CsrMatrix
+---@return CsrMatrix, CsrMatrix
+function M.bareiss_algorithm(matrix, augment_column)
+    local width, list_of_values, list_of_column_indexes = M.to_list_of_list(matrix)
+    local ac, height, abs = M.to_list(augment_column), #list_of_values, math.abs
+    assert(#ac == height)
+
+    local tail_indexes = {}
+    for y = 1, height do
+        tail_indexes[y] = #list_of_values[y]
+    end
+
+    local max_pivot = 0
+    local mpy = int_max
+    local prev_kk = 1
+    local pivot_next_column = width
+    for k = height, 2, -1 do
+        while mpy == int_max do
+            for y = 1, k do
+                local ti = tail_indexes[y]
+                local v, c = list_of_values[y], list_of_column_indexes[y]
+
+                if c[ti] == pivot_next_column then
+                    local a = abs(v[ti])
+                    if max_pivot < a then
+                        max_pivot = a
+                        mpy = y
+                    end
+                end
+            end
+
+            pivot_next_column = pivot_next_column - 1
+            if pivot_next_column == 0 then
+                goto break_all
+            end
+        end
+
+        list_of_values[k], list_of_values[mpy] = list_of_values[mpy], list_of_values[k]
+        list_of_column_indexes[k], list_of_column_indexes[mpy] = list_of_column_indexes[mpy], list_of_column_indexes[k]
+        tail_indexes[k], tail_indexes[mpy] = tail_indexes[mpy], tail_indexes[k]
+        ac[k], ac[mpy] = ac[mpy], ac[k]
+
+        max_pivot = 0
+        mpy = int_max
+
+        local kv, kc = list_of_values[k], list_of_column_indexes[k]
+        local kk = kv[tail_indexes[k]]
+        for y = 1, k - 1 do
+            local ti = tail_indexes[y]
+            local v, c = list_of_values[y], list_of_column_indexes[y]
+
+            if c[ti] == pivot_next_column + 1 then
+                local yk = v[ti]
+                v[ti], c[ti] = nil, nil
+                ti = ti - 1
+                tail_indexes[y] = ti
+
+                local ki = 1
+                local kci = kc[ki] or int_max
+                for i = 1, ti do
+                    local kx = 0
+                    local yci = c[i]
+                    while kci <= yci do
+                        if kci == yci then
+                            kx = kv[ki]
+                        end
+                        ki = ki + 1
+                        kci = kc[ki] or int_max
+                    end
+
+                    v[i] = (v[i] * kk - yk * kx) / prev_kk
+                end
+
+                ac[y] = (ac[y] * kk - yk * ac[k]) / prev_kk
+            else
+                for xi = 1, ti do
+                    v[xi] = (v[xi] * kk) / prev_kk
+                end
+
+                ac[y] = (ac[y] * kk) / prev_kk
+            end
+
+            if c[ti] == pivot_next_column then
+                local a = abs(v[ti])
+                if max_pivot < a then
+                    max_pivot = a
+                    mpy = y
+                end
+            end
+        end
+
+        prev_kk = kk
+        pivot_next_column = pivot_next_column - 1
+        if pivot_next_column == 0 then
+            goto break_all
+        end
+    end
+
+    ::break_all::
+    return M.from_list_of_list(width, list_of_values, list_of_column_indexes), M.with_vector(ac)
+end
+
 ---LDL decomposition of the symmetric matrix.
 ---@param symmetric_matrix CsrMatrix
 ---@return CsrMatrix, CsrMatrix
@@ -770,6 +979,52 @@ function M.backward_substitution(upper_triangular_matrix, augment_column)
         end
 
         solved[y] = (augment_column_list[y] - sum) / values[is]
+    end
+
+    return M.with_vector(solved)
+end
+
+---Use matrix of lower echelon form to solve linear equations.
+---@param lower_echelon_form CsrMatrix
+---@return CsrMatrix
+function M.extra_substitution(lower_echelon_form)
+    local solved = {}
+
+    local values = lower_echelon_form.values
+    local column_indexes = lower_echelon_form.column_indexes
+    local row_ranges = lower_echelon_form.row_ranges
+    local height, width = #row_ranges - 1, lower_echelon_form.width
+
+    local y = 1
+    while row_ranges[y] == row_ranges[y + 1] do
+        y = y + 1
+    end
+
+    for x = 1, width do
+        local sum = 0
+        local is, ie = row_ranges[y], row_ranges[y + 1]
+
+        if x ~= column_indexes[ie - 1] then
+            solved[x] = 1
+            goto continue
+        end
+
+        for i = is, ie - 2 do
+            local u = column_indexes[i]
+            sum = sum + values[i] * solved[u]
+        end
+
+        if is == ie - 1 then
+            solved[x] = 1
+        else
+            solved[x] = (0 - sum) / values[ie - 1]
+        end
+
+        y = y + 1
+        if y > height then
+            break
+        end
+        ::continue::
     end
 
     return M.with_vector(solved)
