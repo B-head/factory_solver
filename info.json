@@ -1,6 +1,6 @@
 {
     "name": "factory_solver",
-    "version": "0.6.4",
+    "version": "0.6.5",
     "title": "Factory solver based on IPMs for LP",
     "author": "B_head",
     "description": "The Factorio calculator. Calculate the quantities of machines and ingredients required in a factory to hit your target production rate.",
