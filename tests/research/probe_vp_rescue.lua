@@ -61,16 +61,34 @@
 --                 into BOTH Vf builds even when the Vp rescue never fired
 --                 (lock at the current level): a free P hatch would be the
 --                 next tier's whack-a-mole hole.
---   FS_VC         off (default) | oracle | flat   Vc rescue = reference stage
---                 2c ("consume what you can without buying extra imports for
---                 it"): under the target + Vp + Vf budgets (the Vf lock is
---                 threaded even when the Vf stage never fired), minimize the
---                 priced surplus, lock, re-solve at ship costs. oracle =
---                 price only the reference's consumable materials; flat =
---                 price every |surplus_sink| with no classification (a
---                 non-consumable dump cannot shrink under the import locks
---                 anyway); the flat-vs-oracle gap measures whether a
---                 consumability classifier is needed at all.
+--   FS_VC         off (default) | oracle | flat | mini   Vc rescue =
+--                 reference stage 2c ("consume what you can without buying
+--                 extra imports for it"): under the target + Vp + Vf budgets
+--                 (the Vf lock is threaded even when the Vf stage never
+--                 fired), minimize the priced surplus, lock, re-solve at ship
+--                 costs. oracle = price only the reference's consumable
+--                 materials; flat = price every |surplus_sink| with no
+--                 classification (a non-consumable dump cannot shrink under
+--                 the import locks anyway); the flat-vs-oracle gap measured
+--                 whether a consumability classifier is needed at all -- it
+--                 is (flat leaves 83 of the 169 tier2c losses: cutting a
+--                 consumable dump sometimes must GROW a non-consumable one,
+--                 and flat's pricing refuses that trade).
+--                 mini = the consumability MIRROR of the reference's joint
+--                 fixpoint on the surplus side (inject one unit of M;
+--                 consumable iff the lines net-absorb it without dumping M
+--                 itself), prescreen-accelerated over the FULL sink
+--                 universe: one joint prescreen replaces the reference's
+--                 per-material phase 1, violators pay the individual
+--                 screen, then joint demote-one + promotion exactly as the
+--                 reference. Unlike the Vp classifier the universe must NOT
+--                 be restricted to the flowing dumps: the demote-one's
+--                 whack-a-mole victim selection is jointly coupled across
+--                 ALL sinks, and a partial universe both over-demotes
+--                 (collateral of doomed co-demands it cannot demote -- the
+--                 missing holes the stage then dumps through at zero price)
+--                 and under-demotes (ties whose partner is outside) -- see
+--                 the rescue_vc comment for the measured failure modes.
 --   FS_VP_CLASS   approx (default) | oracle | mini | miniflat
 --                 oracle = the reference's producible set as P-approx: the
 --                 mechanism's ceiling with a perfect classifier.
@@ -123,7 +141,7 @@ local VC = (os.getenv("FS_VC") or "off"):lower()
 assert(CONFIG == "observer" or CONFIG == "hardgate", "FS_VP_CONFIG must be observer|hardgate")
 assert(CLASS == "approx" or CLASS == "oracle" or CLASS == "mini" or CLASS == "miniflat",
     "FS_VP_CLASS must be approx|oracle|mini|miniflat")
-assert(VC == "off" or VC == "oracle" or VC == "flat", "FS_VC must be off|oracle|flat")
+assert(VC == "off" or VC == "oracle" or VC == "flat" or VC == "mini", "FS_VC must be off|oracle|flat|mini")
 
 local TOL, ITER = 1e-7, 800
 local SOFT_GATE_K = 256
@@ -254,17 +272,20 @@ local function compute_p_approx(constraints, lines, intermediates)
 end
 
 ---One synthetic-demand test solve on the unseeded build: price `priced_set`
----hatches at 1, recipes/bridges at the face EPS, ALL else free (verbatim
----reference probe mechanics -- a graduated outsider price was tried and
----contaminates the verdict at mass scale ~1/delta, so outsiders stay free and
----partner discovery is the rescue loop's job, not the test's). Demands one
----unit of each `demand_list` material; returns the per-material own-shortage
----residuals over priced_set (nil = unfinished).
-local function fix_test(constraints, lines, priced_set, demand_list)
+---escapes of `priced_kind` at 1, recipes/bridges at the face EPS, ALL else
+---free (verbatim reference probe mechanics -- a graduated outsider price was
+---tried and contaminates the verdict at mass scale ~1/delta, so outsiders
+---stay free and partner discovery is the rescue loop's job, not the test's).
+---(priced_kind, demand_sign) selects the mirror, exactly as the reference's
+---shared fixpoint engine: ("shortage_source", -1) asks producibility (a sink
+---demanding one net-produced unit), ("surplus_sink", +1) asks consumability
+---(a source injecting one unit to net-absorb). Returns the per-material
+---own-escape residuals over priced_set (nil = unfinished).
+local function fix_test(constraints, lines, priced_set, demand_list, priced_kind, demand_sign)
     local ok0, p = pcall(create_problem.create_problem, "vp_fixtest", constraints, lines, nil, ref.OPTS)
     if not ok0 then return nil end
     for _, pr in pairs(p.primals) do
-        if pr.kind == "shortage_source" and priced_set[pr.material] then
+        if pr.kind == priced_kind and priced_set[pr.material] then
             pr.cost = 1
         elseif pr.kind == "recipe" or pr.kind == "bridge" then
             pr.cost = EPS_RECIPE
@@ -275,7 +296,7 @@ local function fix_test(constraints, lines, priced_set, demand_list)
     for _, mat in ipairs(demand_list) do
         local probe = "|vp_fixtest_probe|" .. mat
         p:add_objective(probe, 0, false, nil, mat)
-        p:add_subject_term(probe, mat, -1)
+        p:add_subject_term(probe, mat, demand_sign)
         local dual = "|vp_fixtest_demand|" .. mat
         p:add_lower_limit_constraint(dual, 1)
         p:add_subject_term(probe, dual, 1)
@@ -284,7 +305,7 @@ local function fix_test(constraints, lines, priced_set, demand_list)
     if not ok or s ~= "finished" then return nil end
     local own = {}
     for key, pr in pairs(p.primals) do
-        if pr.kind == "shortage_source" and pr.material and priced_set[pr.material] then
+        if pr.kind == priced_kind and pr.material and priced_set[pr.material] then
             own[pr.material] = (own[pr.material] or 0) + math.abs(v.x[key] or 0)
         end
     end
@@ -305,51 +326,80 @@ end
 ---set is exactly the joint-clean set, and the member-only joint is an EASIER
 ---test than the prescreen that already proved them clean, so phase 2 is
 ---skipped outright. Phase 3 promotion sweeps as in the reference. Returns
----the member set and the solve count spent this call.
-local function fixpoint_over(constraints, lines, U, p1)
+---the member set and the solve count spent this call. (priced_kind,
+---demand_sign) selects the producibility / consumability mirror (see
+---fix_test); the verdict cache `p1` must be per-mirror (the caller owns it).
+local function fixpoint_over(constraints, lines, U, p1, priced_kind, demand_sign)
     local mats = {}
     for m in pairs(U) do mats[#mats + 1] = m end
     table.sort(mats)
 
+    local TRACE = os.getenv("FS_FIX_TRACE") ~= nil
+    local function trace(fmt, ...) if TRACE then io.stderr:write(("[fix %s] "):format(priced_kind) .. fmt:format(...) .. "\n") end end
+
     local solves = 0
     local function run(priced_set, demand_list)
         solves = solves + 1
-        return fix_test(constraints, lines, priced_set, demand_list)
+        return fix_test(constraints, lines, priced_set, demand_list, priced_kind, demand_sign)
     end
 
     local function individual(mat)
         if p1[mat] == nil then
             local own = run({ [mat] = true }, { mat })
             p1[mat] = { pass = own ~= nil and (own[mat] or 0) <= FIX_TOL }
+            trace("individual %s %s (own=%s)", mat, p1[mat].pass and "PASS" or "FAIL",
+                own and tostring(own[mat] or 0) or "unfinished")
         end
         return p1[mat].pass
     end
 
-    -- Joint prescreen standing in for phase 1. A singleton universe skips
-    -- it: the joint over one material IS its individual test (and the
-    -- individual path caches the verdict for later universe growth).
+    -- Phase 1. For the producibility mirror a joint PRESCREEN stands in:
+    -- the joint prices and demands a superset of the individual test, so
+    -- joint-clean is the harder certificate, and only the violators pay the
+    -- individual screen. For the consumability mirror the prescreen is
+    -- unsound in BOTH directions -- a joint injection is free supply to the
+    -- other members' absorption chains (seed_104: two reference-
+    -- non-consumable sinks read clean in every joint, only the true
+    -- individual catches them), while co-pricing closes escape routes
+    -- (seed_88's hydrogen-chloride reads own=2 in a partial joint yet
+    -- passes individually) -- so there the reference's real per-material
+    -- phase 1 runs, and demote-one always follows. The flowing-restricted /
+    -- prescreen-accelerated economies of the Vp classifier are all unsound
+    -- on the surplus side; what remains IS the reference fixpoint, paid in
+    -- full -- but it depends only on the problem STRUCTURE (not the target
+    -- or the solution), so a shipped implementation computes it once per
+    -- recipe set and caches.
     local members, coupled = {}, false
     if #mats == 1 then
         if individual(mats[1]) then members[mats[1]] = true end
         return members, solves
     end
-    local own0 = run(U, mats)
-    if own0 then
-        for _, mat in ipairs(mats) do
-            if (own0[mat] or 0) <= FIX_TOL then
-                members[mat] = true
-            elseif individual(mat) then
-                members[mat] = true
-                coupled = true
-            end
-        end
-    else
-        -- Prescreen unfinished: fall back to full individual screening, and
-        -- run phase 2 since no joint certificate exists.
+    if demand_sign > 0 then
         for _, mat in ipairs(mats) do
             if individual(mat) then members[mat] = true end
         end
-        coupled = true
+        coupled = true -- demote-one always runs (reference-faithful)
+    else
+        local own0 = run(U, mats)
+        if own0 then
+            for _, mat in ipairs(mats) do
+                if (own0[mat] or 0) <= FIX_TOL then
+                    members[mat] = true
+                    trace("prescreen clean %s (own=%g)", mat, own0[mat] or 0)
+                elseif individual(mat) then
+                    members[mat] = true
+                    coupled = true
+                    trace("prescreen violator %s re-joins via individual", mat)
+                end
+            end
+        else
+            -- Prescreen unfinished: fall back to full individual screening,
+            -- and run phase 2 since no joint certificate exists.
+            for _, mat in ipairs(mats) do
+                if individual(mat) then members[mat] = true end
+            end
+            coupled = true
+        end
     end
 
     local function member_list(set)
@@ -364,7 +414,8 @@ local function fixpoint_over(constraints, lines, U, p1)
     end
 
     -- Phase 2: joint demote-one, only when a coupled violator re-joined
-    -- (couples need >= 2; otherwise the prescreen certificate stands).
+    -- (couples need >= 2; otherwise the prescreen certificate stands). The
+    -- consumability mirror sets `coupled` unconditionally above.
     local tie_demoted = {}
     if coupled and count(members) >= 2 then
         for _ = 1, #mats + 1 do
@@ -376,6 +427,7 @@ local function fixpoint_over(constraints, lines, U, p1)
                 if members[mat] and amt > wamt then worst, wamt = mat, amt end
             end
             if not worst then break end
+            trace("phase2 demote %s (own=%g)", worst, wamt)
             members[worst] = nil
             tie_demoted[#tie_demoted + 1] = worst
         end
@@ -394,7 +446,10 @@ local function fixpoint_over(constraints, lines, U, p1)
                     for m in pairs(trial) do
                         if (own[m] or 0) > FIX_TOL then clean = false; break end
                     end
-                    if clean then members[mat] = true; promoted = true end
+                    if clean then
+                        members[mat] = true; promoted = true
+                        trace("phase3 promote %s", mat)
+                    end
                 end
             end
         end
@@ -425,7 +480,7 @@ local function classify_miniflat(constraints, lines, intermediates, prob, x0)
     local U = {}
     for m in pairs(flowing) do U[m] = true end
     local p1 = {}
-    local members, fp_solves = fixpoint_over(constraints, lines, U, p1)
+    local members, fp_solves = fixpoint_over(constraints, lines, U, p1, "shortage_source", -1)
 
     local F, n_flow = {}, 0
     for m in pairs(flowing) do F[#F + 1] = m; n_flow = n_flow + 1 end
@@ -584,23 +639,12 @@ end
 ---price of GROWING a non-consumable one (the reference takes that trade, a
 ---flat objective refuses it when the growth exceeds the cut) -- the
 ---flat-vs-oracle corpus gap measures exactly how much that matters, i.e.
----whether a consumability classifier is needed at all.
+---whether a consumability classifier is needed at all. FS_VC=mini replaces
+---the oracle with the ship-side reference fixpoint over the full sink
+---universe (see the FS_VC header note and the inline comment below for why
+---nothing cheaper survives).
 local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
     if VC == "off" then return prob, x end
-    local priced = {}
-    for key, pr in pairs(prob.primals) do
-        if pr.kind == "surplus_sink"
-            and (VC == "flat" or (consumable and pr.material and consumable[pr.material])) then
-            priced[#priced + 1] = key
-        end
-    end
-    table.sort(priced)
-    r.n_vcpriced = #priced
-
-    local vc0 = 0
-    for _, key in ipairs(priced) do vc0 = vc0 + math.abs(x[key] or 0) end
-    r.vc0 = vc0
-    if #priced == 0 or vc0 <= VP_TRIGGER then return prob, x end
 
     local function with_locks(p)
         if not p then return p end
@@ -616,6 +660,79 @@ local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
         end
         return p
     end
+
+    local entries = {}
+    for key, pr in pairs(prob.primals) do
+        if pr.kind == "surplus_sink" and pr.material then
+            entries[#entries + 1] = { key = key, material = pr.material }
+        end
+    end
+    table.sort(entries, function(a, b) return a.key < b.key end)
+
+    local priced = {}
+    if VC == "mini" then
+        -- The consumability mirror (see the FS_VC header note). Trigger
+        -- pre-check on the FLAT sum first: the priced subset can only be
+        -- smaller, so below the trigger the adjudication is not worth its
+        -- solves (vc0 then reports the flat upper bound).
+        local flat0, seen_flow = 0, {}
+        r.n_vcflow = 0
+        for _, e in ipairs(entries) do
+            flat0 = flat0 + math.abs(x[e.key] or 0)
+            if not seen_flow[e.material] and math.abs(x[e.key] or 0) > FLOW_TH then
+                seen_flow[e.material] = true
+                r.n_vcflow = r.n_vcflow + 1
+            end
+        end
+        if flat0 <= VP_TRIGGER or r.n_vcflow == 0 then r.vc0 = flat0; return prob, x end
+
+        -- The universe is EVERY sink material, not the flowing subset, and
+        -- fixpoint_over runs the reference's real per-material phase 1 for
+        -- this mirror (see its phase-1 note). The cheaper variants were
+        -- built and measured first and each failure mode was traced:
+        -- flowing-restricted + support probe + never-flowed priced
+        -- wholesale = tier2c 169 -> 30 with 4 outright regressions (partial
+        -- universe mis-demotes: seed_88's hydrogen-chloride is collateral
+        -- of a doomed co-demand the partial universe cannot demote, becomes
+        -- a zero-price hole, and the stage dumps 78 units through it); a
+        -- co-demand CONTEXT variant (outsiders demanded but not demotable)
+        -- leaves that trace bit-identical (the fix requires DEMOTING the
+        -- doomed outsider); a full-universe joint prescreen still admits
+        -- reference-non-consumable sinks (seed_104) because the injection
+        -- joint is generous in a way no member subset cures. Full universe
+        -- with real phase 1 retires the support probe, the wholesale
+        -- never-flowed pricing, and both misclassification directions; the
+        -- cost scales with the sink count, but the fixpoint depends only on
+        -- the problem structure, so a shipped implementation computes it
+        -- once per recipe set and caches (storage), not per solve.
+        local U = {}
+        for _, e in ipairs(entries) do U[e.material] = true end
+
+        local p1 = {}
+        local members, fp = fixpoint_over(constraints, lines, U, p1, "surplus_sink", 1)
+        r.vcfp_solves = r.vcfp_solves + fp
+        r.solves = r.solves + fp
+
+        for _, e in ipairs(entries) do
+            if members[e.material] then priced[#priced + 1] = e.key end
+        end
+        local F = set_to_list(U)
+        r.n_vcuniv = #F
+        r.vc_cls_info = { F = F, members = members }
+    else
+        for _, e in ipairs(entries) do
+            if VC == "flat" or (consumable and consumable[e.material]) then
+                priced[#priced + 1] = e.key
+            end
+        end
+    end
+    table.sort(priced)
+    r.n_vcpriced = #priced
+
+    local vc0 = 0
+    for _, key in ipairs(priced) do vc0 = vc0 + math.abs(x[key] or 0) end
+    r.vc0 = vc0
+    if #priced == 0 or vc0 <= VP_TRIGGER then return prob, x end
 
     -- Stage: the priced surplus as the only objective under all prior budgets.
     local p1 = with_locks(build_ship(constraints, lines, t_limit))
@@ -686,7 +803,7 @@ local function rescue_vp_mini(constraints, lines, intermediates, prob0, x0, t_li
     if r.n_flow == 0 then return prob0, x0 end
 
     local p1 = {}
-    local members, fp = fixpoint_over(constraints, lines, U, p1)
+    local members, fp = fixpoint_over(constraints, lines, U, p1, "shortage_source", -1)
     r.fp_solves = r.fp_solves + fp
     r.solves = r.solves + fp
 
@@ -718,7 +835,7 @@ local function rescue_vp_mini(constraints, lines, intermediates, prob0, x0, t_li
                     end
                 end
                 if grew then
-                    members, fp = fixpoint_over(constraints, lines, U, p1)
+                    members, fp = fixpoint_over(constraints, lines, U, p1, "shortage_source", -1)
                     r.fp_solves = r.fp_solves + fp
                     r.solves = r.solves + fp
                 end
@@ -769,7 +886,8 @@ local function solve_shipped(constraints, lines, intermediates, classify, consum
     local r = { solves = 1, rescued = 0, tmin = -1, vp_rescued = 0, vpmin = -1, vp0 = -1,
         n_priced = 0, n_flow = -1, fp_solves = 0, n_univ = -1,
         vf_rescued = 0, vfmin = -1, vf0 = -1, n_makeup = 0,
-        vc_rescued = 0, vcmin = -1, vc0 = -1, n_vcpriced = 0 }
+        vc_rescued = 0, vcmin = -1, vc0 = -1, n_vcpriced = 0,
+        n_vcflow = -1, vcfp_solves = 0, n_vcuniv = -1 }
     local prob, state, x0, s0 = build_solve_ship(constraints, lines, nil)
     if state ~= "finished" or not x0 then return nil, state, nil, r end
 
@@ -828,7 +946,8 @@ local COLS = { "label", "n_mats", "ref_state", "T_ref", "Vp_ref", "Vc_ref", "Vf_
     "rescued", "T_min", "vp_rescued", "Vp_min", "Vp0", "n_priced", "cls_extra", "cls_missing",
     "n_flow", "fp_solves", "clsF_extra", "clsF_missing", "n_univ",
     "vf_rescued", "Vf_min", "Vf0", "n_makeup",
-    "vc_rescued", "Vc_min", "Vc0", "n_vcpriced" }
+    "vc_rescued", "Vc_min", "Vc0", "n_vcpriced",
+    "n_vcflow", "vcfp_solves", "n_vcuniv", "clsC_extra", "clsC_missing" }
 
 local function process(prob, label, path, emit)
     local intermediates = ref.intermediates(prob.normalized_lines)
@@ -902,6 +1021,18 @@ local function process(prob, label, path, emit)
         end
     end
 
+    -- Vc mini classifier: the same diff against the reference's consumable
+    -- set, over the dump universe it adjudicated.
+    local clsC_extra, clsC_missing = -1, -1
+    if info.vc_cls_info and info.vc_cls_info.F then
+        clsC_extra, clsC_missing = 0, 0
+        for _, m in ipairs(info.vc_cls_info.F) do
+            local ca, cr = info.vc_cls_info.members[m] == true, consumable[m] == true
+            if ca and not cr then clsC_extra = clsC_extra + 1 end
+            if cr and not ca then clsC_missing = clsC_missing + 1 end
+        end
+    end
+
     emit({ label = label, n_mats = entry.n_mats, ref_state = entry.state, T_ref = entry.T, Vp_ref = entry.Vp,
         Vc_ref = entry.Vc, Vf_ref = entry.Vf, M_ref = entry.M, S_ref = entry.S, Nv_ref = entry.Nv,
         ref_steps = entry.steps, ref_cached = cached and 1 or 0,
@@ -913,7 +1044,9 @@ local function process(prob, label, path, emit)
         n_flow = info.n_flow, fp_solves = info.fp_solves,
         clsF_extra = clsF_extra, clsF_missing = clsF_missing, n_univ = info.n_univ,
         vf_rescued = info.vf_rescued, Vf_min = info.vfmin, Vf0 = info.vf0, n_makeup = info.n_makeup,
-        vc_rescued = info.vc_rescued, Vc_min = info.vcmin, Vc0 = info.vc0, n_vcpriced = info.n_vcpriced })
+        vc_rescued = info.vc_rescued, Vc_min = info.vcmin, Vc0 = info.vc0, n_vcpriced = info.n_vcpriced,
+        n_vcflow = info.n_vcflow, vcfp_solves = info.vcfp_solves, n_vcuniv = info.n_vcuniv,
+        clsC_extra = clsC_extra, clsC_missing = clsC_missing })
 end
 
 -- ---- main -------------------------------------------------------------------
