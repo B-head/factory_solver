@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.4
 Date: ????
-  Changes:
+  Bugfixes:
+    - Order recipes from a Helmod import by their intended row order
+      (product-first) instead of an arbitrary one, so an imported production
+      line keeps the same layout as in Helmod.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.3
 Date: 2026-06-11
