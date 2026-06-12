@@ -122,8 +122,10 @@ function handlers.on_make_constraint_picker(event)
     -- case for non-Latin scripts too (string.lower is ASCII-only). The display
     -- name comes from the flib dictionary keyed by filter type; it returns nil
     -- until the player's language finishes translating, so we degrade to
-    -- name-only filtering meanwhile.
-    local raw_filter = player_data.constraint_filter_text or ""
+    -- name-only filtering meanwhile. The filter string is dialog-local (not
+    -- persisted): it lives in the root frame's tags and resets on every open.
+    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_constraint_adder"))
+    local raw_filter = dialog.tags.filter_text --[[@as string?]] or ""
     local needle = (raw_filter ~= "") and helpers.multilingual_to_lower(raw_filter) or ""
     local dict_name = (filter_type == "item" and "item")
         or (filter_type == "fluid" and "fluid")
@@ -327,18 +329,13 @@ function handlers.on_constraint_picker_button_click(event)
     end
 end
 
----@param event EventDataTrait
-function handlers.on_init_constraint_filter_textfield(event)
-    local player_data = save.get_player_data(event.player_index)
-    event.element.text = player_data.constraint_filter_text or ""
-end
-
 ---@param event EventData.on_gui_text_changed
 function handlers.on_constraint_filter_textfield_changed(event)
-    local player_data = save.get_player_data(event.player_index)
-    player_data.constraint_filter_text = event.element.text
-
     local root = assert(fs_util.find_upper(event.element, "factory_solver_constraint_adder"))
+    local root_tags = root.tags
+    root_tags.filter_text = event.element.text
+    root.tags = root_tags
+
     fs_util.dispatch_to_subtree(root, "on_filter_text_changed")
 end
 
@@ -376,12 +373,22 @@ return {
         {
             type = "textfield",
             name = "constraint_filter_textfield",
-            style = "factory_solver_name_filter_textfield",
+            style = "flib_titlebar_search_textfield",
+            visible = false,
             clear_and_focus_on_right_click = true,
             tooltip = { "factory-solver-name-filter-tooltip" },
             handler = {
-                on_added = handlers.on_init_constraint_filter_textfield,
                 [defines.events.on_gui_text_changed] = handlers.on_constraint_filter_textfield_changed,
+            },
+        },
+        {
+            type = "sprite-button",
+            style = "frame_action_button",
+            sprite = "utility/search",
+            hovered_sprite = "utility/search",
+            clicked_sprite = "utility/search",
+            handler = {
+                [defines.events.on_gui_click] = common.on_toggle_name_filter,
             },
         },
         {

@@ -45,7 +45,6 @@ __factory_solver__storage = {}
 ---@field selected_filter_group table<FilterTab, string>
 ---@field unresearched_craft_visible boolean
 ---@field hidden_craft_visible boolean
----@field constraint_filter_text string
 ---@field time_scale TimeScale
 ---@field amount_unit AmountUnit
 ---@field presets Presets

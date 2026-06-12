@@ -726,6 +726,46 @@ function M.on_craft_visible_switch_state_changed(event)
     fs_util.dispatch_to_subtree(root, "on_craft_visible_changed")
 end
 
+---Toggle the title-bar name-filter textfield's visibility. Shared by the
+---constraint and production-line adders: the search button sits in the title bar
+---next to the textfield, and the textfield starts hidden every time the dialog
+---opens (no persisted filter). Showing it focuses the field so the player can
+---type immediately; hiding it clears any active filter and re-renders the picker
+---so a hidden field never silently constrains the results. Both dialogs keep the
+---filter string in their root frame's `tags.filter_text` and rebuild on
+---`on_filter_text_changed`, so this handler can drive either one. The root frame
+---is the title bar's parent; the textfield is the title bar's only textfield.
+---@param event EventData.on_gui_click
+function M.on_toggle_name_filter(event)
+    local button = event.element
+    local title_bar = button.parent
+    local root = title_bar.parent
+
+    local textfield
+    for _, sibling in pairs(title_bar.children) do
+        if sibling.type == "textfield" then
+            textfield = sibling
+            break
+        end
+    end
+    if not textfield then return end
+
+    local visible = not textfield.visible
+    textfield.visible = visible
+    button.toggled = visible
+
+    if visible then
+        textfield.focus()
+        textfield.select_all()
+    elseif textfield.text ~= "" then
+        textfield.text = ""
+        local root_tags = root.tags
+        root_tags.filter_text = ""
+        root.tags = root_tags
+        fs_util.dispatch_to_subtree(root, "on_filter_text_changed")
+    end
+end
+
 fs_util.add_handlers(M)
 
 return M

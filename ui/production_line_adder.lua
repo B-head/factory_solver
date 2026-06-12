@@ -553,12 +553,6 @@ function handlers.on_production_line_picker_button_click(event)
     fs_util.dispatch_to_subtree(root, "on_production_line_changed")
 end
 
----@param event EventDataTrait
-function handlers.on_init_name_filter_textfield(event)
-    local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
-    event.element.text = dialog.tags.filter_text --[[@as string?]] or ""
-end
-
 ---@param event EventData.on_gui_text_changed
 function handlers.on_name_filter_textfield_changed(event)
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
@@ -603,12 +597,22 @@ return {
         {
             type = "textfield",
             name = "name_filter_textfield",
-            style = "factory_solver_name_filter_textfield",
+            style = "flib_titlebar_search_textfield",
+            visible = false,
             clear_and_focus_on_right_click = true,
             tooltip = { "factory-solver-name-filter-tooltip" },
             handler = {
-                on_added = handlers.on_init_name_filter_textfield,
                 [defines.events.on_gui_text_changed] = handlers.on_name_filter_textfield_changed,
+            },
+        },
+        {
+            type = "sprite-button",
+            style = "frame_action_button",
+            sprite = "utility/search",
+            hovered_sprite = "utility/search",
+            clicked_sprite = "utility/search",
+            handler = {
+                [defines.events.on_gui_click] = common.on_toggle_name_filter,
             },
         },
         {
