@@ -1,5 +1,6 @@
 local flib_table = require "__flib__/table"
 local flib_format = require "__flib__/format"
+local flib_dictionary = require "__flib__/dictionary"
 local fs_util = require "fs_util"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
@@ -812,13 +813,90 @@ function M.find_highlight_root(elem)
     return root
 end
 
----on_gui_hover for decorated slots: paint every other slot in the same root that
----represents the same material/machine/module/recipe (fluids: an overlapping
----acceptance range) with flib_slot_button_orange, and reset non-matching slots
----to their base_style. Only buttons carrying base_style (i.e. decorated slots)
----are touched. The hovered button itself is skipped — the engine already
----highlights it. Resetting non-matches in the same pass keeps things consistent
----when the engine delivers hover before the previous slot's leave.
+---Resolve a slot's locale-resolved display name from the flib dictionaries, for
+---the name filter. Mirrors the dict selection the constraint / production-line
+---pickers use, extended with "entity" for machine slots. Returns nil when no
+---dictionary is loaded yet (translation in progress) — name_filter_matches then
+---degrades to internal-name matching.
+---@param tn_e TypedName
+---@param dicts table<string, table<string, string>?>?
+---@return string?
+function M.localised_for_typed_name(tn_e, dicts)
+    if not dicts then
+        return nil
+    end
+    local t, d = tn_e.type, nil
+    if t == "item" then
+        d = dicts.item
+    elseif t == "fluid" then
+        d = dicts.fluid
+    elseif t == "recipe" then
+        d = dicts.recipe
+    elseif t == "virtual_recipe" or t == "virtual_material" then
+        d = dicts.virtual
+    elseif t == "machine" then
+        d = dicts.entity
+    end
+    return d and d[tn_e.name] or nil
+end
+
+---Recompute and apply the highlight style of every decorated slot under `root`.
+---Two independent highlight sources both want to drive a slot's `style`: the
+---hover (a hovered slot lights its same-kind slots) and the title-bar name filter
+---(lights every slot whose name matches). They share one style channel, so a slot
+---is lit iff EITHER applies. Both inputs are read from `root.tags`
+---(`hover_typed_name`, `filter_text`), making this a pure function of the window
+---state — so every caller (hover, leave, filter edit, and the every-tick
+---post-recalc re-apply) reconstructs the SAME combined result and the two sources
+---never clobber each other. Persisting the hover in tags is what lets the
+---re-apply survive the on_calculation_changed storm the solver pump emits each
+---tick while iterating: it re-lights the hover instead of erasing it.
+---
+---Self is not excluded from its own hover match: the highlight style IS the
+---slot's hover graphic at rest, so the hovered slot showing it (under the engine's
+---own hover draw) is visually identical to a plain hover. Locale dictionaries are
+---fetched once (outside the loop) only when the filter is non-empty.
+---@param root LuaGuiElement
+function M.refresh_highlight(root)
+    local raw_filter = root.tags.filter_text --[[@as string?]] or ""
+    local needle = (raw_filter ~= "") and helpers.multilingual_to_lower(raw_filter) or ""
+    local hover_tn = root.tags.hover_typed_name --[[@as TypedName?]]
+
+    -- get_all returns the player's whole translated set keyed by dict name
+    -- ({ item=, fluid=, recipe=, virtual=, entity= }) or nil until the language
+    -- finishes translating. We use it rather than per-dict flib_dictionary.get
+    -- because get raises "Dictionary '<name>' does not exist" when a dict is not
+    -- registered yet (e.g. a script reload that did not re-run build()); get_all
+    -- never raises, and the filter degrades to internal-name matching meanwhile.
+    local dicts
+    if needle ~= "" then
+        dicts = flib_dictionary.get_all(root.player_index)
+    end
+
+    for e in fs_util.dfs_lower(root) do
+        if e.type == "sprite-button" and e.tags.base_style then
+            local base = e.tags.base_style --[[@as string]]
+            local tn_e = e.tags.highlight_typed_name --[[@as TypedName]]
+            local lit = false
+
+            if hover_tn and tn.matches_for_highlight(hover_tn, tn_e) then
+                lit = true
+            end
+            if not lit and needle ~= "" then
+                local localised = M.localised_for_typed_name(tn_e, dicts)
+                if M.name_filter_matches(needle, tn_e.name, localised) then
+                    lit = true
+                end
+            end
+
+            e.style = (lit and M.highlight_style_by_base[base]) or base
+        end
+    end
+end
+
+---on_gui_hover for decorated slots: record the hovered slot's TypedName on the
+---root window and repaint. Storing it (rather than passing it transiently) lets
+---the post-recalc re-apply keep the hover lit instead of erasing it every tick.
 ---@param event EventData.on_gui_hover
 function M.on_slot_hover(event)
     local hovered = event.element
@@ -827,30 +905,24 @@ function M.on_slot_hover(event)
         return
     end
     local root = M.find_highlight_root(hovered)
-    for e in fs_util.dfs_lower(root) do
-        if e.type == "sprite-button" and e.tags.base_style then
-            local base = e.tags.base_style --[[@as string]]
-            local highlight = M.highlight_style_by_base[base]
-            if highlight and e ~= hovered
-                and tn.matches_for_highlight(hovered_tn, e.tags.highlight_typed_name --[[@as TypedName]]) then
-                e.style = highlight
-            else
-                e.style = base
-            end
-        end
-    end
+    local root_tags = root.tags
+    root_tags.hover_typed_name = hovered_tn
+    root.tags = root_tags
+    M.refresh_highlight(root)
 end
 
----on_gui_leave for decorated slots: restore every decorated slot in the same
----root to its base_style, clearing any highlight.
+---on_gui_leave for decorated slots: clear the stored hover and repaint; any
+---active name filter is re-applied by the same refresh (so filter matches stay
+---lit).
 ---@param event EventData.on_gui_leave
 function M.on_slot_leave(event)
     local root = M.find_highlight_root(event.element)
-    for e in fs_util.dfs_lower(root) do
-        if e.type == "sprite-button" and e.tags.base_style then
-            e.style = e.tags.base_style --[[@as string]]
-        end
+    local root_tags = root.tags
+    if root_tags.hover_typed_name ~= nil then
+        root_tags.hover_typed_name = nil
+        root.tags = root_tags
     end
+    M.refresh_highlight(root)
 end
 
 fs_util.add_handlers(M)

@@ -57,11 +57,27 @@ end
 ---on_configuration_changed (before flib_dictionary marks itself initialized);
 ---flib resets its storage on on_configuration_changed, so both lifecycle events
 ---rebuild. Relies on storage.virtuals already being populated by the caller.
+-- Entity types factory_solver surfaces as a machine slot (machine_typed_name /
+-- beacon). Crafting machines reach the GUI through a recipe's category, the
+-- energy machines through manage/virtual.lua's per-type virtual recipes, and
+-- beacons through the module rows -- all carry type=="machine" TypedNames whose
+-- name is the entity name. Restricting the entity dictionary to these types
+-- (rather than every prototype) keeps the translation request small while still
+-- covering every machine the name filter can land on; anything missed still
+-- matches by internal name via name_filter_matches.
+local machine_entity_types = {
+    "assembling-machine", "furnace", "rocket-silo", "mining-drill", "lab",
+    "agricultural-tower", "boiler", "generator", "burner-generator",
+    "reactor", "fusion-reactor", "fusion-generator", "thruster",
+    "beacon", "offshore-pump",
+}
+
 function M.build()
     flib_dictionary.new("item")
     flib_dictionary.new("fluid")
     flib_dictionary.new("recipe")
     flib_dictionary.new("virtual")
+    flib_dictionary.new("entity")
 
     for name, proto in pairs(prototypes.item) do
         if not proto.parameter then
@@ -89,6 +105,13 @@ function M.build()
         local loc = virtual_localised(value)
         if loc then
             flib_dictionary.add("virtual", name, loc)
+        end
+    end
+
+    local machines = prototypes.get_entity_filtered { { filter = "type", type = machine_entity_types } }
+    for name, proto in pairs(machines) do
+        if not proto.parameter then
+            flib_dictionary.add("entity", name, proto.localised_name)
         end
     end
 end
