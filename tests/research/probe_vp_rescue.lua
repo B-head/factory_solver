@@ -101,8 +101,9 @@
 --                 variables at 1, bridges at the face regularizer, all else
 --                 free. The LOWEST tier: the stage solution IS the final
 --                 solution (nothing below it to re-optimize), so the polish
---                 costs exactly one extra solve; the baseline is kept when
---                 the improvement is below the grading tolerance.
+--                 costs exactly one extra solve; the baseline is kept only
+--                 when the improvement is numerical noise (the stage is
+--                 already paid for, so any real reduction is adopted).
 --   FS_RECIPE_EPS <float>   Research override for create_problem's flat
 --                 recipe_epsilon tier (shipped 2^-10 ~ 9.8e-4; the per-key
 --                 jitter scales with it). The plain-epsilon comparison arm:
@@ -114,6 +115,20 @@
 --   FS_TOL        <float>   Solver tolerance for every probe solve (default
 --                 1e-7). Tighter tolerance sharpens the epsilon tie-break
 --                 (dust ~ tol/eps) without changing any cost.
+--   FS_SOFT_K     <float>   Soft-gate strength for the ship builds. Default
+--                 UNSET = no gate at all (reachable and unreachable hatches
+--                 both flat elastic_cost). The 2026-06-13 k=1/256/4096 corpus
+--                 A/B graded the un-gated cascade best (tie 1530 vs 1522 vs
+--                 1510): under the full rescue pipeline the gate is a
+--                 solve-count damper, not a quality device, and its price
+--                 pressure hides baseline cheats below the mini classifier's
+--                 FLOW_TH (seed_78/99 Vp residues). Strengthening starves the
+--                 rescue of its detection signal outright (k=4096 broke
+--                 tier 1 on seed_124). 256 reproduces the legacy observer
+--                 shape for A/Bs. Only the ship builds read this -- the
+--                 P-approx recording builds keep SOFT_GATE_K (the recorder
+--                 only logs is_reachable; costs never affect the
+--                 classification). Ignored under FS_VP_CONFIG=hardgate.
 --   FS_VP_CLASS   approx (default) | oracle | mini | miniflat
 --                 oracle = the reference's producible set as P-approx: the
 --                 mechanism's ceiling with a perfect classifier.
@@ -172,7 +187,10 @@ assert(VC == "off" or VC == "oracle" or VC == "flat" or VC == "mini" or VC == "a
     "FS_VC must be off|oracle|flat|mini|approx")
 
 local TOL, ITER = tonumber(os.getenv("FS_TOL") or "") or 1e-7, 800
-local SOFT_GATE_K = 256
+local SOFT_GATE_K = 256 -- P-approx recording builds only (k-independent classification)
+-- Ship builds' gate strength; nil (the default) = un-gated flat. See the
+-- FS_SOFT_K header note for the corpus verdict behind the default.
+local SHIP_SOFT_K = tonumber(os.getenv("FS_SOFT_K") or "")
 local RESCUE_TRIGGER = 1e-6 -- target rescue (mirrors the shipped step)
 local VP_TRIGGER = 1e-4     -- below the grader's ABS tie threshold: dust not worth 2 solves
 local FLOW_TH = 1e-4        -- mini classifier: an import hatch above this is "flowing"
@@ -218,7 +236,9 @@ local function build_ship(constraints, lines, target_budget, target_only)
     if CONFIG == "hardgate" then
         opts = {}
     else
-        opts = { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K }
+        -- reachability_soft_gate_k stays absent when SHIP_SOFT_K is nil: the
+        -- un-gated flat hatch is the cascade's ship shape (FS_SOFT_K note).
+        opts = { reachability_gating = false, reachability_soft_gate_k = SHIP_SOFT_K }
     end
     opts.target_budget = target_budget
     opts.target_only_objective = target_only
@@ -609,7 +629,12 @@ local function rescue_vp(constraints, lines, prob, x0, t_limit, priced_keys)
     if s1 ~= "finished" then return prob, x0, 1, -1, -1, vp0 end
     local vpmin = 0
     for _, key in ipairs(priced_keys) do vpmin = vpmin + math.abs(v1.x[key] or 0) end
-    if vpmin >= vp0 then return prob, x0, 1, vpmin, -1, vp0 end -- no headroom; keep baseline
+    -- No-headroom guard, same shape as the Vf/Vc stages: improvements inside
+    -- the grading tolerance are not worth the final solve, and the tighter
+    -- lock (budget(vpmin) instead of budget(vp0)) would pin the lower tiers
+    -- for nothing. Anything the grader can see (> max(ABS, 5e-3 rel)) still
+    -- rescues -- the un-gated baseline relies on that.
+    if vp0 - vpmin <= math.max(VP_TRIGGER, vp0 * 5e-3) then return prob, x0, 1, vpmin, -1, vp0 end
 
     -- Re-solve at ship costs under both locked budgets.
     local p2 = build_ship(constraints, lines, t_limit)
@@ -990,10 +1015,10 @@ end
 ---variables at 1, bridges at the face regularizer (the reference's
 ---tie-break), everything else free. The LOWEST tier: the stage solution IS
 ---the final solution (no further tier to re-optimize at ship costs), so the
----polish costs exactly one solve. The baseline is kept when the improvement
----is below the grading tolerance -- the solve is still spent; there is no
----final to skip.
-local function rescue_polish(constraints, lines, prob, x, t_limit, r)
+---polish costs exactly one solve. The baseline is kept only when the
+---improvement is numerical noise -- the stage solution is already paid for
+---(there is no final to skip), so any real machine reduction is adopted.
+local function rescue_polish(constraints, lines, intermediates, prob, x, t_limit, r)
     if not POLISH then return prob, x end
     local m0 = ref.total_of(prob, x, ref.MACHINE_KINDS)
     r.m0 = m0
@@ -1014,7 +1039,56 @@ local function rescue_polish(constraints, lines, prob, x, t_limit, r)
     if s1 ~= "finished" or not v1.x then r.polish = -1; return prob, x end
     local mmin = ref.total_of(p1, v1.x, ref.MACHINE_KINDS)
     r.mmin = mmin
-    if m0 - mmin <= math.max(VP_TRIGGER, m0 * 5e-3) then r.polish = -1; return prob, x end
+    -- Adopt any real improvement: the stage solution is already paid for
+    -- (there is no final to skip). The old grading-tolerance threshold
+    -- (5e-3, the grader's own REL) parked exactly-at-the-boundary
+    -- improvements and turned reachable ties into tier-3 losses (seed_74:
+    -- M 38.71 reachable, kept 38.89; the dust-Vp-lock family). Noise floor
+    -- only -- but see the tier guard below.
+    if m0 - mmin <= 1e-9 * math.max(1, m0) then r.polish = -1; return prob, x end
+    -- Upper-tier preservation guard (polish = -2). The budget locks bound
+    -- every tier only up to their margin (rel 1e-3 + abs 1e-6), and the
+    -- polish prices everything but machines at ZERO, so it happily spends
+    -- the whole margin to shave machines. When a lock level is large the
+    -- margin is large in absolute terms (seed_111: flat Vc lock 20 ->
+    -- margin 0.02, spent into a consumable dump the reference keeps at 0 =
+    -- a tier-2c loss bought with a 0.02-machine win). The ship-cost finals
+    -- never do this -- their violation costs are real -- so the guard holds
+    -- the polish to the same standard: adopt only when no upper tier moved
+    -- by more than the grader's ABS. Total imports (split-blind) stand in
+    -- for Vp/Vf: the probe has no producible classification of its own, and
+    -- a margin-shuffle between the two import tiers under their separate
+    -- locks is the one hole this leaves open.
+    local function escape_map(p, xx)
+        local m = {}
+        for key, pr in pairs(p.primals) do
+            local is_esc = pr.kind == "shortage_source" or pr.kind == "surplus_sink"
+                or pr.kind == "elastic"
+                or (pr.kind == "initial_source" and pr.material and intermediates[pr.material])
+            if is_esc then
+                local id = pr.kind .. "|" .. (pr.material or key)
+                m[id] = (m[id] or 0) + math.abs(xx[key] or 0)
+            end
+        end
+        return m
+    end
+    local m_before, m_after = escape_map(prob, x), escape_map(p1, v1.x)
+    local TRACE = os.getenv("FS_POLISH_TRACE") ~= nil
+    local rejected = false
+    for id, v1v in pairs(m_after) do
+        local v0v = m_before[id] or 0
+        local allow = math.max(v0v * (1 + BUDGET_REL) + BUDGET_ABS, v0v + VP_TRIGGER)
+        if v1v > allow then
+            rejected = true
+            if TRACE then io.stderr:write(("[polish guard] %s %g -> %g (allow %g)\n"):format(id, v0v, v1v, allow)) end
+        elseif TRACE and v1v > v0v + 1e-9 then
+            io.stderr:write(("[polish ok] %s %g -> %g\n"):format(id, v0v, v1v))
+        end
+    end
+    if rejected then
+        r.polish = -2
+        return prob, x
+    end
     r.polish = 1
     return p1, v1.x
 end
@@ -1169,7 +1243,7 @@ local function solve_shipped(constraints, lines, intermediates, classify, consum
         if (r.n_flow or 0) <= 0 then r.cand_mats = nil end -- cls denominators are meaningless without flow
         prob2, x2 = rescue_vf(constraints, lines, intermediates, prob2, x2, t_limit, r)
         prob2, x2 = rescue_vc(constraints, lines, prob2, x2, t_limit, r, consumable)
-        prob2, x2 = rescue_polish(constraints, lines, prob2, x2, t_limit, r)
+        prob2, x2 = rescue_polish(constraints, lines, intermediates, prob2, x2, t_limit, r)
         return prob2, "finished", x2, r
     end
 
@@ -1200,7 +1274,7 @@ local function solve_shipped(constraints, lines, intermediates, classify, consum
 
     prob, x0 = rescue_vf(constraints, lines, intermediates, prob, x0, t_limit, r)
     prob, x0 = rescue_vc(constraints, lines, prob, x0, t_limit, r, consumable)
-    prob, x0 = rescue_polish(constraints, lines, prob, x0, t_limit, r)
+    prob, x0 = rescue_polish(constraints, lines, intermediates, prob, x0, t_limit, r)
     return prob, "finished", x0, r
 end
 
