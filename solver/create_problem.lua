@@ -767,6 +767,19 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- reachable materials, unreachable ones stay flat.
     local opt_soft_gate_k = options.reachability_soft_gate_k
     local opt_shortage_cost_overrides = options.shortage_cost_overrides
+    -- Research probe (machine-polish vs plain-epsilon comparison): overrides
+    -- the flat recipe_epsilon tier. nil keeps the shipped 2^-10; the per-key
+    -- jitter scales with it (it is a fraction OF the tier).
+    local opt_recipe_epsilon = options.recipe_epsilon or recipe_epsilon
+    -- Research probe (the Vp rescue's hatch-deletion final): materials whose
+    -- import hatches (intermediate |initial_source| / |shortage_source|) are
+    -- omitted entirely. Only sound when a stage solve has already PROVEN the
+    -- material's import can be ~zero (the stage solution is the witness, so
+    -- elastic necessity is not violated): deletion encodes that face
+    -- structurally, where a ~zero budget row over live variables is
+    -- numerically hostile to the IPM's interior point. Deficit seeds still
+    -- count for reachability; only the hatch variables disappear.
+    local opt_hatch_exclude = options.hatch_exclude
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -943,7 +956,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- infinitesimal cost in [0, 2^-14) that picks one canonical routing
             -- without pricing the hop. Still ~four orders below source_cost, so it
             -- never tips a real decision or makes the LP skip a bridge.
-            local bridge_cost = slack_cost + recipe_epsilon * jitter_strength * key_unit_hash(objective_name)
+            local bridge_cost = slack_cost + opt_recipe_epsilon * jitter_strength * key_unit_hash(objective_name)
             problem:add_objective(objective_name, bridge_cost, true, "bridge")
         else
             -- A user source recipe is priced at source_cost on its product so
@@ -953,7 +966,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- Flat epsilon plus a per-recipe hash jitter (both inside the
             -- recipe_epsilon tier) so genuinely tied recipes resolve to one
             -- canonical vertex instead of an analytic-centre split.
-            local recipe_cost = recipe_epsilon * (1 + jitter_strength * key_unit_hash(objective_name))
+            local recipe_cost = opt_recipe_epsilon * (1 + jitter_strength * key_unit_hash(objective_name))
             if is_source_line(line) and line.products[1] then
                 recipe_cost = source_cost_of(line.products[1]) + recipe_cost
             end
@@ -1018,7 +1031,10 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         -- producing solutions that look "OK" numerically but hide the
         -- external input behind the slack-vs-source distinction. source_cost
         -- is far below elastic_cost so the shortage gate is unaffected.
-        if deficits[constraint_name] then
+        if opt_hatch_exclude and opt_hatch_exclude[constraint_name] then --[[
+            Deletion mode (research): no import hatch at all for this
+            intermediate -- see opt_hatch_exclude above. ]]
+        elseif deficits[constraint_name] then
             local slack_name = vk.initial_source(constraint_name)
             problem:add_objective(slack_name, source_cost_of(value), false, "initial_source", constraint_name)
             problem:add_subject_term(slack_name, constraint_name, 1)

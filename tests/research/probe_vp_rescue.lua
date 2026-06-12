@@ -89,6 +89,26 @@
 --                 missing holes the stage then dumps through at zero price)
 --                 and under-demotes (ties whose partner is outside) -- see
 --                 the rescue_vc comment for the measured failure modes.
+--   FS_POLISH     off (default) | on   The lexicographic machine polish =
+--                 reference stage 3: under the target + Vp + Vf + Vc budgets
+--                 (every lock threaded at its current level even when its
+--                 stage never fired), minimize the machine count -- recipe
+--                 variables at 1, bridges at the face regularizer, all else
+--                 free. The LOWEST tier: the stage solution IS the final
+--                 solution (nothing below it to re-optimize), so the polish
+--                 costs exactly one extra solve; the baseline is kept when
+--                 the improvement is below the grading tolerance.
+--   FS_RECIPE_EPS <float>   Research override for create_problem's flat
+--                 recipe_epsilon tier (shipped 2^-10 ~ 9.8e-4; the per-key
+--                 jitter scales with it). The plain-epsilon comparison arm:
+--                 the shipped epsilon already presses the degenerate face
+--                 toward fewer machines, so how much of the polish's tier-3
+--                 win does simply raising it buy, and at what tier-1/2
+--                 regression cost (the epsilon trades against violations at
+--                 a finite rate ~elastic_cost/eps, the polish at none)?
+--   FS_TOL        <float>   Solver tolerance for every probe solve (default
+--                 1e-7). Tighter tolerance sharpens the epsilon tie-break
+--                 (dust ~ tol/eps) without changing any cost.
 --   FS_VP_CLASS   approx (default) | oracle | mini | miniflat
 --                 oracle = the reference's producible set as P-approx: the
 --                 mechanism's ceiling with a perfect classifier.
@@ -138,12 +158,14 @@ local VP = (os.getenv("FS_VP") or "on"):lower() ~= "off"
 local CLASS = (os.getenv("FS_VP_CLASS") or "approx"):lower()
 local VF = (os.getenv("FS_VF") or "off"):lower() == "on"
 local VC = (os.getenv("FS_VC") or "off"):lower()
+local POLISH = (os.getenv("FS_POLISH") or "off"):lower() == "on"
+local RECIPE_EPS = tonumber(os.getenv("FS_RECIPE_EPS") or "") -- nil = shipped 2^-10
 assert(CONFIG == "observer" or CONFIG == "hardgate", "FS_VP_CONFIG must be observer|hardgate")
 assert(CLASS == "approx" or CLASS == "oracle" or CLASS == "mini" or CLASS == "miniflat",
     "FS_VP_CLASS must be approx|oracle|mini|miniflat")
 assert(VC == "off" or VC == "oracle" or VC == "flat" or VC == "mini", "FS_VC must be off|oracle|flat|mini")
 
-local TOL, ITER = 1e-7, 800
+local TOL, ITER = tonumber(os.getenv("FS_TOL") or "") or 1e-7, 800
 local SOFT_GATE_K = 256
 local RESCUE_TRIGGER = 1e-6 -- target rescue (mirrors the shipped step)
 local VP_TRIGGER = 1e-4     -- below the grader's ABS tie threshold: dust not worth 2 solves
@@ -169,6 +191,18 @@ end
 
 local function budget(opt) return opt * (1 + BUDGET_REL) + BUDGET_ABS end
 
+---Hatch-deletion state for the problem being processed: set by rescue_vp's
+---final FALLBACKS when the ordinary budget-row final diverges and the stage
+---proved Vp_min ~ 0 (see rescue_vp), cleared at the top of solve_shipped.
+---Every later build of the SAME problem (Vf / Vc / polish stages and finals)
+---must keep the deletion or the ~zero Vp face would have to be re-imposed as
+---the numerically hostile budget row. STAGED_RELAY is the deeper fallback:
+---ship-cost finals diverge on this problem outright, so every later stage
+---adopts its own stage solution (the reference's staged shape) instead of
+---re-solving at ship costs.
+local HATCH_EXCLUDE = nil
+local STAGED_RELAY = false
+
 ---One ship build of the configured shape. No observe-price overrides anywhere
 ---in this probe.
 ---@param target_budget number?
@@ -182,8 +216,35 @@ local function build_ship(constraints, lines, target_budget, target_only)
     end
     opts.target_budget = target_budget
     opts.target_only_objective = target_only
+    opts.recipe_epsilon = RECIPE_EPS
+    opts.hatch_exclude = HATCH_EXCLUDE
     local ok, p = pcall(create_problem.create_problem, "ship", constraints, lines, nil, opts)
     if not ok then return nil end
+    return p
+end
+
+---Thread every established stage lock (Vp / Vf / Vc) into a build as budget
+---rows. Locks are set by their stages at the CURRENT level even when the
+---stage never fired (the hole-plugging rule: a free prior tier would be the
+---next tier's whack-a-mole hole); absent keys mean the stage's tier is not
+---part of this run's configuration.
+local function add_lock_rows(p, r)
+    if not p then return p end
+    if r.vp_lock_keys and r.vp_lock_limit then
+        local d = "|research_vp_budget|"
+        p:add_upper_limit_constraint(d, r.vp_lock_limit)
+        for _, key in ipairs(r.vp_lock_keys) do p:add_subject_term(key, d, 1) end
+    end
+    if r.vf_lock_keys and r.vf_lock_limit then
+        local d = "|research_vf_budget|"
+        p:add_upper_limit_constraint(d, r.vf_lock_limit)
+        for _, key in ipairs(r.vf_lock_keys) do p:add_subject_term(key, d, 1) end
+    end
+    if r.vc_lock_keys and r.vc_lock_limit then
+        local d = "|research_vc_budget|"
+        p:add_upper_limit_constraint(d, r.vc_lock_limit)
+        for _, key in ipairs(r.vc_lock_keys) do p:add_subject_term(key, d, 1) end
+    end
     return p
 end
 
@@ -551,8 +612,39 @@ local function rescue_vp(constraints, lines, prob, x0, t_limit, priced_keys)
     p2:add_upper_limit_constraint(dual, budget(vpmin))
     for _, key in ipairs(priced_keys) do p2:add_subject_term(key, dual, 1) end
     local s2, v2 = solve(p2)
-    if s2 ~= "finished" or not v2.x then return prob, x0, 2, vpmin, -1, vp0 end
-    return p2, v2.x, 2, vpmin, 1, vp0
+    if s2 == "finished" and v2.x then return p2, v2.x, 2, vpmin, 1, vp0 end
+
+    -- The final diverged -- the corpus finalfail family (seed_17/96/124/26
+    -- ...), every one with Vp_min ~ 0: the budget row pins LIVE hatch
+    -- variables against sum <= ~1e-6, a face the IPM's interior cannot
+    -- approach. Two escalating fallbacks, both only sound when the stage
+    -- proved Vp_min ~ 0 (its solution is the witness that the build stays
+    -- feasible with no hatch at all):
+    --   1. deletion final -- DELETE the priced hatches (HATCH_EXCLUDE) and
+    --      re-run the ship-cost final on the structural face; the lock row
+    --      disappears with the variables. Fixes the seed_26 shape.
+    --   2. staged relay -- on the rest (seed_17/96/124) the ship-cost final
+    --      diverges even on the deletion build (the optimum is the full
+    --      fabricate cascade, ref machine counts 1e7+, and the 2^20-tier
+    --      cost regime cannot converge there; a 4x iteration cap does not
+    --      help). Give up on ship-cost finals for this problem entirely:
+    --      adopt the Vp stage solution, and let every later stage adopt its
+    --      own stage solution too (STAGED_RELAY) -- the exact staged shape
+    --      the reference solves these problems with.
+    if vpmin > VP_TRIGGER then return prob, x0, 2, vpmin, -1, vp0 end
+    local mats = {}
+    for _, key in ipairs(priced_keys) do
+        local pr = prob.primals[key]
+        if pr and pr.material then mats[pr.material] = true end
+    end
+    HATCH_EXCLUDE = mats
+    local p3 = build_ship(constraints, lines, t_limit)
+    if p3 then
+        local s3, v3 = solve(p3)
+        if s3 == "finished" and v3.x then return p3, v3.x, 3, vpmin, 1, vp0 end
+    end
+    STAGED_RELAY = true
+    return p1, v1.x, 3, vpmin, 1, vp0
 end
 
 ---The lexicographic Vf rescue (reference stage 2b on the ship shape; see the
@@ -612,6 +704,13 @@ local function rescue_vf(constraints, lines, intermediates, prob, x, t_limit, r)
     local vfmin = 0
     for _, key in ipairs(makeup_keys) do vfmin = vfmin + math.abs(v1.x[key] or 0) end
     r.vfmin = vfmin
+    if STAGED_RELAY then
+        -- Ship-cost finals diverge on this problem (see rescue_vp): adopt
+        -- the stage solution itself; the later stages restore their tiers.
+        r.vf_rescued = 1
+        r.vf_lock_limit = budget(vfmin)
+        return p1, v1.x
+    end
     if vf0 - vfmin <= math.max(VP_TRIGGER, vf0 * 5e-3) then r.vf_rescued = -1; return prob, x end
 
     -- Final: ship costs under the target + Vp + Vf budgets.
@@ -684,7 +783,24 @@ local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
                 r.n_vcflow = r.n_vcflow + 1
             end
         end
-        if flat0 <= VP_TRIGGER or r.n_vcflow == 0 then r.vc0 = flat0; return prob, x end
+        if flat0 <= VP_TRIGGER or r.n_vcflow == 0 then
+            -- Nothing flowing to adjudicate -- but the NEXT tier (the machine
+            -- polish) still needs a Vc ceiling, or it freely grows consumable
+            -- dumps to shed machines (measured: 384 tie -> tier2c_loss
+            -- regressions on the full pipeline; the oracle/flat arms set
+            -- their lock before this point and never hit it). Without a
+            -- classification the lock is the FLAT sum over every sink:
+            -- over-strict on the non-consumable share (which the reference's
+            -- stage 3 leaves free), but the whole surplus is ~zero here, so
+            -- the freedom lost is only the freedom to grow dumps from
+            -- nothing.
+            local all_keys = {}
+            for _, e in ipairs(entries) do all_keys[#all_keys + 1] = e.key end
+            r.vc_lock_keys = all_keys
+            r.vc_lock_limit = budget(math.max(flat0, 0))
+            r.vc0 = flat0
+            return prob, x
+        end
 
         -- The universe is EVERY sink material, not the flowing subset, and
         -- fixpoint_over runs the reference's real per-material phase 1 for
@@ -732,6 +848,12 @@ local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
     local vc0 = 0
     for _, key in ipairs(priced) do vc0 = vc0 + math.abs(x[key] or 0) end
     r.vc0 = vc0
+    -- The Vc lock for the next tier (the machine polish), at the current
+    -- level even when this stage does not fire -- same hole-plugging rule as
+    -- the Vf lock. The local with_locks above must NOT thread it (it builds
+    -- this stage's own problems); only add_lock_rows consumers see it.
+    r.vc_lock_keys = priced
+    r.vc_lock_limit = budget(math.max(vc0, 0))
     if #priced == 0 or vc0 <= VP_TRIGGER then return prob, x end
 
     -- Stage: the priced surplus as the only objective under all prior budgets.
@@ -753,6 +875,13 @@ local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
     local vcmin = 0
     for _, key in ipairs(priced) do vcmin = vcmin + math.abs(v1.x[key] or 0) end
     r.vcmin = vcmin
+    if STAGED_RELAY then
+        -- Ship-cost finals diverge on this problem (see rescue_vp): adopt
+        -- the stage solution itself; the polish restores the machine tier.
+        r.vc_rescued = 1
+        r.vc_lock_limit = budget(vcmin)
+        return p1, v1.x
+    end
     if vc0 - vcmin <= math.max(VP_TRIGGER, vc0 * 5e-3) then r.vc_rescued = -1; return prob, x end
 
     -- Final: ship costs under the target + Vp + Vf + Vc budgets.
@@ -765,7 +894,43 @@ local function rescue_vc(constraints, lines, prob, x, t_limit, r, consumable)
     local s2, v2 = solve(p2)
     if s2 ~= "finished" or not v2.x then r.vc_rescued = -1; return prob, x end
     r.vc_rescued = 1
+    r.vc_lock_limit = budget(vcmin)
     return p2, v2.x
+end
+
+---The lexicographic machine polish (reference stage 3 on the ship shape; see
+---the FS_POLISH header note). Under every established budget -- the target
+---row plus the Vp / Vf / Vc locks -- minimize the machine count: recipe
+---variables at 1, bridges at the face regularizer (the reference's
+---tie-break), everything else free. The LOWEST tier: the stage solution IS
+---the final solution (no further tier to re-optimize at ship costs), so the
+---polish costs exactly one solve. The baseline is kept when the improvement
+---is below the grading tolerance -- the solve is still spent; there is no
+---final to skip.
+local function rescue_polish(constraints, lines, prob, x, t_limit, r)
+    if not POLISH then return prob, x end
+    local m0 = ref.total_of(prob, x, ref.MACHINE_KINDS)
+    r.m0 = m0
+
+    local p1 = add_lock_rows(build_ship(constraints, lines, t_limit), r)
+    if not p1 then return prob, x end
+    for _, pr in pairs(p1.primals) do
+        if pr.kind == "recipe" then
+            pr.cost = 1
+        elseif pr.kind == "bridge" then
+            pr.cost = EPS_RECIPE
+        else
+            pr.cost = 0
+        end
+    end
+    r.solves = r.solves + 1
+    local s1, v1 = solve(p1)
+    if s1 ~= "finished" or not v1.x then r.polish = -1; return prob, x end
+    local mmin = ref.total_of(p1, v1.x, ref.MACHINE_KINDS)
+    r.mmin = mmin
+    if m0 - mmin <= math.max(VP_TRIGGER, m0 * 5e-3) then r.polish = -1; return prob, x end
+    r.polish = 1
+    return p1, v1.x
 end
 
 ---mini (probe-first, round 3): one support probe replaces round 2's
@@ -858,6 +1023,10 @@ local function rescue_vp_mini(constraints, lines, intermediates, prob0, x0, t_li
     r.solves = r.solves + vsolves
     r.vp_lock_keys = priced_keys
     r.vp_lock_limit = r.vp_rescued == 1 and budget(r.vpmin) or budget(math.max(r.vp0, 0))
+    if HATCH_EXCLUDE then -- deletion fallback: the face is structural, no lock row
+        r.vp_deleted = STAGED_RELAY and 2 or 1
+        r.vp_lock_keys, r.vp_lock_limit = nil, nil
+    end
     local prob, x = prob0, x0
     if r.vp_rescued == 1 then prob, x = prob2, x2 end
 
@@ -887,7 +1056,9 @@ local function solve_shipped(constraints, lines, intermediates, classify, consum
         n_priced = 0, n_flow = -1, fp_solves = 0, n_univ = -1,
         vf_rescued = 0, vfmin = -1, vf0 = -1, n_makeup = 0,
         vc_rescued = 0, vcmin = -1, vc0 = -1, n_vcpriced = 0,
-        n_vcflow = -1, vcfp_solves = 0, n_vcuniv = -1 }
+        n_vcflow = -1, vcfp_solves = 0, n_vcuniv = -1,
+        polish = 0, m0 = -1, mmin = -1, vp_deleted = 0 }
+    HATCH_EXCLUDE, STAGED_RELAY = nil, false -- per-problem reset (rescue_vp's fallbacks)
     local prob, state, x0, s0 = build_solve_ship(constraints, lines, nil)
     if state ~= "finished" or not x0 then return nil, state, nil, r end
 
@@ -912,6 +1083,7 @@ local function solve_shipped(constraints, lines, intermediates, classify, consum
         if (r.n_flow or 0) <= 0 then r.cand_mats = nil end -- cls denominators are meaningless without flow
         prob2, x2 = rescue_vf(constraints, lines, intermediates, prob2, x2, t_limit, r)
         prob2, x2 = rescue_vc(constraints, lines, prob2, x2, t_limit, r, consumable)
+        prob2, x2 = rescue_polish(constraints, lines, prob2, x2, t_limit, r)
         return prob2, "finished", x2, r
     end
 
@@ -935,9 +1107,14 @@ local function solve_shipped(constraints, lines, intermediates, classify, consum
     r.solves = r.solves + vsolves
     r.vp_lock_keys = priced_keys
     r.vp_lock_limit = r.vp_rescued == 1 and budget(r.vpmin) or budget(math.max(r.vp0, 0))
+    if HATCH_EXCLUDE then -- deletion fallback: the face is structural, no lock row
+        r.vp_deleted = STAGED_RELAY and 2 or 1
+        r.vp_lock_keys, r.vp_lock_limit = nil, nil
+    end
 
     prob, x0 = rescue_vf(constraints, lines, intermediates, prob, x0, t_limit, r)
     prob, x0 = rescue_vc(constraints, lines, prob, x0, t_limit, r, consumable)
+    prob, x0 = rescue_polish(constraints, lines, prob, x0, t_limit, r)
     return prob, "finished", x0, r
 end
 
@@ -947,7 +1124,8 @@ local COLS = { "label", "n_mats", "ref_state", "T_ref", "Vp_ref", "Vc_ref", "Vf_
     "n_flow", "fp_solves", "clsF_extra", "clsF_missing", "n_univ",
     "vf_rescued", "Vf_min", "Vf0", "n_makeup",
     "vc_rescued", "Vc_min", "Vc0", "n_vcpriced",
-    "n_vcflow", "vcfp_solves", "n_vcuniv", "clsC_extra", "clsC_missing" }
+    "n_vcflow", "vcfp_solves", "n_vcuniv", "clsC_extra", "clsC_missing",
+    "polish", "M0", "M_min", "vp_deleted" }
 
 local function process(prob, label, path, emit)
     local intermediates = ref.intermediates(prob.normalized_lines)
@@ -1046,7 +1224,8 @@ local function process(prob, label, path, emit)
         vf_rescued = info.vf_rescued, Vf_min = info.vfmin, Vf0 = info.vf0, n_makeup = info.n_makeup,
         vc_rescued = info.vc_rescued, Vc_min = info.vcmin, Vc0 = info.vc0, n_vcpriced = info.n_vcpriced,
         n_vcflow = info.n_vcflow, vcfp_solves = info.vcfp_solves, n_vcuniv = info.n_vcuniv,
-        clsC_extra = clsC_extra, clsC_missing = clsC_missing })
+        clsC_extra = clsC_extra, clsC_missing = clsC_missing,
+        polish = info.polish, M0 = info.m0, M_min = info.mmin, vp_deleted = info.vp_deleted })
 end
 
 -- ---- main -------------------------------------------------------------------
