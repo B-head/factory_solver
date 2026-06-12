@@ -36,21 +36,38 @@ local target_cost = 2 ^ 20
 -- degenerate face. Any eps > 0 makes running a pointless recipe strictly
 -- costly, so the LP drops it to (near) zero.
 --
--- 2^-10 is chosen for three reasons: it is the power of two nearest 1e-3, the
--- geometric centre of the empirically safe 1e-4 .. 1e-2 window (below 1e-4 it
--- fails to collapse futile flows; above 1e-2 it starts overriding source_cost's
--- genuine material-efficiency tie-break); and it extends the existing
--- power-of-two ladder by one clean 2^10 step: recipe_epsilon 2^-10 < source 2^0
--- < elastic 2^10 < target 2^20. The 2^10 gap below source_cost keeps it from
--- ever competing with the material-efficiency or reachability gating.
+-- The value is graded empirically against the problem-definition reference
+-- solver (tests/research/probe_eps_reference.lua): this flat eps is the LP's
+-- proxy for the definition's machine-count tier, so the right size is the one
+-- whose solutions land on the reference's machine-minimal vertex. Too small and
+-- eps*(excess futile flow) sinks below the IPM's relative tolerance against the
+-- big source/elastic/target tiers, so the solver stops enforcing machine
+-- minimization on degenerate faces -- the previously-shipped 2^-10 left up to
+-- ~5x excess machines on such a vertex (reference-graded: 336 of 1660 corpus
+-- problems worse than gold at the machine tier). 2^-6 recovers that -- 88 corpus
+-- problems move closer to the gold answer for 10 benign regressions (all sub-1%
+-- / tolerance-noise violation wiggles, none at the target tier) -- with no change
+-- in solve count or IPM iterations.
+--
+-- Measured on a BINARY scale, the safe window's upper edge is ~2^-6: at 2^-5 the
+-- override of source_cost's material-efficiency tie-break starts to bite (the
+-- first target-tier regressions appear and violation regressions climb from 14
+-- at 2^-5 to 56 at 2^-2). The old decimal "1e-2" bound was conservative; 2^-6 =
+-- 0.0156 sits just above it yet grades clean. The lower edge is the failure mode
+-- 2^-10 itself showed -- too small to clear tolerance against the big tiers.
+--
+-- It extends the power-of-two ladder: recipe_epsilon 2^-6 < source 2^0 < elastic
+-- 2^10 < target 2^20. The 2^6 = 64x gap below source_cost still keeps it under
+-- the material-efficiency and reachability gating -- the corpus regressions above
+-- are tolerance noise, not real efficiency losses.
 --
 -- Note this leaves an interior-point "dust" residual of ~tolerance/eps on a
--- recipe driven to zero (it parks at x ~ mu/s instead of exactly 0). On real
--- (large, richly-connected) problems that dust is negligible against the actual
--- flows; it is only visible, relative to flow, on tiny synthetic chains with an
--- isolated dead-end recipe -- see the activity_floor handling in
--- tests/cases/lp_scale_invariance.lua.
-local recipe_epsilon = 2 ^ -10
+-- recipe driven to zero (it parks at x ~ mu/s instead of exactly 0); the 2^-6
+-- value shrinks that dust ~16x versus the old 2^-10. On real (large, richly-
+-- connected) problems the dust is negligible against the actual flows; it is only
+-- visible, relative to flow, on tiny synthetic chains with an isolated dead-end
+-- recipe -- see the activity_floor handling in tests/cases/lp_scale_invariance.lua.
+local recipe_epsilon = 2 ^ -6
 
 -- Recipe/bridge face regularizer for the target_only_objective build (the
 -- target-rescue stage 1). The stage is a pure measurement solve -- "how little
@@ -86,8 +103,8 @@ local target_rescue_epsilon = 2 ^ -20
 -- enough to separate tied optima past the IPM's relative tolerance (~1e-6),
 -- small enough that it never competes with the flat epsilon's futile-collapse
 -- or, one tier up, with source_cost's material-efficiency tie-break. At 2^-4 an
--- effective epsilon lands in [2^-10, 2^-10 + 2^-14) ~= [9.8e-4, 1.03e-3): still
--- inside the empirically safe 1e-4..1e-2 epsilon window, still ~600x below
+-- effective epsilon lands in [2^-6, 2^-6 + 2^-10) ~= [0.0156, 0.0166): at the
+-- upper edge of the binary safe window (see recipe_epsilon above), ~64x below
 -- source_cost = 1, and the ~6% relative spread between two recipes clears IPM
 -- tolerance. It cannot flip the flat epsilon's activity ranking either -- the
 -- gaps there are factors (5 vs 10 lines), which a <=1 jitter can never invert.

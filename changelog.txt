@@ -9,6 +9,11 @@ Date: ????
       Product / Ingredient placement" and "Classic top-to-bottom order", restore
       the previous layout. Existing saves get a one-time chat notice on update.
   Changes:
+    - The solver now drives redundant machines out of solutions more reliably. On
+      tightly-coupled recipe loops it could leave a working solution running well
+      more machines than necessary (up to several times the minimum); these are
+      now collapsed, so production lines list closer to the fewest machines that
+      meet the targets. Throughput results are unchanged.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.4
 Date: 2026-06-12

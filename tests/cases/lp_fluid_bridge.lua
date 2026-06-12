@@ -330,7 +330,7 @@ table.insert(cases, {
 -- bridge carries a distinct, strictly-positive, sub-epsilon cost. If the bridge
 -- jitter is ever reverted to a bare slack_cost, both costs collapse to 0 and the
 -- distinctness / positivity assertions below fail.
-local bridge_recipe_epsilon = 2 ^ -10
+local bridge_recipe_epsilon = 2 ^ -6
 local bridge_jitter_strength = 2 ^ -4
 local function bridge_key_unit_hash(key)
     local modulus = 2 ^ 28
