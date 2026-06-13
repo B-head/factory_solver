@@ -102,6 +102,7 @@ function M.create_relation_to_recipes(force_index)
     local items = {} ---@type table<string, RelationToRecipe>
     local fluids = {} ---@type table<string, RelationToRecipe>
     local virtuals = {} ---@type table<string, RelationToRecipe>
+    local recipes_by_category = {} ---@type table<string, string[]>
 
     local cache_crafting_fuels, cache_resource_fuels,
         cache_crafting_fluid_fuels, cache_resource_fluid_fuels,
@@ -110,7 +111,7 @@ function M.create_relation_to_recipes(force_index)
     ---@return RelationToRecipe
     local function create_relation_table()
         ---@type RelationToRecipe
-        return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_burnt_result = {}, recipe_for_fuel = {} }
+        return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_burnt_result = {}, fuel_consumer_categories = {}, fuel_consumer_virtual_recipes = {} }
     end
 
     ---@param filter_type FilterType
@@ -180,6 +181,15 @@ function M.create_relation_to_recipes(force_index)
     for _, recipe in pairs(force.recipes) do
         enabled_recipe[recipe.name] = recipe.enabled
 
+        -- Group real recipes by category so a fuel's consumers expand lazily
+        -- (category -> recipes) instead of being flattened per (recipe, fuel).
+        local cat_recipes = recipes_by_category[recipe.category]
+        if not cat_recipes then
+            cat_recipes = {}
+            recipes_by_category[recipe.category] = cat_recipes
+        end
+        cat_recipes[#cat_recipes + 1] = recipe.name
+
         for _, value in ipairs(recipe.products) do
             local info = get_info(value.type, value.name)
             flib_table.insert(info.recipe_for_product, recipe.name)
@@ -193,15 +203,33 @@ function M.create_relation_to_recipes(force_index)
             flib_table.insert(info.recipe_for_ingredient, recipe.name)
         end
 
+        -- recipe_for_fuel is no longer materialized per (recipe, fuel) -- that was
+        -- the recipe x fuel product. Fuel consumers expand later from
+        -- fuel_consumer_categories (built just below). The spent-fuel credit still
+        -- runs here because it targets only the few fuels that have a burnt_result.
         for _, value in ipairs(cache_crafting_fuels[recipe.category]) do
-            local info = get_info("item", value)
-            flib_table.insert(info.recipe_for_fuel, recipe.name)
             register_burnt_result(value, recipe.name, recipe.enabled and not recipe.hidden)
         end
+    end
 
-        for _, value in ipairs(cache_crafting_fluid_fuels[recipe.category]) do
-            local info = get_info("fluid", value)
-            flib_table.insert(info.recipe_for_fuel, recipe.name)
+    -- Reverse cache_fuel_names' category -> fuel lists into each fuel material's
+    -- fuel_consumer_categories. This is the sum of category fuel-list sizes
+    -- (~1k on pyanodon), not the recipe x fuel product (~389k) the per-recipe
+    -- recipe_for_fuel insert used to pay.
+    for category, fuel_items in pairs(cache_crafting_fuels) do
+        for _, fuel_name in ipairs(fuel_items) do
+            local info = items[fuel_name]
+            if info then
+                info.fuel_consumer_categories[#info.fuel_consumer_categories + 1] = category
+            end
+        end
+    end
+    for category, fuel_fluids in pairs(cache_crafting_fluid_fuels) do
+        for _, fuel_name in ipairs(fuel_fluids) do
+            local info = fluids[fuel_name]
+            if info then
+                info.fuel_consumer_categories[#info.fuel_consumer_categories + 1] = category
+            end
         end
     end
 
@@ -258,7 +286,7 @@ function M.create_relation_to_recipes(force_index)
             local fixed_fuel = acc.try_get_fixed_fuel(machine)
             if fixed_fuel then
                 local info = get_info(fixed_fuel.type, fixed_fuel.name)
-                flib_table.insert(info.recipe_for_fuel, recipe.name)
+                flib_table.insert(info.fuel_consumer_virtual_recipes, recipe.name)
                 if fixed_fuel.type == "item" then
                     register_burnt_result(fixed_fuel.name, recipe.name, is_visible)
                 end
@@ -267,7 +295,7 @@ function M.create_relation_to_recipes(force_index)
             if acc.is_use_any_fluid_fuel(machine) then
                 for _, value in ipairs(any_fluid_fuels) do
                     local info = get_info("fluid", value)
-                    flib_table.insert(info.recipe_for_fuel, recipe.name)
+                    flib_table.insert(info.fuel_consumer_virtual_recipes, recipe.name)
                 end
             end
 
@@ -276,7 +304,7 @@ function M.create_relation_to_recipes(force_index)
                 local fuels = acc.get_fuels_in_categories(fuel_categories)
                 for _, value in ipairs(fuels) do
                     local info = get_info("item", value.name)
-                    flib_table.insert(info.recipe_for_fuel, recipe.name)
+                    flib_table.insert(info.fuel_consumer_virtual_recipes, recipe.name)
                     register_burnt_result(value.name, recipe.name, is_visible)
                 end
             end
@@ -285,13 +313,13 @@ function M.create_relation_to_recipes(force_index)
         if recipe.resource_category then
             for _, value in ipairs(cache_resource_fuels[recipe.resource_category]) do
                 local info = get_info("item", value)
-                flib_table.insert(info.recipe_for_fuel, recipe.name)
+                flib_table.insert(info.fuel_consumer_virtual_recipes, recipe.name)
                 register_burnt_result(value, recipe.name, is_visible)
             end
 
             for _, value in ipairs(cache_resource_fluid_fuels[recipe.resource_category]) do
                 local info = get_info("fluid", value)
-                flib_table.insert(info.recipe_for_fuel, recipe.name)
+                flib_table.insert(info.fuel_consumer_virtual_recipes, recipe.name)
             end
         end
     end
@@ -302,7 +330,34 @@ function M.create_relation_to_recipes(force_index)
         fluid = fluids,
         virtual_recipe = virtuals,
         virtual_recipe_researched = virtual_recipe_researched,
+        recipes_by_category = recipes_by_category,
     }
+end
+
+---Expand a material's lazy fuel-consumer representation into the flat list of
+---recipe names that burn it as fuel: real recipes via category indirection
+---(fuel_consumer_categories x recipes_by_category) plus the directly-listed
+---virtual recipes. The flat list is never stored -- it is the recipe x fuel
+---product that dominated create_relation_to_recipes -- so the picker materializes
+---it on demand for the single selected material.
+---@param relation_to_recipes RelationToRecipes
+---@param info RelationToRecipe
+---@return string[]
+function M.expand_fuel_consumers(relation_to_recipes, info)
+    local result = {}
+    local by_category = relation_to_recipes.recipes_by_category
+    for _, category in ipairs(info.fuel_consumer_categories) do
+        local recipes = by_category[category]
+        if recipes then
+            for _, recipe_name in ipairs(recipes) do
+                result[#result + 1] = recipe_name
+            end
+        end
+    end
+    for _, recipe_name in ipairs(info.fuel_consumer_virtual_recipes) do
+        result[#result + 1] = recipe_name
+    end
+    return result
 end
 
 ---Create caches of additional information for groups.

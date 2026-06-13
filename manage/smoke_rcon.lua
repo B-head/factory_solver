@@ -1189,7 +1189,7 @@ function M.check_force_caches()
             local burnt = item.burnt_result
             if burnt then
                 local fuel_info = rel.item[name]
-                if fuel_info and #fuel_info.recipe_for_fuel > 0 then
+                if fuel_info and #relation.expand_fuel_consumers(rel, fuel_info) > 0 then
                     local burnt_info = rel.item[burnt.name]
                     assert(burnt_info and #burnt_info.recipe_for_burnt_result > 0,
                         "burnt_result '" .. burnt.name .. "' not registered under recipe_for_burnt_result "

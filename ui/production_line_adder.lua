@@ -4,6 +4,7 @@ local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
+local relation = require "manage/relation"
 local common = require "ui/common"
 
 ---[a_lo,a_hi] ⊆ [b_lo,b_hi]
@@ -248,7 +249,8 @@ function handlers.on_init_choose_visiblity(event)
     elseif kind == "ingredient" then
         allowed, recipe_names = dialog_tags.is_choose_ingredient, relation_to_recipe.recipe_for_ingredient
     elseif kind == "fuel" then
-        allowed, recipe_names = dialog_tags.is_choose_ingredient, relation_to_recipe.recipe_for_fuel
+        allowed = dialog_tags.is_choose_ingredient
+        recipe_names = relation.expand_fuel_consumers(relation_to_recipes, relation_to_recipe)
     else
         assert()
     end
@@ -297,7 +299,7 @@ function handlers.on_make_choose_table(event)
     elseif kind == "ingredient" then
         recipe_names = relation_to_recipe.recipe_for_ingredient
     elseif kind == "fuel" then
-        recipe_names = relation_to_recipe.recipe_for_fuel
+        recipe_names = relation.expand_fuel_consumers(relation_to_recipes, relation_to_recipe)
     else
         assert()
     end

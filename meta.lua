@@ -109,13 +109,15 @@ __factory_solver__storage = {}
 ---@field fluid table<string, RelationToRecipe>
 ---@field virtual_recipe table<string, RelationToRecipe>
 ---@field virtual_recipe_researched table<string, boolean>
+---@field recipes_by_category table<string, string[]> Real recipe names grouped by recipe_category; lets fuel consumers expand lazily (RelationToRecipe.fuel_consumer_categories) instead of materializing the recipe x fuel product. See relation.expand_fuel_consumers.
 
 ---@class RelationToRecipe
 ---@field craftable_count integer
 ---@field recipe_for_product string[]
 ---@field recipe_for_burnt_result string[] Recipes that emit this material only as a burnt fuel residue (spent cell / ash), kept apart from recipe_for_product so the picker lists them in their own section instead of burying the real producers.
 ---@field recipe_for_ingredient string[]
----@field recipe_for_fuel string[]
+---@field fuel_consumer_categories string[] Recipe categories whose machines burn this material as fuel; expand to real recipe names via relation_to_recipes.recipes_by_category. Stored as category keys, not flattened recipe names: every recipe in a category shares its fuel set, so flattening is the recipe x fuel product (~389k entries on a pyanodon set). See relation.expand_fuel_consumers.
+---@field fuel_consumer_virtual_recipes string[] Virtual recipes that consume this material as fuel (machine-derived, listed directly -- no category indirection).
 
 ---@class GroupInfos
 ---@field item table<string, GroupInfo>
