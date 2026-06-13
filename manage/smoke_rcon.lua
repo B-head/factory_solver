@@ -1333,11 +1333,11 @@ function M.check_relation_split()
 
         -- finish_relation_build: every phase to completion in one call.
         local finished = relation.finish_relation_build(
-            relation.build_relation_init(FORCE_INDEX), FORCE_INDEX)
+            relation.build_relation_init(), FORCE_INDEX)
 
         -- One recipe per advance: the most aggressive split, a tick boundary
         -- between every recipe, which is what stresses the cursor reentry.
-        local drip_state = relation.build_relation_init(FORCE_INDEX)
+        local drip_state = relation.build_relation_init()
         local dripped
         repeat
             dripped = relation.advance_relation_build(drip_state, FORCE_INDEX)

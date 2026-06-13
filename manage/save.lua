@@ -477,7 +477,7 @@ function M.advance_relation_builds()
                 -- to the relation_build fallback (not a second synchronous build)
                 -- and apply_research_change skips on relation_build instead.
                 force_data.relation_to_recipes_needs_updating = false
-                force_data.relation_build = relation.build_relation_init(force.index)
+                force_data.relation_build = relation.build_relation_init()
                 return true
             end
             if force_data.relation_build then

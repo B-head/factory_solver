@@ -85,7 +85,7 @@ __factory_solver__storage = {}
 ---@class ForceLocalData
 ---@field relation_to_recipes RelationToRecipes
 ---@field relation_to_recipes_needs_updating boolean
----@field relation_build RelationBuildState? In-flight tick-split relation build (on_tick, manage/relation.lua). nil when none in progress. Plain tables only (name arrays + integer cursor; no LuaObject, no pairs-next position), so it is storage / on_load safe and survives save/load mid-build.
+---@field relation_build RelationBuildState? In-flight tick-split relation build (on_tick, manage/relation.lua). nil when none in progress. Plain tables only (no LuaObject, no live pairs iterator -- each phase resumes from a stored string key), so it is storage / on_load safe and survives save/load mid-build.
 ---@field group_infos GroupInfos
 ---@field group_infos_needs_updating boolean
 ---@field solutions table<string, Solution>
@@ -128,23 +128,16 @@ __factory_solver__storage = {}
 
 ---Progress state for the tick-split relation build (manage/relation.lua's
 ---build_relation_init / build_relation_step). create_relation_to_recipes' heavy
----recipe-set listing is spread across ticks at RELATION_BUILD_BUDGET recipes per
+---recipe-set listing is spread across ticks at RELATION_BUILD_BUDGET entries per
 ---tick instead of one synchronous pass. Every field is a plain string / number /
----boolean table (no LuaObject, no pairs-next iterator) so it is storage-safe and
----resumable after save/load: real_recipe_names / virtual_recipe_names are key
----snapshots walked by the integer cursor, and the recipe set is stable across
----research so the lists never go stale mid-build.
+---boolean table (no LuaObject, no live pairs iterator) so it is storage-safe and
+---resumable after save/load: each phase walks its source table directly via a
+---stored-key pairs resume (step_table), and the recipe set is stable across research
+---so the walk never goes stale mid-build.
 ---@class RelationBuildState
 ---@field phase string Current build phase: prep_fuel_crafting / prep_fuel_resource / prep_alloc_item / prep_alloc_fluid / prep_alloc_vmat / real_recipes / fuel_reverse / virtual_recipes / finalize / done.
 ---@field rel RelationToRecipes Partially built relation cache (filled phase by phase; enabled-dependent fields stay all-false until the finalize pass).
----@field cursor integer Next index into the current phase's name array; reset to 1 on each phase transition.
----@field real_recipe_names string[] Snapshot of force.recipes keys, in pairs() order, walked by the real_recipes phase.
----@field virtual_recipe_names string[] Snapshot of storage.virtuals.recipe keys, in pairs() order, walked by the virtual_recipes phase.
----@field item_names string[] Snapshot of prototypes.item keys, walked by prep_alloc_item (table alloc + burnt_result resolution).
----@field fluid_names string[] Snapshot of prototypes.fluid keys, walked by prep_alloc_fluid.
----@field virtual_material_names string[] Snapshot of storage.virtuals.material keys, walked by prep_alloc_vmat.
----@field crafting_category_names string[] Snapshot of prototypes.recipe_category keys, walked by prep_fuel_crafting.
----@field resource_category_names string[] Snapshot of prototypes.resource_category keys, walked by prep_fuel_resource.
+---@field cursor_key string? Key last processed in the current phase's source table; the next step resumes the pairs iterator after it. nil = start of phase (also reset to nil when a phase is exhausted).
 ---@field fuel RelationBuildFuelCache cache_fuel_names' result, built incrementally across the prep_fuel phases; reused by the real / virtual recipe passes.
 ---@field burnt_result_names table<string, string> Fuel item name -> burnt_result item name, built incrementally in prep_alloc_item.
 

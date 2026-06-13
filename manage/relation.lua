@@ -433,9 +433,10 @@ end
 -- Tick-split relation build (driven from on_tick via manage/save.lua). The
 -- synchronous create_relation_to_recipes walks every item / fluid / recipe in one
 -- pass, which stalls a frame on large modpacks the first time a GUI reads the
--- cache. This spreads the recipe listing over ticks: build_relation_init does the
--- one-shot prep, build_relation_step lists RELATION_BUILD_BUDGET recipes per call,
--- and a final atomic pass flips the currently-enabled recipes via
+-- cache. This spreads the recipe listing over ticks: build_relation_init allocates
+-- the empty skeleton, build_relation_step walks each source table
+-- RELATION_BUILD_BUDGET entries per call (resuming the pairs iterator from a stored
+-- key), and a final atomic pass flips the currently-enabled recipes via
 -- apply_research_change. The listing phases are research-invariant (force.recipes
 -- holds every recipe regardless of enabled), so a research finished mid-build does
 -- not invalidate them; its effect is captured by the finalize pass instead.
@@ -443,9 +444,13 @@ local RELATION_BUILD_BUDGET = 100
 
 -- Prep phases split the heavy one-shot setup across ticks: fuel-cache computation
 -- per recipe/resource category, then per-material RelationToRecipe allocation
--- (item + burnt_result, fluid, virtual material). The cheap pairs snapshots and
--- the all-false seed stay in build_relation_init -- pairs can't be resumed across
--- ticks and those passes are light. After prep, the listing phases run.
+-- (item + burnt_result, fluid, virtual material). Every phase -- including the key
+-- listing itself -- walks its source table directly via a stored-key pairs resume
+-- (step_table), so no single tick pays a full pass. The all-false seed of the
+-- research-dependent fields rides along on the phase that walks the matching table
+-- (real -> enabled_recipe, virtual -> virtual_recipe_researched, vmat ->
+-- virtual_material_researched), all complete before the finalize pass reads them.
+-- After prep, the listing phases run.
 local RELATION_PHASE_PREP_FUEL_CRAFTING = "prep_fuel_crafting"
 local RELATION_PHASE_PREP_FUEL_RESOURCE = "prep_fuel_resource"
 local RELATION_PHASE_PREP_ALLOC_ITEM = "prep_alloc_item"
@@ -457,58 +462,60 @@ local RELATION_PHASE_VIRTUAL = "virtual_recipes"
 local RELATION_PHASE_FINALIZE = "finalize"
 local RELATION_PHASE_DONE = "done"
 
----Snapshot a table's keys into an array (pairs order). The split build walks this
----array by integer cursor across ticks instead of holding a non-storable pairs
----iterator. In-game pairs order is deterministic, so the array -- and hence the
----resulting recipe_for_* order -- matches the synchronous build's pairs walk.
----@param t table
----@return string[]
-local function snapshot_keys(t)
-    local names = {}
-    for name, _ in pairs(t) do names[#names + 1] = name end
-    return names
-end
-
----Process up to `budget` items from names[state.cursor..], calling fn(name) for
----each and advancing the cursor. Returns true when the array is exhausted (the
----caller then moves to the next phase). Shared cursor loop for every array-driven
----prep / listing phase.
----@param state RelationBuildState
----@param names string[]
----@param budget integer
----@param fn fun(name: string)
----@return boolean done
-local function step_array(state, names, budget, fn)
-    local stop = math.min(#names, state.cursor + budget - 1)
-    for i = state.cursor, stop do fn(names[i]) end
-    state.cursor = stop + 1
-    return state.cursor > #names
-end
-
----Start a tick-split relation build. Does ONLY the cheap, non-resumable work --
----key snapshots (pairs is a single pass) and the all-false seed of the research-
----dependent fields -- then returns the state armed at the first prep phase. The
----heavy setup (fuel cache, per-material table allocation, burnt_result map) is
----deferred to build_relation_step's prep phases so no single tick pays it all.
+---Process up to `budget` entries of the live table `t`, resuming after
+---state.cursor_key (nil = from the start), calling fn(name, value) for each and
+---advancing the cursor. Returns true once the table is exhausted (the caller then
+---moves to the next phase; cursor_key is reset to nil so it starts fresh). Shared
+---walk for every prep / listing phase.
 ---
----Seeding enabled_recipe / virtual_recipe_researched / virtual_material_researched
----to false (not leaving them nil) is required for correctness: the finalize pass
----replays the currently-enabled recipes through apply_research_change, which keys
----its flip test on the stored value. A nil virtual_recipe_researched would read as
----a flip for an unresearched virtual recipe and wrongly debit craftable_count.
----recompute_relation_dynamic also writes false for every disabled recipe, so this
----keeps the split build field-for-field equal to a synchronous one.
----@param force_index integer
+---Holds only the last key -- a string, hence storage-safe across the tick-split --
+---and re-derives the pairs iterator each call, resuming via the iterator function
+---pairs() returns. This works for both LuaCustomTable (prototypes.* / force.recipes)
+---and plain tables (storage.virtuals.*): raw next() rejects a LuaCustomTable
+---(userdata), but the pairs iterator resumes from a stored key. Resume is O(1) for
+---force.recipes and an O(position) -- but ~1.5ns/key -- scan for prototypes.item,
+---paid once per call, so the spread is essentially free. In-game pairs order is
+---deterministic and the resume yields the same sequence as a single pass, so the
+---resulting recipe_for_* order matches the synchronous build.
+---@param state RelationBuildState
+---@param t table
+---@param budget integer
+---@param fn fun(name: string, value: any)
+---@return boolean done
+local function step_table(state, t, budget, fn)
+    local iter, s = pairs(t)
+    local key = state.cursor_key
+    local processed = 0
+    while processed < budget do
+        local k, v = iter(s, key)
+        if k == nil then
+            state.cursor_key = nil
+            return true
+        end
+        fn(k, v)
+        key = k
+        processed = processed + 1
+    end
+    state.cursor_key = key
+    return false
+end
+
+---Start a tick-split relation build: allocate the empty cache skeleton and the
+---any-fluid-fuel name list, then return the state armed at the first prep phase.
+---Everything heavy -- fuel cache, per-material table allocation, burnt_result map,
+---the recipe-set listing, and the all-false seed of the research-dependent fields --
+---is deferred to build_relation_step's phases, which walk each source table directly
+---via step_table's stored-key pairs resume so no single tick pays a full pass.
+---
+---The all-false seed (enabled_recipe / virtual_recipe_researched /
+---virtual_material_researched) is required for correctness -- the finalize pass
+---replays the live-enabled recipes through apply_research_change, which keys its flip
+---test on the stored value, so a nil would be misread as a flip and wrongly debit
+---craftable_count -- but it no longer happens here: each phase seeds the field for
+---the table it walks (REAL -> enabled_recipe, VIRTUAL -> virtual_recipe_researched,
+---PREP_ALLOC_VMAT -> virtual_material_researched), all complete before finalize.
 ---@return RelationBuildState
-function M.build_relation_init(force_index)
-    local force = game.forces[force_index]
-
-    local item_names = snapshot_keys(prototypes.item)
-    local fluid_names = snapshot_keys(prototypes.fluid)
-    local virtual_material_names = snapshot_keys(storage.virtuals.material)
-    local real_recipe_names = snapshot_keys(force.recipes)
-    local virtual_recipe_names = snapshot_keys(storage.virtuals.recipe)
-
+function M.build_relation_init()
     ---@type RelationToRecipes
     local rel = {
         enabled_recipe = {},
@@ -520,22 +527,11 @@ function M.build_relation_init(force_index)
         recipes_by_category = {},
         contributes = {},
     }
-    for _, name in ipairs(real_recipe_names) do rel.enabled_recipe[name] = false end
-    for _, name in ipairs(virtual_recipe_names) do rel.virtual_recipe_researched[name] = false end
-    for _, name in ipairs(virtual_material_names) do rel.virtual_material_researched[name] = false end
 
     ---@type RelationBuildState
     return {
         phase = RELATION_PHASE_PREP_FUEL_CRAFTING,
         rel = rel,
-        cursor = 1,
-        real_recipe_names = real_recipe_names,
-        virtual_recipe_names = virtual_recipe_names,
-        item_names = item_names,
-        fluid_names = fluid_names,
-        virtual_material_names = virtual_material_names,
-        crafting_category_names = snapshot_keys(prototypes.recipe_category),
-        resource_category_names = snapshot_keys(prototypes.resource_category),
         fuel = {
             crafting_fuels = {},
             resource_fuels = {},
@@ -558,90 +554,80 @@ local function build_relation_step(state, force_index, budget)
 
     if state.phase == RELATION_PHASE_PREP_FUEL_CRAFTING then
         local fuel = state.fuel
-        if step_array(state, state.crafting_category_names, budget, function(cat)
+        if step_table(state, prototypes.recipe_category, budget, function(cat)
                 fuel.crafting_fuels[cat], fuel.crafting_fluid_fuels[cat] =
                     compute_category_fuels(acc.get_machines_in_category(cat), fuel.any_fluid_fuels)
             end) then
             state.phase = RELATION_PHASE_PREP_FUEL_RESOURCE
-            state.cursor = 1
         end
         return false
     elseif state.phase == RELATION_PHASE_PREP_FUEL_RESOURCE then
         local fuel = state.fuel
-        if step_array(state, state.resource_category_names, budget, function(cat)
+        if step_table(state, prototypes.resource_category, budget, function(cat)
                 fuel.resource_fuels[cat], fuel.resource_fluid_fuels[cat] =
                     compute_category_fuels(acc.get_machines_in_resource_category(cat), fuel.any_fluid_fuels)
             end) then
             state.phase = RELATION_PHASE_PREP_ALLOC_ITEM
-            state.cursor = 1
         end
         return false
     elseif state.phase == RELATION_PHASE_PREP_ALLOC_ITEM then
-        -- Allocate item RelationToRecipe tables and resolve each item's
-        -- burnt_result in the same item pass (both keyed by item name).
+        -- Allocate item RelationToRecipe tables and resolve each item's burnt_result
+        -- in the same item pass; the resume yields the item prototype as the value,
+        -- so no second prototypes.item[name] lookup is needed.
         local burnt = state.burnt_result_names
-        if step_array(state, state.item_names, budget, function(name)
+        if step_table(state, prototypes.item, budget, function(name, item)
                 rel.item[name] = create_relation_table()
-                local b = prototypes.item[name].burnt_result
+                local b = item.burnt_result
                 if b then burnt[name] = b.name end
             end) then
             state.phase = RELATION_PHASE_PREP_ALLOC_FLUID
-            state.cursor = 1
         end
         return false
     elseif state.phase == RELATION_PHASE_PREP_ALLOC_FLUID then
-        if step_array(state, state.fluid_names, budget, function(name)
+        if step_table(state, prototypes.fluid, budget, function(name)
                 rel.fluid[name] = create_relation_table()
             end) then
             state.phase = RELATION_PHASE_PREP_ALLOC_VMAT
-            state.cursor = 1
         end
         return false
     elseif state.phase == RELATION_PHASE_PREP_ALLOC_VMAT then
-        if step_array(state, state.virtual_material_names, budget, function(name)
+        -- Allocate the virtual-material relation tables and seed each material's
+        -- researched flag false (finalize flips the researched ones; a nil would be
+        -- misread as a flip). Nothing between here and finalize reads it.
+        if step_table(state, storage.virtuals.material, budget, function(name)
                 rel.virtual_recipe[name] = create_relation_table()
+                rel.virtual_material_researched[name] = false
             end) then
             state.phase = RELATION_PHASE_REAL
-            state.cursor = 1
         end
         return false
     elseif state.phase == RELATION_PHASE_REAL then
-        local recipes = game.forces[force_index].recipes
-        local names = state.real_recipe_names
-        local stop = math.min(#names, state.cursor + budget - 1)
-        for i = state.cursor, stop do
-            local recipe = recipes[names[i]]
-            -- A recipe can leave force.recipes only via a config change, which
-            -- discards this state through reinit_force_data, so it is present here.
-            if recipe then
-                process_real_recipe(rel, recipe, state.fuel, state.burnt_result_names)
-            end
-        end
-        state.cursor = stop + 1
-        if state.cursor > #names then
+        -- List real recipes and seed enabled_recipe false (finalize flips the live-
+        -- enabled ones). The resume yields the live recipe as the value, so there is
+        -- no force.recipes[name] re-lookup and no stale-entry guard: pairs only
+        -- yields recipes that exist, and the set is research-stable (a config change
+        -- that could remove one discards this whole state via reinit_force_data).
+        local fuel, burnt = state.fuel, state.burnt_result_names
+        if step_table(state, game.forces[force_index].recipes, budget, function(name, recipe)
+                rel.enabled_recipe[name] = false
+                process_real_recipe(rel, recipe, fuel, burnt)
+            end) then
             state.phase = RELATION_PHASE_FUEL_REVERSE
-            state.cursor = 1
         end
         return false
     elseif state.phase == RELATION_PHASE_FUEL_REVERSE then
         build_fuel_consumer_reverse(rel, state.fuel)
         state.phase = RELATION_PHASE_VIRTUAL
-        state.cursor = 1
         return false
     elseif state.phase == RELATION_PHASE_VIRTUAL then
-        local recipes = storage.virtuals.recipe
-        local names = state.virtual_recipe_names
-        local stop = math.min(#names, state.cursor + budget - 1)
-        for i = state.cursor, stop do
-            local recipe = recipes[names[i]]
-            if recipe then
-                process_virtual_recipe(rel, recipe, state.fuel, state.burnt_result_names)
-            end
-        end
-        state.cursor = stop + 1
-        if state.cursor > #names then
+        -- List virtual recipes and seed virtual_recipe_researched false (finalize
+        -- flips the researched ones). Same resume-yields-the-value shape as REAL.
+        local fuel, burnt = state.fuel, state.burnt_result_names
+        if step_table(state, storage.virtuals.recipe, budget, function(name, recipe)
+                rel.virtual_recipe_researched[name] = false
+                process_virtual_recipe(rel, recipe, fuel, burnt)
+            end) then
             state.phase = RELATION_PHASE_FINALIZE
-            state.cursor = 1
         end
         return false
     elseif state.phase == RELATION_PHASE_FINALIZE then
