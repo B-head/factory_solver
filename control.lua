@@ -270,6 +270,13 @@ end)
 script.on_event(defines.events.on_tick, function(event)
     flib_dictionary.on_tick()
 
+    -- Advance the tick-split relation build (manage/relation.lua) before solving so
+    -- a GUI reading the cache this tick sees as much progress as possible; the
+    -- synchronous fallback in save.get_relation_to_recipes covers the rest. It is
+    -- independent of the solver (the solve path never reads relation_to_recipes), so
+    -- both run every tick.
+    save.advance_relation_builds()
+
     local force_data, solution = pre_solve.find_the_need_for_solve()
     if force_data and solution then
         pre_solve.forwerd_solve(force_data, solution)

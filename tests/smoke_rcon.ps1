@@ -148,6 +148,19 @@ try {
         $allPass = $false
     }
 
+    # The tick-split relation build (build_relation_init + build_relation_step,
+    # driven from on_tick) must reproduce the synchronous create_relation_to_recipes
+    # field-for-field, including the one-recipe-per-step cursor reentry. Solution-
+    # independent, so it runs once up front too.
+    $relationSplit = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_relation_split'))"
+    if ($relationSplit -eq "OK") {
+        Write-Host "SMOKE PASS: [relation_split] tick-split build == synchronous build"
+    } else {
+        Write-Host "SMOKE FAIL: [relation_split] $relationSplit"
+        $allPass = $false
+    }
+
     # Fuel follows a machine change across every fuel mode (the on_make_fuel_table /
     # apply_machine_clipboard reconciliation). Solution-independent, driven off
     # data_test.lua machines, so it runs once up front too.

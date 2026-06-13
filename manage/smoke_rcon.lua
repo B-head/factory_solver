@@ -1317,6 +1317,83 @@ function M.check_force_caches()
     return "OK"
 end
 
+---RCON entry point: assert the tick-split relation build reproduces the
+---synchronous one. create_relation_to_recipes runs build + recompute_dynamic in
+---one pass; the split build (build_relation_init + build_relation_step) lists the
+---recipes across ticks with everything enabled=false, then a finalize pass flips
+---the live-enabled recipes via apply_research_change. Both must yield a
+---field-for-field identical cache -- this is the contract the on_tick driver and
+---the get_relation_to_recipes fallback rely on. Also runs the build one recipe per
+---step (budget reentry) to exercise the cursor the way the driver does across
+---ticks. Returns "OK" or "ERROR: <detail>". Base-game prototypes only.
+---@return string
+function M.check_relation_split()
+    local ok, err = pcall(function()
+        local sync = relation.create_relation_to_recipes(FORCE_INDEX)
+
+        -- finish_relation_build: every phase to completion in one call.
+        local finished = relation.finish_relation_build(
+            relation.build_relation_init(FORCE_INDEX), FORCE_INDEX)
+
+        -- One recipe per advance: the most aggressive split, a tick boundary
+        -- between every recipe, which is what stresses the cursor reentry.
+        local drip_state = relation.build_relation_init(FORCE_INDEX)
+        local dripped
+        repeat
+            dripped = relation.advance_relation_build(drip_state, FORCE_INDEX)
+        until dripped
+
+        local function assert_lists_equal(label, a, b)
+            assert(#a == #b, label .. " length mismatch (" .. #a .. " vs " .. #b .. ")")
+            local sa, sb = {}, {}
+            for i, v in ipairs(a) do sa[i] = v end
+            for i, v in ipairs(b) do sb[i] = v end
+            -- recipe_for_* are order-sensitive arrays; sort copies before comparing
+            -- so a harness-variable pairs order is not mistaken for a real diff.
+            table.sort(sa)
+            table.sort(sb)
+            for i = 1, #sa do
+                assert(sa[i] == sb[i], label .. " element mismatch at " .. i)
+            end
+        end
+
+        ---@param other RelationToRecipes
+        ---@param tag string
+        local function compare(other, tag)
+            for kind, sync_map in pairs({ item = sync.item, fluid = sync.fluid, virtual_recipe = sync.virtual_recipe }) do
+                local other_map = other[kind]
+                for name, info in pairs(sync_map) do
+                    local oi = other_map[name]
+                    assert(info.craftable_count == oi.craftable_count,
+                        tag .. " " .. kind .. " craftable_count mismatch: " .. name)
+                    assert_lists_equal(tag .. " " .. kind .. " recipe_for_product " .. name,
+                        info.recipe_for_product, oi.recipe_for_product)
+                    assert_lists_equal(tag .. " " .. kind .. " recipe_for_ingredient " .. name,
+                        info.recipe_for_ingredient, oi.recipe_for_ingredient)
+                    assert_lists_equal(tag .. " " .. kind .. " recipe_for_burnt_result " .. name,
+                        info.recipe_for_burnt_result, oi.recipe_for_burnt_result)
+                end
+            end
+            for name, v in pairs(sync.enabled_recipe) do
+                assert(v == other.enabled_recipe[name], tag .. " enabled_recipe mismatch: " .. name)
+            end
+            for name, v in pairs(sync.virtual_recipe_researched) do
+                assert(v == other.virtual_recipe_researched[name], tag .. " virtual_recipe_researched mismatch: " .. name)
+            end
+            for name, v in pairs(sync.virtual_material_researched) do
+                assert(v == other.virtual_material_researched[name], tag .. " virtual_material_researched mismatch: " .. name)
+            end
+        end
+
+        compare(finished, "finish")
+        compare(dripped, "drip")
+    end)
+    if not ok then
+        return "ERROR: relation-split check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
 ---Asserts that the stored fuel follows a machine change across every fuel mode,
 ---the bug behind acc.reconcile_fuel_for_machine / reconcile_fluid_fuel_for_machine.
 ---Fluid leg: a default RANGE re-derives to the new machine's acceptance range, an
@@ -1957,6 +2034,7 @@ function M.register()
         check_catalyst_reclassify = M.check_catalyst_reclassify,
         check_target_rescue = M.check_target_rescue,
         check_force_caches = M.check_force_caches,
+        check_relation_split = M.check_relation_split,
         check_fuel_reconciliation = M.check_fuel_reconciliation,
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
         check_fixed_recipe_machine = M.check_fixed_recipe_machine,

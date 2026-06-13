@@ -141,6 +141,8 @@ function M.init_force_data(force_index)
         storage.forces[force_index] = {
             relation_to_recipes = { enabled_recipe = {}, item = {}, fluid = {}, virtual_recipe = {}, virtual_recipe_researched = {}, recipes_by_category = {}, contributes = {} },
             relation_to_recipes_needs_updating = true,
+            -- nil while no tick-split build is in flight; set by save.advance_relation_builds.
+            relation_build = nil,
             group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {}, external = {} },
             group_infos_needs_updating = true,
             solutions = {},
@@ -157,6 +159,10 @@ function M.reinit_force_data(force_index)
     local force_data = storage.forces[force_index]
     if force_data then
         force_data.relation_to_recipes_needs_updating = true
+        -- Drop any in-flight tick-split build: it snapshotted the old recipe set,
+        -- which a config change may have altered. The needs_updating flag above
+        -- re-fires a fresh build on the next on_tick.
+        force_data.relation_build = nil
         force_data.group_infos_needs_updating = true
 
         -- Older saves predate research_bonuses. Initialize to zeros so the
@@ -442,7 +448,13 @@ end
 ---@param now_enabled boolean
 function M.apply_research_change(force_index, recipe_names, now_enabled)
     local force_data = storage.forces[force_index]
-    if not force_data or force_data.relation_to_recipes_needs_updating then
+    -- relation_build non-nil means a tick-split build is mid-flight: its partial
+    -- rel has empty contributes / recipe_for_* for not-yet-listed recipes, so an
+    -- incremental apply would miscount. The finalize pass applies the live enabled
+    -- set atomically instead, so skipping here loses nothing.
+    if not force_data
+        or force_data.relation_to_recipes_needs_updating
+        or force_data.relation_build then
         return
     end
     -- Patch group_infos in lockstep when it is already built; if it isn't, pass
@@ -451,12 +463,54 @@ function M.apply_research_change(force_index, recipe_names, now_enabled)
     relation.apply_research_change(force_data.relation_to_recipes, group_infos, force_index, recipe_names, now_enabled)
 end
 
+---on_tick driver for the tick-split relation build. Advances at most one force per
+---tick (like find_the_need_for_solve): fires a build for the first force whose
+---cache is stale, or steps the one already in flight. The synchronous fallback in
+---get_relation_to_recipes covers a GUI that needs the cache sooner.
+---@return boolean advanced True if a build was fired or stepped this tick.
+function M.advance_relation_builds()
+    for _, force in pairs(game.forces) do
+        local force_data = storage.forces[force.index]
+        if force_data then
+            if force_data.relation_to_recipes_needs_updating and not force_data.relation_build then
+                -- Fire: clear needs_updating now so get_relation_to_recipes routes
+                -- to the relation_build fallback (not a second synchronous build)
+                -- and apply_research_change skips on relation_build instead.
+                force_data.relation_to_recipes_needs_updating = false
+                force_data.relation_build = relation.build_relation_init(force.index)
+                return true
+            end
+            if force_data.relation_build then
+                local rel = relation.advance_relation_build(force_data.relation_build, force.index)
+                if rel then
+                    force_data.relation_to_recipes = rel
+                    force_data.relation_build = nil
+                    -- craftable_count moved, so the group counts are stale.
+                    force_data.group_infos_needs_updating = true
+                end
+                return true
+            end
+        end
+    end
+    return false
+end
+
 ---comment
 ---@param player_index integer
 ---@return RelationToRecipes
 function M.get_relation_to_recipes(player_index)
     local force_index = game.players[player_index].force_index
     local force_data = storage.forces[force_index]
+    -- A tick-split build is mid-flight: finish it synchronously now (a GUI needs
+    -- the cache before on_tick got there). finish_relation_build runs every
+    -- remaining phase including the finalize apply, so the result equals a full
+    -- synchronous build. Checked before needs_updating so we never double-build.
+    if force_data.relation_build then
+        force_data.relation_to_recipes = relation.finish_relation_build(force_data.relation_build, force_index)
+        force_data.relation_build = nil
+        force_data.relation_to_recipes_needs_updating = false
+        return force_data.relation_to_recipes
+    end
     if force_data.relation_to_recipes_needs_updating then
         force_data.relation_to_recipes_needs_updating = false
         force_data.relation_to_recipes = relation.create_relation_to_recipes(force_index)

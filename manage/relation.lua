@@ -137,181 +137,228 @@ local function compute_researched(rel, recipe, force)
     return true
 end
 
----Build the recipe-set-dependent half of RelationToRecipes: the recipe_for_* /
----recipes_by_category / fuel_consumer_* lists. These depend only on which recipes
----exist, which is stable across research (force.recipes holds every recipe
----regardless of `enabled`), so they are built once and reused. The
----research-dependent fields (enabled_recipe / craftable_count /
----virtual_recipe_researched) are left empty here and filled by
----recompute_relation_dynamic.
----@param force_index integer
+---@return RelationToRecipe
+local function create_relation_table()
+    ---@type RelationToRecipe
+    return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_burnt_result = {}, fuel_consumer_categories = {}, fuel_consumer_virtual_recipes = {} }
+end
+
+-- A machine burning an item fuel emits that fuel's burnt_result (spent cell /
+-- ash), so a recipe consuming the fuel is also a *producer* of the residue.
+-- Register it under recipe_for_burnt_result -- NOT recipe_for_product -- so the
+-- picker lists it in a dedicated "spent fuel" section instead of flooding the
+-- product list with every fuel-burning recipe. The craftable_count credit for it
+-- is applied later (recompute_relation_dynamic, or apply_research_change in the
+-- split build's finalize). Fluid fuels have no burnt_result and never reach here.
+---@param rel RelationToRecipes
+---@param burnt_result_names table<string, string>
+---@param fuel_item_name string
+---@param recipe_name string
+local function register_burnt_result(rel, burnt_result_names, fuel_item_name, recipe_name)
+    local burnt_name = burnt_result_names[fuel_item_name]
+    if burnt_name then
+        flib_table.insert(rel.item[burnt_name].recipe_for_burnt_result, recipe_name)
+        -- The consuming recipe makes the spent item craftable when it runs, so
+        -- the residue is one of the recipe's contributions (see RelationContribution).
+        local contrib = rel.contributes[recipe_name]
+        contrib[#contrib + 1] = { type = "item", name = burnt_name }
+    end
+end
+
+-- Resolve every fuel item's burnt_result once into an immutable item -> spent-item
+-- NAME map (string-valued, not the LuaItemPrototype, so it stays storage-safe when
+-- the build is split across ticks). A fuel would otherwise be resolved once per
+-- (recipe, category) it can burn in -- ~389k times for only ~116 distinct fuels on
+-- a pyanodon set.
+---@return table<string, string>
+local function build_burnt_result_names()
+    local burnt_result_names = {} ---@type table<string, string>
+    for name, item in pairs(prototypes.item) do
+        local burnt = item.burnt_result
+        if burnt then burnt_result_names[name] = burnt.name end
+    end
+    return burnt_result_names
+end
+
+---Bundle cache_fuel_names' five return values into one storage-safe table (all
+---name-string arrays / maps) so the split build can carry it across ticks.
+---@return RelationBuildFuelCache
+local function build_fuel_cache()
+    local crafting_fuels, resource_fuels,
+        crafting_fluid_fuels, resource_fluid_fuels,
+        any_fluid_fuels = M.cache_fuel_names()
+    return {
+        crafting_fuels = crafting_fuels,
+        resource_fuels = resource_fuels,
+        crafting_fluid_fuels = crafting_fluid_fuels,
+        resource_fluid_fuels = resource_fluid_fuels,
+        any_fluid_fuels = any_fluid_fuels,
+    }
+end
+
+---Allocate the relation-cache skeleton: an empty RelationToRecipe per item / fluid
+---/ virtual material, plus empty research-dependent fields. recipe_for_* lists are
+---filled by process_real_recipe / process_virtual_recipe.
 ---@return RelationToRecipes
-local function build_relation_lists(force_index)
-    local force = game.forces[force_index]
+local function create_empty_rel()
     local items = {} ---@type table<string, RelationToRecipe>
     local fluids = {} ---@type table<string, RelationToRecipe>
     local virtuals = {} ---@type table<string, RelationToRecipe>
-    local recipes_by_category = {} ---@type table<string, string[]>
-
-    local cache_crafting_fuels, cache_resource_fuels,
-        cache_crafting_fluid_fuels, cache_resource_fluid_fuels,
-        any_fluid_fuels = M.cache_fuel_names()
-
-    ---@return RelationToRecipe
-    local function create_relation_table()
-        ---@type RelationToRecipe
-        return { craftable_count = 0, recipe_for_ingredient = {}, recipe_for_product = {}, recipe_for_burnt_result = {}, fuel_consumer_categories = {}, fuel_consumer_virtual_recipes = {} }
-    end
-
-    for key, _ in pairs(prototypes.item) do
-        items[key] = create_relation_table()
-    end
-    for key, _ in pairs(prototypes.fluid) do
-        fluids[key] = create_relation_table()
-    end
-    for key, _ in pairs(storage.virtuals.material) do
-        virtuals[key] = create_relation_table()
-    end
-
-    local contributes = {} ---@type table<string, RelationContribution[]>
-
+    for key, _ in pairs(prototypes.item) do items[key] = create_relation_table() end
+    for key, _ in pairs(prototypes.fluid) do fluids[key] = create_relation_table() end
+    for key, _ in pairs(storage.virtuals.material) do virtuals[key] = create_relation_table() end
     ---@type RelationToRecipes
-    local rel = {
+    return {
         enabled_recipe = {},
         item = items,
         fluid = fluids,
         virtual_recipe = virtuals,
         virtual_recipe_researched = {},
         virtual_material_researched = {},
-        recipes_by_category = recipes_by_category,
-        contributes = contributes,
+        recipes_by_category = {},
+        contributes = {},
     }
+end
 
-    -- A machine burning an item fuel emits that fuel's burnt_result (spent cell /
-    -- ash), so a recipe consuming the fuel is also a *producer* of the residue.
-    -- Register it under recipe_for_burnt_result -- NOT recipe_for_product -- so the
-    -- picker lists it in a dedicated "spent fuel" section instead of flooding the
-    -- product list with every fuel-burning recipe. The craftable_count credit for
-    -- it is applied later, from this list, by recompute_relation_dynamic. Fluid
-    -- fuels have no burnt_result and never reach here.
-    --
-    -- A fuel is registered once per (recipe, category) it can burn in -- ~389k
-    -- times for only ~116 distinct fuels on a pyanodon set -- so resolve
-    -- burnt_result once up front into an immutable item -> spent-item NAME map
-    -- (string-valued, not the LuaItemPrototype, so it stays storage-safe if this
-    -- is ever split across ticks).
-    local burnt_result_names = {} ---@type table<string, string>
-    for name, item in pairs(prototypes.item) do
-        local burnt = item.burnt_result
-        if burnt then burnt_result_names[name] = burnt.name end
+---Add one real recipe's recipe-set contributions to rel: group it by category,
+---record its products / ingredients on the materials' recipe_for_* lists, build its
+---`contributes` entry, and register the spent-fuel residues of the fuels its
+---category can burn. recipe-set-dependent only -- no enabled state is touched.
+---@param rel RelationToRecipes
+---@param recipe LuaRecipe
+---@param fuel RelationBuildFuelCache
+---@param burnt_result_names table<string, string>
+local function process_real_recipe(rel, recipe, fuel, burnt_result_names)
+    -- Group real recipes by category so a fuel's consumers expand lazily
+    -- (category -> recipes) instead of being flattened per (recipe, fuel).
+    local recipes_by_category = rel.recipes_by_category
+    local cat_recipes = recipes_by_category[recipe.category]
+    if not cat_recipes then
+        cat_recipes = {}
+        recipes_by_category[recipe.category] = cat_recipes
     end
-    ---@param fuel_item_name string
-    ---@param recipe_name string
-    local function register_burnt_result(fuel_item_name, recipe_name)
-        local burnt_name = burnt_result_names[fuel_item_name]
-        if burnt_name then
-            flib_table.insert(items[burnt_name].recipe_for_burnt_result, recipe_name)
-            -- The consuming recipe makes the spent item craftable when it runs, so
-            -- the residue is one of the recipe's contributions (see RelationContribution).
-            local contrib = contributes[recipe_name]
-            contrib[#contrib + 1] = { type = "item", name = burnt_name }
-        end
+    cat_recipes[#cat_recipes + 1] = recipe.name
+
+    local contrib = {}
+    rel.contributes[recipe.name] = contrib
+
+    for _, value in ipairs(recipe.products) do
+        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
+        contrib[#contrib + 1] = { type = value.type, name = value.name }
     end
-
-    for _, recipe in pairs(force.recipes) do
-        -- Group real recipes by category so a fuel's consumers expand lazily
-        -- (category -> recipes) instead of being flattened per (recipe, fuel).
-        local cat_recipes = recipes_by_category[recipe.category]
-        if not cat_recipes then
-            cat_recipes = {}
-            recipes_by_category[recipe.category] = cat_recipes
-        end
-        cat_recipes[#cat_recipes + 1] = recipe.name
-
-        local contrib = {}
-        contributes[recipe.name] = contrib
-
-        for _, value in ipairs(recipe.products) do
-            flib_table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
-            contrib[#contrib + 1] = { type = value.type, name = value.name }
-        end
-        for _, value in ipairs(recipe.ingredients) do
-            flib_table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
-        end
-        for _, value in ipairs(cache_crafting_fuels[recipe.category]) do
-            register_burnt_result(value, recipe.name)
-        end
+    for _, value in ipairs(recipe.ingredients) do
+        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
     end
+    for _, value in ipairs(fuel.crafting_fuels[recipe.category]) do
+        register_burnt_result(rel, burnt_result_names, value, recipe.name)
+    end
+end
 
-    -- Reverse cache_fuel_names' category -> fuel lists into each fuel material's
-    -- fuel_consumer_categories. This is the sum of category fuel-list sizes
-    -- (~1k on pyanodon), not the recipe x fuel product (~389k) a per-recipe
-    -- recipe_for_fuel insert would pay.
-    for category, fuel_items in pairs(cache_crafting_fuels) do
+-- Reverse cache_fuel_names' category -> fuel lists into each fuel material's
+-- fuel_consumer_categories. This is the sum of category fuel-list sizes (~1k on
+-- pyanodon), not the recipe x fuel product (~389k) a per-recipe recipe_for_fuel
+-- insert would pay.
+---@param rel RelationToRecipes
+---@param fuel RelationBuildFuelCache
+local function build_fuel_consumer_reverse(rel, fuel)
+    for category, fuel_items in pairs(fuel.crafting_fuels) do
         for _, fuel_name in ipairs(fuel_items) do
-            local info = items[fuel_name]
+            local info = rel.item[fuel_name]
             if info then
                 info.fuel_consumer_categories[#info.fuel_consumer_categories + 1] = category
             end
         end
     end
-    for category, fuel_fluids in pairs(cache_crafting_fluid_fuels) do
+    for category, fuel_fluids in pairs(fuel.crafting_fluid_fuels) do
         for _, fuel_name in ipairs(fuel_fluids) do
-            local info = fluids[fuel_name]
+            local info = rel.fluid[fuel_name]
             if info then
                 info.fuel_consumer_categories[#info.fuel_consumer_categories + 1] = category
             end
         end
     end
+end
 
-    for _, recipe in pairs(storage.virtuals.recipe) do
-        local contrib = {}
-        contributes[recipe.name] = contrib
+---Add one virtual recipe's recipe-set contributions to rel: its products /
+---ingredients, and -- for a fixed-machine or resource virtual -- the fuels it
+---consumes (and their spent-fuel residues). recipe-set-dependent only.
+---@param rel RelationToRecipes
+---@param recipe VirtualRecipe
+---@param fuel RelationBuildFuelCache
+---@param burnt_result_names table<string, string>
+local function process_virtual_recipe(rel, recipe, fuel, burnt_result_names)
+    local contrib = {}
+    rel.contributes[recipe.name] = contrib
 
-        for _, value in pairs(recipe.products) do
-            flib_table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
-            contrib[#contrib + 1] = { type = value.type, name = value.name }
-        end
-        for _, value in pairs(recipe.ingredients) do
-            flib_table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
-        end
+    for _, value in pairs(recipe.products) do
+        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
+        contrib[#contrib + 1] = { type = value.type, name = value.name }
+    end
+    for _, value in pairs(recipe.ingredients) do
+        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
+    end
 
-        if recipe.fixed_crafting_machine then
-            local machine = tn.typed_name_to_machine(recipe.fixed_crafting_machine)
+    if recipe.fixed_crafting_machine then
+        local machine = tn.typed_name_to_machine(recipe.fixed_crafting_machine)
 
-            local fixed_fuel = acc.try_get_fixed_fuel(machine)
-            if fixed_fuel then
-                flib_table.insert(get_info(rel, fixed_fuel.type, fixed_fuel.name).fuel_consumer_virtual_recipes, recipe.name)
-                if fixed_fuel.type == "item" then
-                    register_burnt_result(fixed_fuel.name, recipe.name)
-                end
-            end
-
-            if acc.is_use_any_fluid_fuel(machine) then
-                for _, value in ipairs(any_fluid_fuels) do
-                    flib_table.insert(get_info(rel, "fluid", value).fuel_consumer_virtual_recipes, recipe.name)
-                end
-            end
-
-            local fuel_categories = acc.try_get_fuel_categories(machine)
-            if fuel_categories then
-                local fuels = acc.get_fuels_in_categories(fuel_categories)
-                for _, value in ipairs(fuels) do
-                    flib_table.insert(get_info(rel, "item", value.name).fuel_consumer_virtual_recipes, recipe.name)
-                    register_burnt_result(value.name, recipe.name)
-                end
+        local fixed_fuel = acc.try_get_fixed_fuel(machine)
+        if fixed_fuel then
+            flib_table.insert(get_info(rel, fixed_fuel.type, fixed_fuel.name).fuel_consumer_virtual_recipes, recipe.name)
+            if fixed_fuel.type == "item" then
+                register_burnt_result(rel, burnt_result_names, fixed_fuel.name, recipe.name)
             end
         end
 
-        if recipe.resource_category then
-            for _, value in ipairs(cache_resource_fuels[recipe.resource_category]) do
-                flib_table.insert(get_info(rel, "item", value).fuel_consumer_virtual_recipes, recipe.name)
-                register_burnt_result(value, recipe.name)
-            end
-            for _, value in ipairs(cache_resource_fluid_fuels[recipe.resource_category]) do
+        if acc.is_use_any_fluid_fuel(machine) then
+            for _, value in ipairs(fuel.any_fluid_fuels) do
                 flib_table.insert(get_info(rel, "fluid", value).fuel_consumer_virtual_recipes, recipe.name)
             end
         end
+
+        local fuel_categories = acc.try_get_fuel_categories(machine)
+        if fuel_categories then
+            local fuels = acc.get_fuels_in_categories(fuel_categories)
+            for _, value in ipairs(fuels) do
+                flib_table.insert(get_info(rel, "item", value.name).fuel_consumer_virtual_recipes, recipe.name)
+                register_burnt_result(rel, burnt_result_names, value.name, recipe.name)
+            end
+        end
+    end
+
+    if recipe.resource_category then
+        for _, value in ipairs(fuel.resource_fuels[recipe.resource_category]) do
+            flib_table.insert(get_info(rel, "item", value).fuel_consumer_virtual_recipes, recipe.name)
+            register_burnt_result(rel, burnt_result_names, value, recipe.name)
+        end
+        for _, value in ipairs(fuel.resource_fluid_fuels[recipe.resource_category]) do
+            flib_table.insert(get_info(rel, "fluid", value).fuel_consumer_virtual_recipes, recipe.name)
+        end
+    end
+end
+
+---Build the recipe-set-dependent half of RelationToRecipes: the recipe_for_* /
+---recipes_by_category / fuel_consumer_* lists. These depend only on which recipes
+---exist, which is stable across research (force.recipes holds every recipe
+---regardless of `enabled`), so they are built once and reused. The
+---research-dependent fields (enabled_recipe / craftable_count /
+---virtual_recipe_researched) are left empty here and filled by
+---recompute_relation_dynamic. This is the synchronous one-pass build; the
+---tick-split equivalent (build_relation_init + build_relation_step) reuses the
+---same process_* helpers, so both produce a field-for-field identical cache.
+---@param force_index integer
+---@return RelationToRecipes
+local function build_relation_lists(force_index)
+    local force = game.forces[force_index]
+    local fuel = build_fuel_cache()
+    local burnt_result_names = build_burnt_result_names()
+    local rel = create_empty_rel()
+
+    for _, recipe in pairs(force.recipes) do
+        process_real_recipe(rel, recipe, fuel, burnt_result_names)
+    end
+    build_fuel_consumer_reverse(rel, fuel)
+    for _, recipe in pairs(storage.virtuals.recipe) do
+        process_virtual_recipe(rel, recipe, fuel, burnt_result_names)
     end
 
     return rel
@@ -384,6 +431,160 @@ function M.recompute_relation_dynamic(rel, force_index)
         virtual_material_researched[name] = not acc.is_unresearched(vm, rel)
     end
     rel.virtual_material_researched = virtual_material_researched
+end
+
+-- Tick-split relation build (driven from on_tick via manage/save.lua). The
+-- synchronous create_relation_to_recipes walks every item / fluid / recipe in one
+-- pass, which stalls a frame on large modpacks the first time a GUI reads the
+-- cache. This spreads the recipe listing over ticks: build_relation_init does the
+-- one-shot prep, build_relation_step lists RELATION_BUILD_BUDGET recipes per call,
+-- and a final atomic pass flips the currently-enabled recipes via
+-- apply_research_change. The listing phases are research-invariant (force.recipes
+-- holds every recipe regardless of enabled), so a research finished mid-build does
+-- not invalidate them; its effect is captured by the finalize pass instead.
+local RELATION_BUILD_BUDGET = 100
+
+local RELATION_PHASE_REAL = "real_recipes"
+local RELATION_PHASE_FUEL_REVERSE = "fuel_reverse"
+local RELATION_PHASE_VIRTUAL = "virtual_recipes"
+local RELATION_PHASE_FINALIZE = "finalize"
+local RELATION_PHASE_DONE = "done"
+
+---Snapshot a table's keys into an array (pairs order). The split build walks this
+---array by integer cursor across ticks instead of holding a non-storable pairs
+---iterator. In-game pairs order is deterministic, so the array -- and hence the
+---resulting recipe_for_* order -- matches the synchronous build's pairs walk.
+---@param t table
+---@return string[]
+local function snapshot_keys(t)
+    local names = {}
+    for name, _ in pairs(t) do names[#names + 1] = name end
+    return names
+end
+
+---Start a tick-split relation build. Does the one-shot prep (fuel cache, empty
+---rel, burnt_result map, recipe-name snapshots) and seeds every research-dependent
+---field to false, then returns the state armed at the real-recipe phase.
+---
+---Seeding enabled_recipe / virtual_recipe_researched / virtual_material_researched
+---to false (not leaving them nil) is required for correctness: the finalize pass
+---replays the currently-enabled recipes through apply_research_change, which keys
+---its flip test on the stored value. A nil virtual_recipe_researched would read as
+---a flip for an unresearched virtual recipe and wrongly debit craftable_count.
+---recompute_relation_dynamic also writes false for every disabled recipe, so this
+---keeps the split build field-for-field equal to a synchronous one.
+---@param force_index integer
+---@return RelationBuildState
+function M.build_relation_init(force_index)
+    local force = game.forces[force_index]
+    local rel = create_empty_rel()
+    local real_recipe_names = snapshot_keys(force.recipes)
+    local virtual_recipe_names = snapshot_keys(storage.virtuals.recipe)
+
+    for _, name in ipairs(real_recipe_names) do rel.enabled_recipe[name] = false end
+    for _, name in ipairs(virtual_recipe_names) do rel.virtual_recipe_researched[name] = false end
+    for name, _ in pairs(storage.virtuals.material) do rel.virtual_material_researched[name] = false end
+
+    ---@type RelationBuildState
+    return {
+        phase = RELATION_PHASE_REAL,
+        rel = rel,
+        cursor = 1,
+        real_recipe_names = real_recipe_names,
+        virtual_recipe_names = virtual_recipe_names,
+        fuel = build_fuel_cache(),
+        burnt_result_names = build_burnt_result_names(),
+    }
+end
+
+---Advance an in-flight build by up to `budget` recipes (one phase per call).
+---Returns true once the build has reached the done phase (state.rel is complete).
+---@param state RelationBuildState
+---@param force_index integer
+---@param budget integer
+---@return boolean done
+local function build_relation_step(state, force_index, budget)
+    local rel = state.rel
+
+    if state.phase == RELATION_PHASE_REAL then
+        local recipes = game.forces[force_index].recipes
+        local names = state.real_recipe_names
+        local stop = math.min(#names, state.cursor + budget - 1)
+        for i = state.cursor, stop do
+            local recipe = recipes[names[i]]
+            -- A recipe can leave force.recipes only via a config change, which
+            -- discards this state through reinit_force_data, so it is present here.
+            if recipe then
+                process_real_recipe(rel, recipe, state.fuel, state.burnt_result_names)
+            end
+        end
+        state.cursor = stop + 1
+        if state.cursor > #names then
+            state.phase = RELATION_PHASE_FUEL_REVERSE
+            state.cursor = 1
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_FUEL_REVERSE then
+        build_fuel_consumer_reverse(rel, state.fuel)
+        state.phase = RELATION_PHASE_VIRTUAL
+        state.cursor = 1
+        return false
+    elseif state.phase == RELATION_PHASE_VIRTUAL then
+        local recipes = storage.virtuals.recipe
+        local names = state.virtual_recipe_names
+        local stop = math.min(#names, state.cursor + budget - 1)
+        for i = state.cursor, stop do
+            local recipe = recipes[names[i]]
+            if recipe then
+                process_virtual_recipe(rel, recipe, state.fuel, state.burnt_result_names)
+            end
+        end
+        state.cursor = stop + 1
+        if state.cursor > #names then
+            state.phase = RELATION_PHASE_FINALIZE
+            state.cursor = 1
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_FINALIZE then
+        -- Atomic, single tick: read the recipes enabled right now (the live
+        -- research state) and flip them in one apply_research_change. Because the
+        -- read and the apply share this tick, no research event can interleave
+        -- between them, so any research finished while the listing phases ran is
+        -- captured here. group_infos = nil: only relation is tick-split, the group
+        -- cache is rebuilt lazily afterwards (group_infos_needs_updating).
+        local enabled_names = {}
+        for name, recipe in pairs(game.forces[force_index].recipes) do
+            if recipe.enabled then enabled_names[#enabled_names + 1] = name end
+        end
+        M.apply_research_change(rel, nil, force_index, enabled_names, true)
+        state.phase = RELATION_PHASE_DONE
+        return true
+    end
+
+    return true
+end
+
+---Advance a build by one tick's worth (RELATION_BUILD_BUDGET recipes). Returns the
+---finished cache when done, nil while still building.
+---@param state RelationBuildState
+---@param force_index integer
+---@return RelationToRecipes?
+function M.advance_relation_build(state, force_index)
+    if build_relation_step(state, force_index, RELATION_BUILD_BUDGET) then
+        return state.rel
+    end
+    return nil
+end
+
+---Run a build to completion synchronously -- the get_relation_to_recipes fallback
+---for when a GUI needs the cache before the on_tick driver has finished it. Walks
+---every remaining phase (including the finalize apply) and returns the cache.
+---@param state RelationBuildState
+---@param force_index integer
+---@return RelationToRecipes
+function M.finish_relation_build(state, force_index)
+    while not build_relation_step(state, force_index, math.huge) do end
+    return state.rel
 end
 
 ---Credit (delta=+1) or debit (delta=-1) a material's craftable_count for one
