@@ -107,6 +107,7 @@ local case_files = {
     "explore_detect",
     "lp_substitution",
     "material_weights",
+    "yafc_codec",
 }
 
 local total, passed, failed = 0, 0, 0

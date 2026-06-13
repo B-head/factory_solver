@@ -8,6 +8,11 @@ Date: ????
       ingredients above Final products. Two per-player mod settings, "Classic
       Product / Ingredient placement" and "Classic top-to-bottom order", restore
       the previous layout. Existing saves get a one-time chat notice on update.
+    - Import and export YAFC (Yet Another Factorio Calculator) share strings, in
+      addition to the existing Factory Planner and Helmod formats. The import
+      format is detected automatically; export adds a YAFC option to the export
+      dialog. Real recipes round-trip faithfully; special "Mechanics" recipes are
+      mapped best-effort and anything unmapped is reported.
   Changes:
     - The solver now drives redundant machines out of solutions more reliably. On
       tightly-coupled recipe loops it could leave a working solution running well

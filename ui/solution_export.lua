@@ -4,6 +4,7 @@ local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
 local factoryplanner_codec = require "manage/factoryplanner_codec"
 local helmod_codec = require "manage/helmod_codec"
+local yafc_codec = require "manage/yafc_codec"
 local common = require "ui/common"
 
 local DIALOG_NAME = "factory_solver_solution_export"
@@ -63,16 +64,27 @@ local function sync_select_all(dialog)
 end
 
 ---Resolve which format radio is currently selected. Returns one of
----"native" / "fp" / "helmod". Falls back to "native" when none can be
+---"native" / "fp" / "helmod" / "yafc". Falls back to "native" when none can be
 ---found (defensive; the dialog always has the radios).
 ---@param dialog LuaGuiElement
----@return "native"|"fp"|"helmod"
+---@return "native"|"fp"|"helmod"|"yafc"
 local function selected_format(dialog)
     local fp_radio = fs_util.find_lower(dialog, "factory_solver_solution_export_format_fp")
     if fp_radio and fp_radio.state then return "fp" end
     local helmod_radio = fs_util.find_lower(dialog, "factory_solver_solution_export_format_helmod")
     if helmod_radio and helmod_radio.state then return "helmod" end
+    local yafc_radio = fs_util.find_lower(dialog, "factory_solver_solution_export_format_yafc")
+    if yafc_radio and yafc_radio.state then return "yafc" end
     return "native"
+end
+
+---Helmod and YAFC share-string formats each carry a single factory, so their
+---selection collapses to one checked row. Native / FP keep multi-select.
+---@param dialog LuaGuiElement
+---@return boolean
+local function is_single_page_format(dialog)
+    local format = selected_format(dialog)
+    return format == "helmod" or format == "yafc"
 end
 
 ---Regenerate the export textbox from the currently checked solutions.
@@ -106,6 +118,13 @@ local function refresh_export_textbox(dialog, player_index)
         if player then
             for _, w in ipairs(warnings) do player.print(w) end
         end
+    elseif format == "yafc" then
+        local s, warnings = yafc_codec.encode(selected)
+        textbox.text = s
+        local player = game.players[player_index]
+        if player then
+            for _, w in ipairs(warnings) do player.print(w) end
+        end
     else
         textbox.text = solution_codec.encode(selected)
     end
@@ -113,13 +132,13 @@ local function refresh_export_textbox(dialog, player_index)
     textbox.select_all()
 end
 
----Helmod's shared-string format only carries a single Model, so when
----Helmod is the active format we collapse the selection to the first
----checked row. The user can still un-check it and pick a different one;
----we don't disable the boxes outright because that hides the choice.
+---Helmod / YAFC shared strings only carry a single factory, so when one of
+---those formats is active we collapse the selection to the first checked row.
+---The user can still un-check it and pick a different one; we don't disable the
+---boxes outright because that hides the choice.
 ---@param dialog LuaGuiElement
-local function enforce_single_selection_for_helmod(dialog)
-    if selected_format(dialog) ~= "helmod" then return end
+local function enforce_single_selection(dialog)
+    if not is_single_page_format(dialog) then return end
     local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_list"))
     local seen_first = false
     for _, child in ipairs(list.children) do
@@ -158,11 +177,11 @@ end
 ---@param event EventData.on_gui_checked_state_changed
 function handlers.on_solution_checked(event)
     local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
-    -- When Helmod is active, a freshly-checked row must displace any
-    -- previously-checked one (single-Model wire format). The new row stays
-    -- checked because the event already wrote its `state = true`; we walk
-    -- the list and clear earlier hits.
-    if event.element.state and selected_format(dialog) == "helmod" then
+    -- When a single-page format (Helmod / YAFC) is active, a freshly-checked
+    -- row must displace any previously-checked one. The new row stays checked
+    -- because the event already wrote its `state = true`; we walk the list and
+    -- clear earlier hits.
+    if event.element.state and is_single_page_format(dialog) then
         local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_list"))
         for _, child in ipairs(list.children) do
             if child ~= event.element and child.type == "checkbox" then
@@ -179,15 +198,15 @@ function handlers.on_select_all_export(event)
     local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
     local list = assert(fs_util.find_lower(dialog, "factory_solver_solution_export_list"))
     local new_state = event.element.state
-    -- Helmod can only ship one Model per string, so "select all" must not
-    -- check more than one box; instead, treat it as "check the first" (or
+    -- Helmod / YAFC can only ship one factory per string, so "select all" must
+    -- not check more than one box; instead, treat it as "check the first" (or
     -- "clear all" when toggling off). For native / FP we keep the normal
     -- multi-select semantics.
-    local helmod_active = selected_format(dialog) == "helmod"
+    local single_page = is_single_page_format(dialog)
     local seen_first = false
     for _, child in ipairs(list.children) do
         if child.type == "checkbox" then
-            if helmod_active then
+            if single_page then
                 if new_state and not seen_first then
                     child.state = true
                     seen_first = true
@@ -218,6 +237,7 @@ local function select_format_radio(dialog, chosen)
         "factory_solver_solution_export_format_native",
         "factory_solver_solution_export_format_fp",
         "factory_solver_solution_export_format_helmod",
+        "factory_solver_solution_export_format_yafc",
     }
     for _, name in ipairs(names) do
         local radio = fs_util.find_lower(dialog, name)
@@ -247,7 +267,17 @@ function handlers.on_format_selected_helmod(event)
     -- (otherwise the textbox would silently drop everything past the
     -- first checked row). Refresh comes after so the textbox reflects
     -- exactly what's still checked.
-    enforce_single_selection_for_helmod(dialog)
+    enforce_single_selection(dialog)
+    sync_select_all(dialog)
+    refresh_export_textbox(dialog, event.player_index)
+end
+
+---@param event EventData.on_gui_checked_state_changed
+function handlers.on_format_selected_yafc(event)
+    local dialog = assert(fs_util.find_upper(event.element, DIALOG_NAME))
+    select_format_radio(dialog, event.element)
+    -- YAFC is single-page like Helmod; collapse the selection the same way.
+    enforce_single_selection(dialog)
     sync_select_all(dialog)
     refresh_export_textbox(dialog, event.player_index)
 end
@@ -315,6 +345,15 @@ return {
                     state = false,
                     handler = {
                         [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_helmod,
+                    },
+                },
+                {
+                    type = "radiobutton",
+                    name = "factory_solver_solution_export_format_yafc",
+                    caption = { "factory-solver-export-format-yafc" },
+                    state = false,
+                    handler = {
+                        [defines.events.on_gui_checked_state_changed] = handlers.on_format_selected_yafc,
                     },
                 },
             },

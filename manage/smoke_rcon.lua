@@ -48,6 +48,7 @@ local fs_log = require "fs_log"
 local acc = require "manage/accessor"
 local fp_codec = require "manage/factoryplanner_codec"
 local helmod_codec = require "manage/helmod_codec"
+local yafc_codec = require "manage/yafc_codec"
 local preset = require "manage/preset"
 local relation = require "manage/relation"
 local report = require "manage/report"
@@ -528,6 +529,97 @@ fixtures.codec_helmod_import_order = {
             limit_type = "lower",
             limit_amount_per_second = 1,
         })
+    end,
+}
+
+---YAFC interop round-trip: FS solution -> yafc_codec.encode (FS->YAFC, raw
+---DEFLATE + base64 via the vendored LibDeflate) -> decode -> yafc_to_payload
+---(YAFC->FS) -> solve. Same rationale as the FP / Helmod fixtures, but YAFC's
+---wire format is the odd one out: raw DEFLATE (no zlib header), which
+---helpers.decode_string cannot read, so this is the only fixture that exercises
+---the LibDeflate compress/inflate path inside real Factorio. Lossy, so the
+---assertion is core-recipe survival. Base game only.
+fixtures.codec_yafc_roundtrip = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        save.init_player_data(PLAYER_INDEX)
+        build_iron_plate_demand(solution)
+
+        -- Put a module on the line so the round-trip exercises the ModuleTemplate
+        -- shape (the real-YAFC export bug was an empty `{}` where YAFC needs `[]`).
+        -- electric-furnace has module slots; "productivity-module" exists in base.
+        local line = solution.production_lines[1]
+        line.module_typed_names = { ["1"] = tn.create_typed_name("item", "productivity-module") }
+
+        local encoded = yafc_codec.encode({ solution })
+        local page, err = yafc_codec.decode(encoded)
+        assert(page, "YAFC decode failed: " .. tostring(err and err[1]))
+
+        local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
+        assert(payload_has_iron_plate(payload), "iron-plate line lost across the YAFC round-trip")
+
+        -- The module must survive encode (full ModuleTemplate object) -> decode.
+        local imported_line
+        for _, l in ipairs(payload.production_lines) do
+            if l.recipe_typed_name.name == "iron-plate" then imported_line = l end
+        end
+        assert(imported_line and imported_line.module_typed_names
+            and imported_line.module_typed_names["1"]
+            and imported_line.module_typed_names["1"].name == "productivity-module",
+            "module lost across the YAFC round-trip")
+
+        solution.constraints = payload.constraints
+        solution.production_lines = payload.production_lines
+    end,
+}
+
+-- A real YAFC-CE "ProjectPage" share string (a pyanodon nuclear sample). Decoded
+-- and asserted by the yafc_real_sample fixture below. The py recipes/entities in
+-- it do not resolve on a base-game mod set, but the reactor-heat row maps via the
+-- base-game nuclear-reactor entity, which is the cross-tool path under test.
+local YAFC_REAL_SAMPLE =
+[==[inR0c+YKKMrPSk0uCUhMT+Uy0jM01zPQM+Di4gIAAAD//+1b2W7jNhT9lULPpuE4CRL7qZhBAwRo2rTNS1HMwxV1JbGhRJaLFwT5915KcpbOFHZkEU1n9CbR1LkSD5dzFz8kXNUOa3e31Zgsk98h59MblaGc0hOZ506o+g5SickkKbzIqM+CL045P4UUMD3LZtkC8sXi4uJykZ7ML8/gnHoKQqWe1w6rae25RDDMQqUbmBqqYOonz7/7bdfWvUWyfEhwo6HOkCw543GSSFHf22T5x0NSKJXR1UPiwBTodga8gVr4iikTkP7yIIXb0o+/tFfTWpkKZPI4SaBSPhhhJ3QtC2WEK6tkOXuc/Ct4YSBDdsL8gdCzNyLPIyBrtc7QYDYs9JUk+qeeaS81m53Eg57Hgz4dfKy3KKVaMw73ODi2Z/PT8+FRu+WSe5SM0+sPbiFDWtQuzL+Yplpmbcp0qawuwdEyHfxTCL7UimbP8G+upXeqGR6NRm1ENvwEejYRCT/M0MsosGez4Udc1Jm3zgiQzCq5CufN8PNRZcDAlhGQHUL1/cn5LBb0PAr0y/UZYWdvwZVR3jLgpE8iWRA1sgLs4HN9Tc09QT9NEoNcaGzVUXv9ysKvTdPBGqZVbbWXcpJkaLkROsi/XROtl+bJFwZ+aJqmfwKdgMbbEs0eE+EkeIVwq9ZopihJmxrBw2N7AMQGsw9eyEzUhW0GpWm6aoBzkBa7luu6IA0kGlXZfkDT3MnaXVtKUO4FXttqS7W+Uw7k9c9PoFgHGfwkSx0UjfWK4CQ+P+nTgiaj3t2vgPab2gWKPoVpcABLjPqEwYzFlqg0cLcjjFX3e8XcyNoe1kjFs6icWaQnMzDbkbZBFtuhbkxvwsjl5XRoFMw6CE+My2wQvvYpiJGv93GYHepwj3y9F75IfZUNabEY4yVWgpPvpSW907gfHsWX1UQLa4NPB8SeepOmwThB8VvyrSh+gwacGhXjkUvtjUGx3twBBX8qcrszlpPeV6QdSerPv12p/5CkJMqeR04K6xrPue3xhThUlwFZ0ReyrtMBH/+xc9eDg95a/LG1RBOjz7y5QV7SlOF2arAhcloiuFizZpeu6Wy9dbr0CjF/vefq0wiwTNgm6BiLt4rGYdyaj2OLeolK1dvnkGU0MUQ/GZH7AkchdBRlr1Mcjas9cvbON0XtDW7Y02Jbqb1h+/5xM4rKpem4MR7LWJdlEfyQJEtvtuiMdEIGH+PbVakDUxUtYFbqfCTp6FMrFju4Aq0ab30k6XhpYZFKNKJqizHOMvhG+FndYVy3awys/O8CK5+v89LnOQU7ox2aNXpnKBkIqVWmryxty1LSQ9XY1yt13lzPNQZX/kO2DqyM6x/uLgSl2sf0xJE0caVoOYWCQEYFgcwptr/ksL/s2bIQy2a4CSHuYiwf68/bzvdlqRKUqGNril6aQF/DZUQC/2F49Df6MihVwUI5KKXrSNVEImxNxdVjxd+eDZL05YusYS6kvKH6X0N33VkZUqtX1HwL2xT4fSeqJE1/+u9UI3k7rfQq4djefamHvUWzk1TJ8nKSqBUaQyX7Hw3ktI4/tL3obR4fg9blRlFSbXlx/vg3]==]
+
+---Decode a real, externally-produced YAFC share string (not one this codec
+---wrote) and assert the cross-tool decode path holds end-to-end: base64 +
+---LibDeflate raw inflate + envelope split + JSON parse + the Mechanics-via-entity
+---virtual-recipe resolution. The reactor-heat row's `Entity.nuclear-reactor`
+---must resolve to factory_solver's `<run>nuclear-reactor` virtual recipe, which
+---exists on the base mod set. build() asserts on the decoded payload directly
+---(no solve -- the py recipes don't exist here, so the LP would be infeasible),
+---then leaves the solution empty so the driver's solve step is a trivial pass.
+fixtures.yafc_real_sample = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        local page, err = yafc_codec.decode(YAFC_REAL_SAMPLE)
+        assert(page, "real YAFC sample decode failed: " .. tostring(err and err[1]))
+        assert(page.content and type(page.content.recipes) == "table",
+            "decoded YAFC page has no recipes table")
+
+        local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
+        assert(#payload.production_lines > 0,
+            "real YAFC sample produced no production lines")
+
+        local found_reactor = false
+        for _, line in ipairs(payload.production_lines) do
+            if line.recipe_typed_name.name == "<run>nuclear-reactor" then
+                found_reactor = true
+                assert(line.recipe_typed_name.type == "virtual_recipe",
+                    "reactor-heat row did not map to a virtual recipe")
+                assert(storage.virtuals.recipe["<run>nuclear-reactor"],
+                    "reactor-heat mapped to a virtual recipe that is not registered")
+            end
+        end
+        assert(found_reactor,
+            "reactor-heat Mechanics row did not resolve to <run>nuclear-reactor")
+
+        -- The py recipes in the sample do not exist on a base mod set, so the
+        -- sample's own lines are not solvable here. Hand the driver a known-good
+        -- solvable solution for its solve step, the decode assertions above being
+        -- this fixture's real subject.
+        build_iron_plate_demand(solution)
     end,
 }
 

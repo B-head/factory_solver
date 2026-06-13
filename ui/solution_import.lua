@@ -3,6 +3,7 @@ local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
 local factoryplanner_codec = require "manage/factoryplanner_codec"
 local helmod_codec = require "manage/helmod_codec"
+local yafc_codec = require "manage/yafc_codec"
 local common = require "ui/common"
 
 local DIALOG_NAME = "factory_solver_solution_import"
@@ -52,7 +53,13 @@ local function decode_any(s, player_index)
         return { helmod_payload }, helmod_warnings, nil
     end
 
-    return nil, {}, err or fp_err or helmod_err
+    local yafc_page, yafc_err = yafc_codec.decode(s)
+    if yafc_page then
+        local yafc_payload, yafc_warnings = yafc_codec.yafc_to_payload(yafc_page, player_index)
+        return { yafc_payload }, yafc_warnings, nil
+    end
+
+    return nil, {}, err or fp_err or helmod_err or yafc_err
 end
 
 ---Compute the rename a given payload name would get if imported on top of

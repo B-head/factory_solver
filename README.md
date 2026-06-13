@@ -40,24 +40,27 @@ The number in the "Required" column is the quantity of machines required for eac
 
 Note: Constraints can be added by right-clicking material or recipe buttons.
 
-## Migrating from Factory Planner or Helmod
+## Migrating from Factory Planner, Helmod, or YAFC
 
-Existing Factory Planner or Helmod factories can be brought over without
+Existing Factory Planner, Helmod, or YAFC factories can be brought over without
 rebuilding them by hand:
 
-1. In Factory Planner or Helmod, export the factory / model to a shared
+1. In Factory Planner, Helmod, or YAFC, export the factory / page to a shared
    string.
 2. In Factory solver, click the import button in the solution list toolbar
    and paste the string. The source format is detected automatically.
 3. Pick which factories to bring in and confirm.
 
-A symmetric export back to Factory Planner or Helmod is also available from
-the export button next to it, in case you want to round-trip a solution.
+A symmetric export back to Factory Planner, Helmod, or YAFC is also available
+from the export button next to it, in case you want to round-trip a solution.
 
 Note: shared-string import / export between Factory solver, Factory Planner,
-and Helmod is best-effort. The three calculators do not share the same
+Helmod, and YAFC is best-effort. The calculators do not share the same
 feature set, so some adjustments may be needed after an import; warnings in
-the chat log point out what was dropped or coerced.
+the chat log point out what was dropped or coerced. (For YAFC specifically:
+real recipes round-trip cleanly, but Factory solver's virtual recipes — boilers,
+generators, mining, and the like — are kept in a Factory-solver-native form on
+export that YAFC itself will not read back.)
 
 ## Enabling quality modules
 
