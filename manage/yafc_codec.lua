@@ -104,10 +104,9 @@ local function to_token(filter_type, name)
     if filter_type == "fluid" then return "Fluid." .. name end
     if filter_type == "machine" then return "Entity." .. name end
     if filter_type == "recipe" then return "Recipe." .. name end
-    -- virtual_recipe / virtual_material: emit the factory_solver-native name
-    -- verbatim. Real YAFC cannot read these (they are not its objects), but it
-    -- keeps the export self-round-trippable; the encode side flags it via a
-    -- warning so the user knows those lines won't re-import into YAFC itself.
+    -- Defensive fallback only. Virtual recipes are routed through
+    -- virtual_recipe_to_yafc before reaching here, and machine / item / fluid
+    -- cover every other to_ref caller, so this branch is not normally hit.
     return name
 end
 
@@ -513,11 +512,107 @@ local function pack_modules(line)
     }
 end
 
+---Map a factory_solver virtual recipe to the YAFC special-recipe token YAFC's
+---own parser produces, so the row imports into real YAFC instead of erroring.
+---YAFC keys its special "Mechanics.*" recipes by mechanic + goods, and merges a
+---set of stable former-alias names into its lookup table (Database.LoadBuiltData),
+---so these tokens resolve on import. The mapped ones are reconstructable from the
+---entity type, the virtual recipe's product, and its stored attributes (verified
+---against YAFC-CE's SpecialNames / CreateSpecialRecipe): spoil, offshore pump
+---(pump.tile), fluid pump, plant (by seed), mining (by category + resource),
+---reactor, generator, and boiler. Mechanics whose YAFC name we cannot rebuild
+---(rocket part / launch, fusion plasma, thruster, research) or that have no YAFC
+---equivalent (source / sink) return nil, so the caller drops the row with a
+---warning rather than emitting a token YAFC would reject.
+---@param recipe_typed_name TypedName
+---@return string?
+local function virtual_recipe_to_yafc(recipe_typed_name)
+    local name = recipe_typed_name.name
+    local vr = storage.virtuals.recipe[name]
+    local function first_product()
+        return vr and vr.products and vr.products[1] and vr.products[1].name or nil
+    end
+
+    -- <spoil>{item} -> Mechanics.spoil.{item}
+    local spoil = string.match(name, "^<spoil>(.+)$")
+    if spoil then
+        return "Mechanics." .. "spoil" .. "." .. spoil
+    end
+
+    -- <pump>{tile} is an offshore pump (pumps a fluid from a tile): YAFC keys it
+    -- under the "pump.tile" category -> Mechanics.pump.tile.{fluid}.
+    if string.match(name, "^<pump>") then
+        local fluid = first_product()
+        if fluid then
+            return "Mechanics.pump.tile." .. fluid
+        end
+        return nil
+    end
+
+    -- <pump-fluid>{fluid} is a pump entity with a fluid filter: YAFC keys it under
+    -- the "pump.{fluid}" category -> Mechanics.pump.{fluid}.{fluid}.
+    if string.match(name, "^<pump%-fluid>") then
+        local fluid = first_product()
+        if fluid then
+            return string.format("Mechanics.pump.%s.%s", fluid, fluid)
+        end
+        return nil
+    end
+
+    -- <grow>{plant}:{seed} -> Mechanics.plant.{seed}. YAFC's harvesting recipe is
+    -- CreateSpecialRecipe(seed, "plant"), keyed by the planted seed item.
+    local plant_seed = string.match(name, "^<grow>[^:]+:(.+)$")
+    if plant_seed then
+        return "Mechanics.plant." .. plant_seed
+    end
+
+    -- <mine>{resource} -> Mechanics.mining.{category}.{resource}. YAFC's mining
+    -- recipe is CreateSpecialRecipe(resource, "mining." .. category), keyed by the
+    -- resource's mining category and the resource entity name. The virtual recipe
+    -- carries the category (resource_category); without it the token can't be
+    -- rebuilt, so drop the row rather than guess.
+    local resource = string.match(name, "^<mine>(.+)$")
+    if resource then
+        local category = vr and vr.resource_category
+        if category then
+            return string.format("Mechanics.mining.%s.%s", category, resource)
+        end
+        return nil
+    end
+
+    -- <run>{entity}[:...] -> dispatch by the crafting entity's type.
+    local run = string.match(name, "^<run>(.+)$")
+    if run then
+        local entity_name = string.match(run, "^([^:]+)")
+        local proto = entity_name and prototypes.entity[entity_name]
+        local t = proto and proto.type
+        if t == "reactor" then
+            -- All reactors share YAFC's single heat recipe; the specific reactor
+            -- rides on the row's `entity`. Former alias, stable across versions.
+            return "Mechanics.reactor.heat"
+        elseif t == "generator" or t == "burner-generator"
+            or t == "electric-energy-interface" then
+            return "Mechanics.generator.electricity"
+        elseif t == "boiler" then
+            local out = first_product()
+            if out then
+                return string.format("Mechanics.boiler.%s.%s", entity_name, out)
+            end
+        end
+        -- fusion-reactor (plasma) / fusion-generator / thruster: no stable YAFC name.
+        return nil
+    end
+
+    -- <mine>, <grow>, <research>, <launch>, rocket, source/sink: not reconstructable.
+    return nil
+end
+
 ---Encode a list of Solutions as a YAFC share string. YAFC's ProjectPage format
 ---carries a single page, so only the first solution is exported; extra
----selections are flagged. virtual_recipe lines are emitted with their
----factory_solver-native name (round-trippable here, but not importable by real
----YAFC) and flagged. Returns (string, warnings).
+---selections are flagged. virtual_recipe lines are mapped to YAFC's "Mechanics.*"
+---special recipes where reconstructable; the rest are dropped with a warning
+---(emitting a factory_solver-native name would make YAFC reject the whole row).
+---Returns (string, warnings).
 ---@param solutions Solution[]
 ---@return string
 ---@return LocalisedString[]
@@ -558,21 +653,52 @@ function M.encode(solutions)
     local recipes = {}
     for _, line in ipairs(solution.production_lines) do
         local recipe_tn = line.recipe_typed_name
+
+        local recipe_ref
         if recipe_tn.type == "virtual_recipe" then
-            warnings[#warnings + 1] = {
-                "factory-solver-yafc-export-warning-virtual-recipe", recipe_tn.name,
-            }
+            local token = virtual_recipe_to_yafc(recipe_tn)
+            if token then
+                recipe_ref = ref_string(token, recipe_tn.quality or "normal")
+            else
+                -- No YAFC recipe corresponds; drop the row rather than emit a
+                -- token YAFC would reject (which broke the whole row's import).
+                warnings[#warnings + 1] = {
+                    "factory-solver-yafc-export-warning-virtual-recipe", recipe_tn.name,
+                }
+            end
+        else
+            recipe_ref = to_ref(recipe_tn)
         end
-        local fuel = line.fuel_typed_name
-        recipes[#recipes + 1] = {
-            recipe = to_ref(recipe_tn),
-            entity = to_ref(line.machine_typed_name),
-            fuel = fuel and to_ref(fuel) or ref_string("Power.electricity", "normal"),
-            fixedBuildings = recipe_caps[recipe_tn.name] or 0,
-            fixedFuel = false,
-            enabled = true,
-            modules = pack_modules(line),
-        }
+
+        if recipe_ref then
+            local row = {
+                recipe = recipe_ref,
+                fixedBuildings = recipe_caps[recipe_tn.name] or 0,
+                fixedFuel = false,
+                enabled = true,
+                modules = pack_modules(line),
+            }
+
+            -- Omit the crafting entity for a <grow> plant recipe: factory_solver
+            -- models the plant entity itself as the machine (yumako-tree,
+            -- jellystem), but YAFC has no EntityCrafter for it and crafts plant
+            -- harvesting in the agricultural tower, so let YAFC pick the default.
+            local machine = line.machine_typed_name
+            local is_grow = recipe_tn.type == "virtual_recipe"
+                and string.match(recipe_tn.name, "^<grow>") ~= nil
+            if machine and not is_grow then
+                row.entity = to_ref(machine)
+            end
+
+            local fuel = line.fuel_typed_name
+            if fuel then
+                row.fuel = to_ref(fuel)
+            else
+                row.fuel = ref_string("Power.electricity", "normal")
+            end
+
+            recipes[#recipes + 1] = row
+        end
     end
 
     local page = {

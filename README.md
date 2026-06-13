@@ -58,9 +58,11 @@ Note: shared-string import / export between Factory solver, Factory Planner,
 Helmod, and YAFC is best-effort. The calculators do not share the same
 feature set, so some adjustments may be needed after an import; warnings in
 the chat log point out what was dropped or coerced. (For YAFC specifically:
-real recipes round-trip cleanly, but Factory solver's virtual recipes — boilers,
-generators, mining, and the like — are kept in a Factory-solver-native form on
-export that YAFC itself will not read back.)
+real recipes round-trip cleanly, and Factory solver's virtual recipes for
+reactors, generators, boilers, spoilage, and pumping map onto YAFC's equivalent
+"Mechanics" recipes; the remaining virtual recipes — mining, rocket launches,
+agriculture, fusion, thrusters, research — have no YAFC counterpart and are
+dropped from the exported page with a warning.)
 
 ## Enabling quality modules
 
