@@ -139,7 +139,7 @@ end
 function M.init_force_data(force_index)
     if not storage.forces[force_index] then
         storage.forces[force_index] = {
-            relation_to_recipes = { enabled_recipe = {}, item = {}, fluid = {}, virtual_recipe = {}, virtual_recipe_researched = {} },
+            relation_to_recipes = { enabled_recipe = {}, item = {}, fluid = {}, virtual_recipe = {}, virtual_recipe_researched = {}, recipes_by_category = {}, contributes = {} },
             relation_to_recipes_needs_updating = true,
             group_infos = { item = {}, fluid = {}, recipe = {}, virtual_recipe = {}, external = {} },
             group_infos_needs_updating = true,
@@ -429,6 +429,24 @@ end
 function M.get_research_bonuses(player_index)
     local force_index = game.players[player_index].force_index
     return storage.forces[force_index].research_bonuses
+end
+
+---Incrementally apply a technology's recipe unlocks/reverts to a force's
+---relation_to_recipes, instead of the full reinit_force_data rebuild (which would
+---also rebuild the recipe-set lists and walk every solution for migration).
+---`now_enabled` is true for on_research_finished, false for on_research_reversed.
+---Skipped when the cache hasn't been built yet -- a full build is already pending
+---and will reflect the unlock when it runs.
+---@param force_index integer
+---@param recipe_names string[]
+---@param now_enabled boolean
+function M.apply_research_change(force_index, recipe_names, now_enabled)
+    local force_data = storage.forces[force_index]
+    if not force_data or force_data.relation_to_recipes_needs_updating then
+        return
+    end
+    relation.apply_research_change(force_data.relation_to_recipes, force_index, recipe_names, now_enabled)
+    force_data.group_infos_needs_updating = true
 end
 
 ---comment

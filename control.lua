@@ -194,12 +194,29 @@ script.on_event(defines.events.on_forces_merged, function(event)
     storage.forces[event.source_index] = nil
 end)
 
+---The recipe names a technology unlocks, from its unlock-recipe effects. Drives
+---the incremental relation_to_recipes update so a research finish/reverse patches
+---only the affected recipes instead of rebuilding the whole cache.
+---@param research LuaTechnology
+---@return string[]
+local function unlocked_recipe_names(research)
+    local names = {}
+    for _, effect in ipairs(research.prototype.effects) do
+        if effect.type == "unlock-recipe" then
+            names[#names + 1] = effect.recipe
+        end
+    end
+    return names
+end
+
 script.on_event(defines.events.on_research_finished, function(event)
-    save.reinit_force_data(event.research.force.index)
+    save.apply_research_change(event.research.force.index,
+        unlocked_recipe_names(event.research), true)
 end)
 
 script.on_event(defines.events.on_research_reversed, function(event)
-    save.reinit_force_data(event.research.force.index)
+    save.apply_research_change(event.research.force.index,
+        unlocked_recipe_names(event.research), false)
 end)
 
 script.on_event(defines.events.on_runtime_mod_setting_changed, function(event)

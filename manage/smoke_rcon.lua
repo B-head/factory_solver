@@ -1178,6 +1178,69 @@ function M.check_force_caches()
         local rel = relation.create_relation_to_recipes(FORCE_INDEX)
         local groups = relation.create_group_infos(FORCE_INDEX, rel)
 
+        -- relation (0): recompute_relation_dynamic runs on on_research_finished in
+        -- place of a full rebuild, so it must reproduce exactly the research-
+        -- dependent fields (craftable_count / enabled_recipe /
+        -- virtual_recipe_researched) a full build computes. Build a second copy,
+        -- recompute its dynamic half, and assert field-for-field equality.
+        local rel_dyn = relation.create_relation_to_recipes(FORCE_INDEX)
+        relation.recompute_relation_dynamic(rel_dyn, FORCE_INDEX)
+        for name, info in pairs(rel.item) do
+            assert(info.craftable_count == rel_dyn.item[name].craftable_count,
+                "recompute item craftable_count mismatch: " .. name)
+        end
+        for name, info in pairs(rel.fluid) do
+            assert(info.craftable_count == rel_dyn.fluid[name].craftable_count,
+                "recompute fluid craftable_count mismatch: " .. name)
+        end
+        for name, info in pairs(rel.virtual_recipe) do
+            assert(info.craftable_count == rel_dyn.virtual_recipe[name].craftable_count,
+                "recompute virtual craftable_count mismatch: " .. name)
+        end
+        for name, researched in pairs(rel.virtual_recipe_researched) do
+            assert(researched == rel_dyn.virtual_recipe_researched[name],
+                "recompute virtual_recipe_researched mismatch: " .. name)
+        end
+        for name, enabled in pairs(rel.enabled_recipe) do
+            assert(enabled == rel_dyn.enabled_recipe[name],
+                "recompute enabled_recipe mismatch: " .. name)
+        end
+
+        -- relation (0b): apply_research_change (on_research_finished) must
+        -- reproduce a full rebuild. Simulate an unlock: pick a visible recipe,
+        -- disable it and full-build a base, then re-enable it and apply the unlock
+        -- incrementally; assert the patched cache matches a fresh full build.
+        local apply_target
+        for name, recipe in pairs(game.forces[FORCE_INDEX].recipes) do
+            if recipe.enabled and not recipe.hidden then
+                apply_target = name
+                break
+            end
+        end
+        if apply_target then
+            game.forces[FORCE_INDEX].recipes[apply_target].enabled = false
+            local applied = relation.create_relation_to_recipes(FORCE_INDEX)
+            game.forces[FORCE_INDEX].recipes[apply_target].enabled = true
+            relation.apply_research_change(applied, FORCE_INDEX, { apply_target }, true)
+            local full2 = relation.create_relation_to_recipes(FORCE_INDEX)
+            for name, info in pairs(full2.item) do
+                assert(info.craftable_count == applied.item[name].craftable_count,
+                    "apply item craftable_count mismatch: " .. name .. " (unlock " .. apply_target .. ")")
+            end
+            for name, info in pairs(full2.fluid) do
+                assert(info.craftable_count == applied.fluid[name].craftable_count,
+                    "apply fluid craftable_count mismatch: " .. name)
+            end
+            for name, info in pairs(full2.virtual_recipe) do
+                assert(info.craftable_count == applied.virtual_recipe[name].craftable_count,
+                    "apply virtual craftable_count mismatch: " .. name)
+            end
+            for name, researched in pairs(full2.virtual_recipe_researched) do
+                assert(researched == applied.virtual_recipe_researched[name],
+                    "apply virtual_recipe_researched mismatch: " .. name)
+            end
+        end
+
         -- relation (1): burnt_result registration. For any item consumed as a
         -- fuel (recipe_for_fuel non-empty) that has a burnt_result, the spent
         -- item must be registered as a product of that consumer. Base game

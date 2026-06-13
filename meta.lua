@@ -110,6 +110,11 @@ __factory_solver__storage = {}
 ---@field virtual_recipe table<string, RelationToRecipe>
 ---@field virtual_recipe_researched table<string, boolean>
 ---@field recipes_by_category table<string, string[]> Real recipe names grouped by recipe_category; lets fuel consumers expand lazily (RelationToRecipe.fuel_consumer_categories) instead of materializing the recipe x fuel product. See relation.expand_fuel_consumers.
+---@field contributes table<string, RelationContribution[]> Recipe name -> the materials it makes craftable when visible (its products plus the spent-fuel residues of the fuels it burns). Drives craftable_count updates -- full (recompute_relation_dynamic) and incremental (apply_research_change) -- without re-reading recipe.products or re-resolving fuels.
+
+---@class RelationContribution
+---@field type FilterType
+---@field name string
 
 ---@class RelationToRecipe
 ---@field craftable_count integer
