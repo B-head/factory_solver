@@ -552,9 +552,31 @@ fixtures.codec_yafc_roundtrip = {
         local line = solution.production_lines[1]
         line.module_typed_names = { ["1"] = tn.create_typed_name("item", "productivity-module") }
 
+        -- A temperatured fluid constraint must export as "Fluid.steam@500" and
+        -- decode back with its temperature (YAFC keys fluid variants by @temp).
+        flib_table.insert(solution.constraints,
+            tn.create_typed_name("fluid", "steam", nil, 500, 500) --[[@as Constraint]])
+        solution.constraints[#solution.constraints].limit_type = "lower"
+        solution.constraints[#solution.constraints].limit_amount_per_second = 10
+
         local encoded = yafc_codec.encode({ solution })
         local page, err = yafc_codec.decode(encoded)
         assert(page, "YAFC decode failed: " .. tostring(err and err[1]))
+
+        -- The exported link goods is YAFC's dictionary-key string form
+        -- "!<target>!<quality>", and the fluid target carries the temperature
+        -- suffix. (The string form is mandatory: YAFC's object-form reader is
+        -- positional, so the alphabetically-sorted object we used to emit -- with
+        -- quality before target -- silently failed to resolve in real YAFC.)
+        local steam_goods
+        for _, lk in ipairs(page.content.links or {}) do
+            if lk.goods and string.find(tostring(lk.goods), "steam", 1, true) then
+                steam_goods = lk.goods
+            end
+        end
+        assert(steam_goods == "!Fluid.steam@500!normal",
+            "temperatured fluid constraint did not export as !Fluid.steam@500!normal (got "
+            .. tostring(steam_goods) .. ")")
 
         local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
         assert(payload_has_iron_plate(payload), "iron-plate line lost across the YAFC round-trip")
@@ -569,8 +591,24 @@ fixtures.codec_yafc_roundtrip = {
             and imported_line.module_typed_names["1"].name == "productivity-module",
             "module lost across the YAFC round-trip")
 
-        solution.constraints = payload.constraints
+        -- The steam constraint must come back with its temperature.
+        local steam_ok = false
+        for _, c in ipairs(payload.constraints) do
+            if c.name == "steam" and c.minimum_temperature == 500 and c.maximum_temperature == 500 then
+                steam_ok = true
+            end
+        end
+        assert(steam_ok, "steam@500 constraint lost its temperature across the round-trip")
+
+        -- Hand the driver a solvable solution: keep the imported lines, but drop
+        -- the synthetic steam target (no producer here) so the solve stays feasible.
         solution.production_lines = payload.production_lines
+        solution.constraints = {}
+        for _, c in ipairs(payload.constraints) do
+            if c.name ~= "steam" then
+                solution.constraints[#solution.constraints + 1] = c
+            end
+        end
     end,
 }
 
@@ -619,6 +657,147 @@ fixtures.yafc_real_sample = {
         -- sample's own lines are not solvable here. Hand the driver a known-good
         -- solvable solution for its solve step, the decode assertions above being
         -- this fixture's real subject.
+        build_iron_plate_demand(solution)
+    end,
+}
+
+---YAFC -> FS -> YAFC re-export fidelity over the real pyanodon sample. The only
+---real-world factory data in the tree (YAFC_REAL_SAMPLE) carries fluids, a
+---Mechanics reactor-heat row, and module-bearing rows -- and it uses YAFC's
+---older *object* reference form. Importing it (yafc_to_payload) then re-exporting
+---must carry the content through the object-form decode -> string-form encode
+---flow: no row is silently dropped, the reactor still maps to
+---Mechanics.reactor.heat, and every re-emitted reference is the order-independent
+---string form (the bug class fixed in this branch). Runs on the base mod set
+---because the mapping is name-level. NOTE: module survival is deliberately NOT
+---asserted here -- the sample's module rows are crafted on pyanodon machines
+---(automated-factory-mk02 / mixer-mk02), and YAFC's fixedCount=0 "auto-fill"
+---modules expand against the owner entity's slot count, which is 0 when that
+---entity is absent (base mod set). Module re-export fidelity is covered on a real
+---pyanodon load by the headless YAFC probe (reexport_yafc remote function).
+fixtures.yafc_real_reexport = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        local page = assert(yafc_codec.decode(YAFC_REAL_SAMPLE), "sample decode failed")
+        local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
+
+        ---@type Solution
+        local probe = {
+            name = "yafc-reexport-probe",
+            constraints = payload.constraints,
+            production_lines = payload.production_lines,
+            quantity_of_machines_required = {},
+            solver_state = "ready",
+        }
+        local reexported = assert(yafc_codec.encode({ probe }), "re-encode failed")
+        local page2 = assert(yafc_codec.decode(reexported), "re-export re-decode failed")
+        local recipes2 = (page2.content and page2.content.recipes) or {}
+        assert(#recipes2 == #payload.production_lines, string.format(
+            "re-export dropped rows: imported %d, re-exported %d",
+            #payload.production_lines, #recipes2))
+
+        local found_reactor = false
+        for _, r in ipairs(recipes2) do
+            if r.recipe == "!Mechanics.reactor.heat!normal" then found_reactor = true end
+            -- Every reference must be the dictionary-key string form.
+            assert(type(r.recipe) == "string" and string.sub(r.recipe, 1, 1) == "!",
+                "re-export emitted a non-string recipe ref: " .. tostring(r.recipe))
+            assert(type(r.entity) == "string" and string.sub(r.entity, 1, 1) == "!",
+                "re-export emitted a non-string entity ref: " .. tostring(r.entity))
+        end
+        assert(found_reactor, "reactor-heat row lost across the YAFC re-export")
+
+        build_iron_plate_demand(solution)
+    end,
+}
+
+---YAFC virtual-recipe export mapping: a factory_solver virtual recipe is mapped
+---to YAFC's "Mechanics.*" special-recipe token on export (so it imports into
+---real YAFC) and survives a round-trip back. A nuclear reactor's `<run>nuclear-
+---reactor` must export as `Mechanics.reactor.heat` (YAFC's former-alias for the
+---reactor-heat recipe, which YAFC merges into its type-name lookup) carried by an
+---`Entity.nuclear-reactor` crafter, then decode back to `<run>nuclear-reactor`.
+---Base game only.
+fixtures.codec_yafc_virtual = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        save.init_player_data(PLAYER_INDEX)
+        assert(storage.virtuals.recipe["<run>nuclear-reactor"],
+            "reactor virtual recipe not registered -- fixture assumptions broken")
+
+        ---@type Solution
+        local probe = {
+            name = "yafc-virtual-probe",
+            constraints = {},
+            production_lines = {
+                {
+                    recipe_typed_name = tn.create_typed_name("virtual_recipe", "<run>nuclear-reactor"),
+                    machine_typed_name = tn.create_typed_name("machine", "nuclear-reactor"),
+                    module_typed_names = {},
+                    affected_by_beacons = {},
+                    fuel_typed_name = tn.create_typed_name("item", "uranium-fuel-cell"),
+                },
+            },
+            quantity_of_machines_required = {},
+            solver_state = "ready",
+        }
+
+        local encoded = yafc_codec.encode({ probe })
+        local page = assert(yafc_codec.decode(encoded), "probe re-decode failed")
+        -- Refs export as YAFC's dictionary-key string form "!<target>!<quality>"
+        -- (not the positional object form, which real YAFC mis-resolves).
+        local row = page.content.recipes and page.content.recipes[1]
+        assert(row and row.recipe == "!Mechanics.reactor.heat!normal",
+            "reactor did not export as !Mechanics.reactor.heat!normal (got "
+            .. tostring(row and row.recipe) .. ")")
+        assert(row.entity == "!Entity.nuclear-reactor!normal",
+            "reactor export lost its Entity.nuclear-reactor crafter (got "
+            .. tostring(row.entity) .. ")")
+
+        local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
+        local round_tripped = false
+        for _, l in ipairs(payload.production_lines) do
+            if l.recipe_typed_name.name == "<run>nuclear-reactor" then round_tripped = true end
+        end
+        assert(round_tripped,
+            "reactor did not round-trip FS -> YAFC -> FS back to <run>nuclear-reactor")
+
+        build_iron_plate_demand(solution)
+    end,
+}
+
+-- A real YAFC 2.19 export of a single uf6 fluid. Its link goods uses the newer
+-- string form "!Fluid.uf6@39!normal" (separator "!", bare quality, temperature
+-- suffix) rather than the older { target, quality } object. Decoded by the
+-- yafc_string_form fixture.
+local YAFC_UF6_SAMPLE =
+[==[inR0c+YKKMrPSk0uCUhMT+Uy0jO01DPQM+Di4gIAAAD//22PQU/DMAyFf8t8jqoNOtb1hEDabdIOuyDEwUmcEs1NqjRBTFX/Oy4DiQM3P/v5e/YEJoZMIZ+vA0ELL+hMdYyWuJINW0z2MZxRM4GCrngrni051PW62W0c1UY3uGv221292WuDd7XT4vRChTYUZgUB+4Vc3IMMftKgnYA+BwyWhJhTIQXsw2WE9nWCLkYrFawOLImVbD7e71chph5ZGNjHsiA2UnIXk8/vPbTr+U1BIuMHWigiermfFzGB88xHHyiJcsijxGHJ8SDtE141mosA1LeNkrwve7/na8I/z9zUf47xROmpeLY+dNA2CuIHpeQtPSd0WWY3l1wzz7OC0aTIfEPMXw==]==]
+
+---Importing a YAFC 2.19 string-form good reference. The link goods
+---"!Fluid.uf6@39!normal" must decode to a fluid constraint named "uf6" carrying
+---temperature 39 -- exercising read_ref's "!sep!" parsing and the "@temp"
+---suffix split that the object form does not cover. The uf6 fluid is py-only, so
+---only the parsed shape is asserted (no prototype resolution / solve). Base only.
+fixtures.yafc_string_form = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        local page, err = yafc_codec.decode(YAFC_UF6_SAMPLE)
+        assert(page, "uf6 string-form decode failed: " .. tostring(err and err[1]))
+
+        local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
+        local uf6
+        for _, c in ipairs(payload.constraints) do
+            if c.name == "uf6" then uf6 = c end
+        end
+        assert(uf6, "uf6 string-form link did not decode to a constraint")
+        assert(uf6.type == "fluid", "uf6 constraint should be a fluid")
+        assert(uf6.minimum_temperature == 39 and uf6.maximum_temperature == 39,
+            "uf6 string-form link lost its @39 temperature (got "
+            .. tostring(uf6.minimum_temperature) .. ")")
+
         build_iron_plate_demand(solution)
     end,
 }

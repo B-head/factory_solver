@@ -37,6 +37,8 @@ local tn = require "manage/typed_name"
 local chain_reachability = require "manage/chain_reachability"
 local create_problem = require "solver/create_problem"
 local ed = require "tests/explore_detect"
+local yafc_codec = require "manage/yafc_codec"
+local solution_codec = require "manage/solution_codec"
 
 local log = fs_log.for_module("chain_explorer")
 
@@ -1297,6 +1299,167 @@ function M.explore(args_str)
     return ed.format_result(ctx, solution.solver_state, steps, d)
 end
 
+---RCON entry point for the FS -> YAFC export probe. Builds the same chain as
+---M.explore but, instead of solving, runs it through the YAFC export codec and
+---writes the resulting share string to script-output/yafc_exports/<name>.b64.
+---The launcher (tests/yafc_export_corpus.ps1) then feeds those strings to the
+---real headless YAFC deserializer to find export-format bugs. The string is
+---written to a file rather than returned over RCON because a deep chain's
+---deflated+base64 payload can exceed a single RCON response; the returned JSON
+---is just a short status the launcher logs.
+---@param args_str string?
+---@return string  JSON { ok, name, lines, file, warnings } or { ok=false, message }
+function M.encode_yafc(args_str)
+    local r = build_problem(args_str)
+    if not r.ok then
+        return helpers.table_to_json({ ok = false, message = assert(r.message) })
+    end
+    local solution = assert(r.solution)
+
+    -- build_problem clears storage.solutions and re-creates a single solution
+    -- named "explore" every call, so without a unique name every export would
+    -- overwrite the same yafc_exports/explore.b64. Use the same collision-free
+    -- (seed, config) stem the dump files carry.
+    local ctx = assert(r.ctx)
+    solution.name = "seed_" .. tostring(ctx.seed) .. "_" .. problem_tag(ctx)
+
+    local ok, b64, warnings = pcall(yafc_codec.encode, { solution })
+    if not ok then
+        return helpers.table_to_json({
+            ok = false,
+            message = string.format("encode raised: %s", tostring(b64)),
+        })
+    end
+
+    -- Warnings are LocalisedStrings ({ key, args... }); keep just the key so the
+    -- launcher log stays one line per export without resolving translations.
+    local wkeys = {}
+    for _, w in ipairs(warnings or {}) do
+        wkeys[#wkeys + 1] = (type(w) == "table") and tostring(w[1]) or tostring(w)
+    end
+
+    local file = "yafc_exports/" .. solution.name .. ".b64"
+    helpers.write_file(file, b64, false)
+
+    return helpers.table_to_json({
+        ok = true,
+        name = solution.name,
+        lines = #solution.production_lines,
+        file = file,
+        warnings = wkeys,
+    })
+end
+
+---RCON entry point for the YAFC -> FS -> YAFC re-export probe. Takes an external
+---YAFC share string (e.g. a real factory exported from YAFC), imports it through
+---yafc_codec.decode + yafc_to_payload, then re-exports the resulting solution and
+---writes the re-export to script-output/yafc_exports/<name>.b64. Feeding both the
+---ORIGINAL and the re-export to the headless YAFC probe shows whether a real
+---factory survives factory_solver's import + re-export (module / fluid / Mechanics
+---fidelity on real-world data, not just random chains). Needs the matching mod
+---set loaded so yafc_to_payload resolves the prototypes. The b64 has no quotes /
+---newlines, so it passes safely inside the RCON command's single-quoted arg.
+---@param b64 string  an external YAFC ProjectPage share string
+---@param name string? output stem (default "reexport")
+---@return string  JSON { ok, name, in_rows, out_rows, file, warnings } or { ok=false, message }
+function M.reexport_yafc(b64, name)
+    save.init_force_data(FORCE_INDEX)
+    save.init_player_data(PLAYER_INDEX)
+
+    local page, derr = yafc_codec.decode(b64)
+    if not page then
+        return helpers.table_to_json({ ok = false, message = "decode: " .. tostring(derr and derr[1]) })
+    end
+    local ok_pl, payload = pcall(yafc_codec.yafc_to_payload, page, PLAYER_INDEX)
+    if not ok_pl then
+        return helpers.table_to_json({ ok = false, message = "yafc_to_payload raised: " .. tostring(payload) })
+    end
+
+    local solutions = storage.forces[FORCE_INDEX].solutions
+    for n in pairs(solutions) do solutions[n] = nil end
+    local sol_name = save.new_solution(solutions, "reexport")
+    local solution = assert(solutions[sol_name])
+    solution.name = name or "reexport"
+    solution.constraints = payload.constraints
+    solution.production_lines = payload.production_lines
+
+    local ok, b64out, warnings = pcall(yafc_codec.encode, { solution })
+    if not ok then
+        return helpers.table_to_json({ ok = false, message = "encode raised: " .. tostring(b64out) })
+    end
+
+    local wkeys = {}
+    for _, w in ipairs(warnings or {}) do
+        wkeys[#wkeys + 1] = (type(w) == "table") and tostring(w[1]) or tostring(w)
+    end
+
+    local file = "yafc_exports/" .. solution.name .. ".b64"
+    helpers.write_file(file, b64out, false)
+
+    return helpers.table_to_json({
+        ok = true,
+        name = solution.name,
+        in_rows = #(page.content and page.content.recipes or {}),
+        out_rows = #solution.production_lines,
+        file = file,
+        warnings = wkeys,
+    })
+end
+
+---RCON entry point for the FS-native -> YAFC export probe. Takes a factory_solver
+---*native* share string (solution_codec format, possibly many solutions), imports
+---every solution and exports each to YAFC, writing them to
+---script-output/yafc_exports/fs_<i>_<name>.b64. This drives the YAFC export over
+---real hand-built factories -- modules, beacons, quality, recyclers, virtual
+---recipes -- the paths the random-chain corpus (qual=off, no modules/beacons)
+---never reaches. The native b64 is compact enough to pass inside the RCON
+---command. The loaded mod set must match the string's content so import_solution
+---resolves the prototypes.
+---@param fs_b64 string  a factory_solver native share string
+---@return string  JSON { ok, count, results=[{name, rows, file, warnings}|{name, error}] } or { ok=false, message }
+function M.encode_fs_to_yafc(fs_b64)
+    save.init_force_data(FORCE_INDEX)
+    save.init_player_data(PLAYER_INDEX)
+
+    local payloads, derr = solution_codec.decode(fs_b64)
+    if not payloads then
+        return helpers.table_to_json({ ok = false, message = "decode: " .. tostring(derr and derr[1]) })
+    end
+
+    local solutions = storage.forces[FORCE_INDEX].solutions
+    for n in pairs(solutions) do solutions[n] = nil end
+
+    local results = {}
+    for i, payload in ipairs(payloads) do
+        local sol_name = save.import_solution(solutions, payload)
+        local solution = solutions[sol_name]
+        if not solution then
+            results[i] = { name = payload.name, error = "import_solution returned no solution" }
+        else
+            local ok, b64, warnings = pcall(yafc_codec.encode, { solution })
+            if not ok then
+                results[i] = { name = solution.name, error = tostring(b64) }
+            else
+                local wkeys = {}
+                for _, w in ipairs(warnings or {}) do
+                    wkeys[#wkeys + 1] = (type(w) == "table") and tostring(w[1]) or tostring(w)
+                end
+                local stem = string.format("fs_%02d_%s", i,
+                    (string.gsub(solution.name or "sol", "[^%w%-]", "_")))
+                helpers.write_file("yafc_exports/" .. stem .. ".b64", b64, false)
+                results[i] = {
+                    name = solution.name,
+                    rows = #solution.production_lines,
+                    file = stem .. ".b64",
+                    warnings = wkeys,
+                }
+            end
+        end
+    end
+
+    return helpers.table_to_json({ ok = true, count = #payloads, results = results })
+end
+
 ---RCON entry point for the producer/consumer split. Builds the same chain as
 ---M.explore but, instead of solving, dumps { meta, constraints, normalized_lines }
 ---to script-output/explore_problems/<tag>.lua as loadable Lua, so a pool of
@@ -1539,6 +1702,9 @@ function M.register()
     remote.add_interface("factory_solver_explore", {
         explore = M.explore,
         explore_emit = M.explore_emit,
+        encode_yafc = M.encode_yafc,
+        reexport_yafc = M.reexport_yafc,
+        encode_fs_to_yafc = M.encode_fs_to_yafc,
         diag = M.diag,
         detail = M.detail,
         solve_explicit = M.solve_explicit,

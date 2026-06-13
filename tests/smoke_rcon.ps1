@@ -47,7 +47,8 @@ param(
         "catalyst_reclassify", "target_rescue",
         "migration_legacy_shape", "codec_solution_roundtrip", "codec_frozen_import",
         "codec_fp_roundtrip", "codec_helmod_roundtrip", "codec_helmod_import_order",
-        "codec_yafc_roundtrip", "yafc_real_sample"),
+        "codec_yafc_roundtrip", "yafc_real_sample", "codec_yafc_virtual", "yafc_string_form",
+        "yafc_real_reexport"),
     # Mods to enable for the run; everything else is explicitly disabled in the
     # workspace's generated mod-list.json. Default is the vanilla minimal set.
     # Pass @() to mirror the dev config (every shared mod linked, shared
