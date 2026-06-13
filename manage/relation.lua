@@ -137,13 +137,29 @@ function M.create_relation_to_recipes(force_index)
     -- the product list. craftable_count still counts it so a residue with no real
     -- recipe (depleted-uranium-fuel-cell) is not flagged unresearched.
     -- Fluid fuels have no burnt_result and never reach here.
+    --
+    -- A fuel item is registered as the producer of its burnt_result once per
+    -- (recipe, category) it can burn in -- ~389k times for only ~116 distinct
+    -- fuels on a pyanodon set -- so resolving burnt_result per registration is
+    -- the single biggest cost in create_relation_to_recipes (~772ms of ~2.5s).
+    -- Resolve it once up front into an immutable item -> spent-item NAME map.
+    -- Deliberately not a lazily-grown cache and string-valued (not the
+    -- LuaItemPrototype): it is built once and only read afterwards, so it stays
+    -- correct -- and storage-safe -- if this function is ever split across ticks.
+    -- An upvalue/lazy cache holding a LuaObject could not be carried across a
+    -- tick boundary (LuaObjects are not storable) and would desync.
+    local burnt_result_names = {} ---@type table<string, string>
+    for name, item in pairs(prototypes.item) do
+        local burnt = item.burnt_result
+        if burnt then burnt_result_names[name] = burnt.name end
+    end
     ---@param fuel_item_name string
     ---@param recipe_name string
     ---@param is_visible boolean
     local function register_burnt_result(fuel_item_name, recipe_name, is_visible)
-        local burnt = acc.try_get_burnt_result(prototypes.item[fuel_item_name])
-        if burnt then
-            local info = get_info("item", burnt.name)
+        local burnt_name = burnt_result_names[fuel_item_name]
+        if burnt_name then
+            local info = get_info("item", burnt_name)
             flib_table.insert(info.recipe_for_burnt_result, recipe_name)
             if is_visible then
                 info.craftable_count = info.craftable_count + 1
