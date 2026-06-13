@@ -218,6 +218,18 @@ function Get-FreeTcpPort {
     return $port
 }
 
+# An OS-assigned free UDP port for Factorio's game socket (--port). Without it
+# every headless run binds the default 34197 and collides with any other Factorio
+# -- another launcher run, or the user's own running game -- failing at bind with
+# "Host address is already in use". Closed before Factorio binds (same small race
+# as Get-FreeTcpPort).
+function Get-FreeUdpPort {
+    $udp = New-Object System.Net.Sockets.UdpClient(0)
+    $port = ([System.Net.IPEndPoint]$udp.Client.LocalEndPoint).Port
+    $udp.Close()
+    return $port
+}
+
 function New-RunWorkspace {
     param([string] $Tag, [string] $ServerName, [string] $RunRoot)
     $dir = Join-Path $RunRoot ("{0}_{1}_{2}" -f $Tag, (Get-Date -Format "yyyyMMddHHmmss"), $PID)
@@ -382,6 +394,7 @@ function New-FactorioArgumentList {
         "--mod-directory", $Workspace.ModsDir,
         "--server-settings", $Workspace.ServerSettingsPath,
         "--config", $Workspace.ConfigPath,
+        "--port", (Get-FreeUdpPort),
         "--rcon-bind", "127.0.0.1:$RconPort",
         "--rcon-password", $RconPassword,
         "--no-log-rotation",
