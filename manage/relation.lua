@@ -182,6 +182,7 @@ local function build_relation_lists(force_index)
         fluid = fluids,
         virtual_recipe = virtuals,
         virtual_recipe_researched = {},
+        virtual_material_researched = {},
         recipes_by_category = recipes_by_category,
         contributes = contributes,
     }
@@ -374,6 +375,66 @@ function M.recompute_relation_dynamic(rel, force_index)
         end
     end
     rel.virtual_recipe_researched = virtual_recipe_researched
+
+    -- Virtual materials' researched state is derived from their source's
+    -- craftable_count (now finalized); cache it so apply_research_change can detect
+    -- flips for the group_infos incremental update.
+    local virtual_material_researched = {} ---@type table<string, boolean>
+    for name, vm in pairs(storage.virtuals.material) do
+        virtual_material_researched[name] = not acc.is_unresearched(vm, rel)
+    end
+    rel.virtual_material_researched = virtual_material_researched
+end
+
+---Credit (delta=+1) or debit (delta=-1) a material's craftable_count for one
+---recipe contribution, and -- when group_infos is provided -- move its group's
+---researched<->unresearched count if craftable_count crossed 0. Item/fluid only:
+---a virtual_material's group is driven by its source via is_unresearched, handled
+---in apply_research_change's virtual-material pass, so here it just adjusts the
+---count. Hidden/parameter prototypes are counted in hidden_count, never moved.
+---@param rel RelationToRecipes
+---@param group_infos GroupInfos?
+---@param m RelationContribution
+---@param delta integer
+local function credit_material(rel, group_infos, m, delta)
+    local info = get_info(rel, m.type, m.name)
+    local before = info.craftable_count
+    info.craftable_count = before + delta
+    if not group_infos or (before > 0) == (info.craftable_count > 0) then return end
+    local proto, group_table
+    if m.type == "item" then
+        proto = prototypes.item[m.name]; group_table = group_infos.item
+    elseif m.type == "fluid" then
+        proto = prototypes.fluid[m.name]; group_table = group_infos.fluid
+    else
+        return
+    end
+    if proto.parameter or proto.hidden then return end
+    local g = group_table[proto.group.name]
+    if info.craftable_count > 0 then
+        g.unresearched_count = g.unresearched_count - 1
+        g.researched_count = g.researched_count + 1
+    else
+        g.researched_count = g.researched_count - 1
+        g.unresearched_count = g.unresearched_count + 1
+    end
+end
+
+---Move one group's researched<->unresearched count by one (a recipe enabled or a
+---virtual researched flip). hidden_count is never touched -- hidden is invariant
+---across research.
+---@param group_table table<string, GroupInfo>
+---@param group_name string
+---@param now_researched boolean
+local function move_group(group_table, group_name, now_researched)
+    local g = group_table[group_name]
+    if now_researched then
+        g.unresearched_count = g.unresearched_count - 1
+        g.researched_count = g.researched_count + 1
+    else
+        g.researched_count = g.researched_count - 1
+        g.unresearched_count = g.unresearched_count + 1
+    end
 end
 
 ---Incrementally apply a technology's recipe unlocks (on_research_finished) or
@@ -381,15 +442,19 @@ end
 ---of a full rebuild. `recipe_names` are the unlock-recipe targets from the
 ---technology's effects; `now_enabled` is true for finish, false for reverse.
 ---Updates enabled_recipe and the affected materials' craftable_count via
----`contributes` (so products and spent-fuel residues are both handled), then any
----virtual recipe whose researched-ness flips because a placement item just became
----(un)craftable or a planet (un)locked. Virtual products are never placement
----items, so a flip cannot cascade into further flips -- one virtual pass suffices.
+---`contributes` (products and spent-fuel residues both), then any virtual recipe
+---whose researched-ness flips because a placement item just became (un)craftable
+---or a planet (un)locked, then any virtual material whose source flipped. Virtual
+---products are never placement items, so flips cannot cascade -- single passes
+---suffice. When `group_infos` is non-nil it is patched in lockstep (every
+---researched<->unresearched move mirrored); pass nil to update relation only and
+---leave a full group_infos rebuild pending.
 ---@param rel RelationToRecipes
+---@param group_infos GroupInfos?
 ---@param force_index integer
 ---@param recipe_names string[]
 ---@param now_enabled boolean
-function M.apply_research_change(rel, force_index, recipe_names, now_enabled)
+function M.apply_research_change(rel, group_infos, force_index, recipe_names, now_enabled)
     local force = game.forces[force_index]
     local contributes = rel.contributes
     local delta = now_enabled and 1 or -1
@@ -399,9 +464,11 @@ function M.apply_research_change(rel, force_index, recipe_names, now_enabled)
             rel.enabled_recipe[recipe_name] = now_enabled
             local recipe = prototypes.recipe[recipe_name]
             if recipe and not recipe.hidden then
+                if group_infos and not recipe.parameter then
+                    move_group(group_infos.recipe, recipe.group.name, now_enabled)
+                end
                 for _, m in ipairs(contributes[recipe_name] or {}) do
-                    local info = get_info(rel, m.type, m.name)
-                    info.craftable_count = info.craftable_count + delta
+                    credit_material(rel, group_infos, m, delta)
                 end
             end
         end
@@ -413,11 +480,29 @@ function M.apply_research_change(rel, force_index, recipe_names, now_enabled)
         if now ~= was then
             rel.virtual_recipe_researched[recipe.name] = now
             if not recipe.hidden then
+                if group_infos then
+                    local bucket = (recipe.is_source or recipe.is_sink) and group_infos.external or group_infos.virtual_recipe
+                    move_group(bucket, recipe.group_name, now)
+                end
                 local vdelta = now and 1 or -1
                 for _, m in ipairs(contributes[recipe.name] or {}) do
-                    local info = get_info(rel, m.type, m.name)
-                    info.craftable_count = info.craftable_count + vdelta
+                    credit_material(rel, group_infos, m, vdelta)
                 end
+            end
+        end
+    end
+
+    -- Virtual materials: researched is derived from a source fluid/entity whose
+    -- craftable_count may have changed above. Re-evaluate all and move the group
+    -- count for any that flipped. Kept in sync even without group_infos so a later
+    -- apply still detects flips correctly.
+    for name, vm in pairs(storage.virtuals.material) do
+        local was = rel.virtual_material_researched[name]
+        local now = not acc.is_unresearched(vm, rel)
+        if now ~= was then
+            rel.virtual_material_researched[name] = now
+            if group_infos and not acc.is_hidden(vm) then
+                move_group(group_infos.virtual_recipe, vm.group_name, now)
             end
         end
     end

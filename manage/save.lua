@@ -445,8 +445,10 @@ function M.apply_research_change(force_index, recipe_names, now_enabled)
     if not force_data or force_data.relation_to_recipes_needs_updating then
         return
     end
-    relation.apply_research_change(force_data.relation_to_recipes, force_index, recipe_names, now_enabled)
-    force_data.group_infos_needs_updating = true
+    -- Patch group_infos in lockstep when it is already built; if it isn't, pass
+    -- nil and leave the full rebuild pending (it will reflect the unlock).
+    local group_infos = (not force_data.group_infos_needs_updating) and force_data.group_infos or nil
+    relation.apply_research_change(force_data.relation_to_recipes, group_infos, force_index, recipe_names, now_enabled)
 end
 
 ---comment

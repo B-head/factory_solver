@@ -1220,9 +1220,11 @@ function M.check_force_caches()
         if apply_target then
             game.forces[FORCE_INDEX].recipes[apply_target].enabled = false
             local applied = relation.create_relation_to_recipes(FORCE_INDEX)
+            local applied_groups = relation.create_group_infos(FORCE_INDEX, applied)
             game.forces[FORCE_INDEX].recipes[apply_target].enabled = true
-            relation.apply_research_change(applied, FORCE_INDEX, { apply_target }, true)
+            relation.apply_research_change(applied, applied_groups, FORCE_INDEX, { apply_target }, true)
             local full2 = relation.create_relation_to_recipes(FORCE_INDEX)
+            local full2_groups = relation.create_group_infos(FORCE_INDEX, full2)
             for name, info in pairs(full2.item) do
                 assert(info.craftable_count == applied.item[name].craftable_count,
                     "apply item craftable_count mismatch: " .. name .. " (unlock " .. apply_target .. ")")
@@ -1238,6 +1240,16 @@ function M.check_force_caches()
             for name, researched in pairs(full2.virtual_recipe_researched) do
                 assert(researched == applied.virtual_recipe_researched[name],
                     "apply virtual_recipe_researched mismatch: " .. name)
+            end
+            -- group_infos must match a full rebuild too (the incremental group path)
+            for cat, group_table in pairs(full2_groups) do
+                for gname, g in pairs(group_table) do
+                    local ag = applied_groups[cat][gname]
+                    assert(g.hidden_count == ag.hidden_count
+                        and g.researched_count == ag.researched_count
+                        and g.unresearched_count == ag.unresearched_count,
+                        "apply group_infos mismatch: " .. cat .. "/" .. gname)
+                end
             end
         end
 
