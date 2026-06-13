@@ -32,6 +32,12 @@ local BRIDGE = "|bridge|"
 local POS_SLACK = "%positive_slack%"
 local NEG_SLACK = "%negative_slack%"
 local TARGET_BUDGET = "|target_budget|"
+-- Cascade staged-rescue rows (see solver/cascade.lua): one budget dual per
+-- locked tier, and the synthetic demand probe / its dual the producibility /
+-- consumability fix tests inject.
+local CASCADE_BUDGET = "|cascade_budget|"
+local CASCADE_PROBE = "|cascade_probe|"
+local CASCADE_DEMAND = "|cascade_demand|"
 -- A bare |elastic| sits on a |limit| dual, so the composite a constraint
 -- relaxation carries is |elastic||limit|<material>.
 local ELASTIC_LIMIT = ELASTIC .. LIMIT
@@ -95,6 +101,24 @@ end
 ---lock; see create_problem's target_budget option).
 ---@return string
 function M.target_budget() return TARGET_BUDGET end
+
+---The dual row capping a cascade tier's summed escapes (the Vp / Vf / Vc
+---budget locks; see solver/cascade.lua). One per tier so a build can carry
+---several locks at once.
+---@param tier string "vp" | "vf" | "vc"
+---@return string
+function M.cascade_budget(tier) return CASCADE_BUDGET .. tier end
+
+---The free objective variable a cascade fix test forces one unit of demand
+---through (sign picks the producibility / consumability mirror).
+---@param material string base material variable key
+---@return string
+function M.cascade_probe(material) return CASCADE_PROBE .. material end
+
+---The lower-limit dual that holds a cascade fix test's probe at one unit.
+---@param material string base material variable key
+---@return string
+function M.cascade_demand(material) return CASCADE_DEMAND .. material end
 
 ---@param dual_variable string
 ---@return string

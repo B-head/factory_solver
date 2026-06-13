@@ -14,6 +14,13 @@ Date: ????
       dialog. Real recipes round-trip faithfully; special "Mechanics" recipes are
       mapped best-effort and anything unmapped is reported.
   Changes:
+    - The solver now produces more practical solutions on recipe loops and
+      byproduct chains. Rather than outsourcing a material the placed recipes can
+      actually make, or trashing a byproduct a placed recipe could consume, it
+      runs the loop and consumes the byproduct, importing or dumping only what the
+      recipes genuinely cannot balance internally. A requested target is also met
+      whenever the recipes allow it, even when meeting it needs a large but
+      legitimate external input. Already-balanced factories are unchanged.
     - The solver now drives redundant machines out of solutions more reliably. On
       tightly-coupled recipe loops it could leave a working solution running well
       more machines than necessary (up to several times the minimum); these are

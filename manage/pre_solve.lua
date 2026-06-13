@@ -4,14 +4,28 @@ local create_problem = require "solver/create_problem"
 local linear_programming = require "solver/linear_programming"
 local substitution = require "solver/substitution"
 local observe_price = require "solver/observe_price"
+local cascade = require "solver/cascade"
 
 local iterate_limit = 600
 
--- Flip to false to fall straight back to the legacy hard reachability gate +
--- two-pass diagnose (immediate rollback). When true (shipped), the gate is
--- replaced by a SOFT gate -- reachable shortages priced at elastic_cost *
--- soft_gate_k so the chain still wins -- and the unreachable self-sustaining
--- catalyst cycles are repriced by the observe-price fixed point below.
+-- The shipped solver pipeline (2026-06-13): the cascade staged rescue
+-- (solver/cascade.lua) on an UN-GATED baseline. It approximates the reference
+-- solver's 5-tier lexicographic optimum (target >> producible imports >>
+-- makeup imports >> consumable dumps >> machines) with lazy budget-locked
+-- stages, paid only when the corresponding defeat actually flows. It replaces
+-- the observer (soft gate + observe-price): observe-price's cone fabrication
+-- is the Vf stage's job now (see project_vp_rescue / project_solver_names).
+-- Flip to false to roll back to the observer below (which itself rolls back to
+-- the legacy hard gate via observe_price_enabled). cascade_enabled wins: when
+-- true, neither observe-price nor the two-pass runs.
+local cascade_enabled = true
+
+-- Observer rollback (only consulted when cascade_enabled is false). Flip to
+-- false to fall straight back to the legacy hard reachability gate + two-pass
+-- diagnose (immediate rollback). When true, the gate is replaced by a SOFT
+-- gate -- reachable shortages priced at elastic_cost * soft_gate_k so the
+-- chain still wins -- and the unreachable self-sustaining catalyst cycles are
+-- repriced by the observe-price fixed point below.
 local observe_price_enabled = true
 -- The soft-gate multiplier. Must stay below target_cost/elastic_cost (= 2^10) so
 -- a reachable shortage never undercuts target relaxation; 256 is the measured
@@ -94,13 +108,38 @@ function M.forwerd_solve(force_data, solution)
         -- The rescue's own restarts set tr_restart; the downstream loops'
         -- restarts (op_restart / reclassify_pending) keep the settled budget so
         -- their re-solves stay locked on the rescued target.
-        if not (solution.tr_restart or solution.op_restart or solution.reclassify_pending) then
+        if not (solution.tr_restart or solution.op_restart or solution.reclassify_pending
+                or solution.cc_restart) then
             solution.target_rescue = nil
         end
         solution.tr_restart = nil
 
         local options = nil
-        if observe_price_enabled then
+        -- The cascade build in flight this tick (nil = the un-gated baseline).
+        -- A cascade build is shaped after create_problem and skips the
+        -- substitution fold (its objective is overwritten).
+        local cc_build = nil
+        if cascade_enabled then
+            -- Shipped path: un-gated baseline, then the cascade staged rescue
+            -- (M.cascade_step) owns every later build. observe-price and the
+            -- two-pass are not run; their state is dropped. A fresh "ready"
+            -- drops in-flight cascade state; the loop's OWN restart keeps it.
+            if not solution.cc_restart then solution.cascade = nil end
+            solution.cc_restart = nil
+            solution.observe_price = nil
+            solution.forced_imports = nil
+            solution.reclassify_pending = nil
+
+            local cc = solution.cascade
+            if cc and cc.build then
+                cc_build = cc.build
+                options = cascade.build_options(cc_build)
+            else
+                -- The baseline: un-gated flat hatches (no soft gate). The
+                -- cascade's stages, not a gate, do the rescue work.
+                options = { reachability_gating = false }
+            end
+        elseif observe_price_enabled then
             -- Shipped path: replace the hard gate with the soft gate and apply the
             -- current observe-price phase's per-material shortage overrides. A
             -- fresh "ready" (edit / migration / new solution) drops in-flight
@@ -149,14 +188,18 @@ function M.forwerd_solve(force_data, solution)
         -- M.target_rescue_step): stage 1 measures T_min with a target-only
         -- objective; once the budget is locked, EVERY later rebuild (observe /
         -- verify / two-pass restarts included) carries the budget row so no
-        -- re-solve can fall back into the target collapse.
-        local rescue = solution.target_rescue
-        if rescue and rescue.phase == "stage1" then
-            options = options or {}
-            options.target_only_objective = true
-        elseif rescue and rescue.budget then
-            options = options or {}
-            options.target_budget = rescue.budget
+        -- re-solve can fall back into the target collapse. Skipped for a
+        -- cascade build: the rescue settles BEFORE the cascade begins, and the
+        -- cascade's own builds carry the target budget through build_options.
+        if not cc_build then
+            local rescue = solution.target_rescue
+            if rescue and rescue.phase == "stage1" then
+                options = options or {}
+                options.target_only_objective = true
+            elseif rescue and rescue.budget then
+                options = options or {}
+                options.target_budget = rescue.budget
+            end
         end
 
         solution.problem = create_problem.create_problem(
@@ -166,6 +209,13 @@ function M.forwerd_solve(force_data, solution)
             solution.forced_imports,
             options
         )
+
+        -- A cascade stage build shapes the problem after construction: cost
+        -- overrides (stage objective / fix-test prices) plus the budget-lock
+        -- and synthetic-demand rows. See solver/cascade.lua M.shape_problem.
+        if cc_build then
+            cascade.shape_problem(solution.problem, cc_build)
+        end
         -- Mirror the inactive-recipe set onto the solution so save / UI lookups
         -- (which see solution, not problem) can gray out isolated lines without
         -- reaching through solution.problem (which is nil after migrations).
@@ -177,7 +227,12 @@ function M.forwerd_solve(force_data, solution)
         -- re-reduces. Stored as plain tables -- the reduced Problem gets its
         -- metatable re-attached on load alongside solution.problem (see
         -- manage/save.lua resetup_force_data_metatable).
-        if substitution_enabled then
+        -- NOT for a cascade stage build: its objective is overwritten by
+        -- shape_problem, so the fold (which conserves the ORIGINAL cost onto
+        -- the kept recipe) would corrupt the stage objective; and a stage
+        -- solves once, so the fold's speedup does not apply. The un-gated
+        -- baseline keeps the fold and its warm start.
+        if substitution_enabled and not cc_build then
             local reduced, reconstruction = substitution.reduce(solution.problem)
             solution.problem.reduced = reduced
             solution.problem.reconstruction = reconstruction
@@ -228,11 +283,24 @@ function M.forwerd_solve(force_data, solution)
         return
     end
 
-    if observe_price_enabled then
-        -- observe-price fixed point (the shipped replacement for the two-pass).
-        -- Each phase below is a full incremental solve; advancing it sets
-        -- solver_state="ready" + op_restart so the rebuild above stays on the
-        -- same plan. See M.observe_price_step.
+    if cascade_enabled then
+        -- The cascade staged rescue (the shipped replacement for the observer).
+        -- Each stage is a full incremental solve; advancing it sets
+        -- solver_state="ready" + cc_restart so the rebuild above stays on the
+        -- same cascade build. Driven on ANY terminal state, not just "finished":
+        -- a stage CAN diverge (the deletion-final / staged-relay fallbacks exist
+        -- for exactly that), so cascade_step must run to advance the fallback
+        -- chain rather than stall in a terminal non-"finished" state. See
+        -- M.cascade_step.
+        local st = solution.solver_state
+        if st ~= "ready" and st ~= "calculating" then
+            M.cascade_step(solution, get_normalized())
+        end
+    elseif observe_price_enabled then
+        -- observe-price fixed point (the observer's replacement for the
+        -- two-pass). Each phase below is a full incremental solve; advancing it
+        -- sets solver_state="ready" + op_restart so the rebuild above stays on
+        -- the same plan. See M.observe_price_step.
         if solution.solver_state == "finished" then
             M.observe_price_step(solution, get_normalized())
         end
@@ -312,6 +380,84 @@ function M.target_rescue_step(solution)
     -- stands and the downstream loops may proceed on it this tick.
     rescue.phase = "done"
     return false
+end
+
+---Advance the cascade staged rescue one step after a terminal solve. On the
+---first call (no in-flight state) it begins the cascade on the
+---target-rescued baseline; later calls feed the just-solved cascade build into
+---cascade.advance, which either wants another solve (re-arm "ready") or settles
+---("done" -- the held answer stands) or asks to restore the adopted answer
+---("restore" -- rebuild the adopted problem and re-filter WITHOUT solving,
+---because the last stage's result was rejected). cascade.advance handles
+---non-finished solves itself (its deletion-final / staged-relay fallbacks), so
+---this is driven on any terminal state; only the baseline must have finished to
+---begin at all.
+---@param solution Solution
+---@param lines NormalizedProductionLine[]
+function M.cascade_step(solution, lines)
+    local cc = solution.cascade
+    if not cc then
+        -- The baseline (target-rescued) just terminated. If it failed, leave
+        -- the terminal state for the UI -- there is no answer to cascade on.
+        if solution.solver_state ~= "finished" or not solution.raw_variables then
+            return
+        end
+        local rescue_budget = solution.target_rescue and solution.target_rescue.budget
+        cc = cascade.begin(solution.problem, solution.raw_variables, lines, rescue_budget)
+        solution.cascade = cc
+        -- begin always leaves a build wanted (the pipeline ends with the
+        -- polish), but guard anyway.
+        if cc.build then
+            solution.cc_restart = true
+            solution.solver_state = "ready"
+            solution.solver_iteration = nil
+        end
+        return
+    end
+    if cc.phase == "done" then return end
+
+    cascade.advance(cc, solution.problem, solution.raw_variables, solution.solver_state)
+
+    -- A compact settled sentinel: drops the heavy working set (the adopted
+    -- PackedVariables snapshot, the entry / verdict tables) but keeps the
+    -- per-tier rescue outcome flags so idle ticks skip re-entry and diagnostics
+    -- (the smoke read-side, future UI) can see what the cascade did.
+    local function settled()
+        return { phase = "done", vp_rescued = cc.vp_rescued, vf_rescued = cc.vf_rescued,
+            vc_rescued = cc.vc_rescued, polish = cc.polish, vp_deleted = cc.vp_deleted,
+            relay = cc.relay, solves = cc.solves }
+    end
+
+    if cc.phase == "restore" then
+        -- The last stage's result was rejected: rebuild the adopted problem
+        -- and restore its answer without solving. filter_result reads only the
+        -- is_result primals against raw.x, and recipe keys are build-invariant,
+        -- so the rebuilt problem yields the adopted machine counts exactly.
+        local build = cc.build
+        solution.problem = create_problem.create_problem(
+            solution.name, solution.constraints, lines, nil, cascade.build_options(build))
+        cascade.shape_problem(solution.problem, build)
+        solution.problem.reduced = nil
+        solution.problem.reconstruction = nil
+        solution.inactive_recipe_variables = solution.problem.inactive_recipe_variables
+        solution.raw_variables = cc.adopted_raw
+        solution.quantity_of_machines_required =
+            solution.problem:filter_result(solution.raw_variables)
+        solution.solver_state = "finished"
+        solution.cascade = settled()
+        return
+    end
+
+    if cc.build then
+        solution.cc_restart = true
+        solution.solver_state = "ready"
+        solution.solver_iteration = nil
+    else
+        -- phase == "done": the held solution IS the adopted answer (its
+        -- filter_result already ran this tick). Fold to the sentinel so idle
+        -- ticks do not re-enter.
+        solution.cascade = settled()
+    end
 end
 
 ---Advance the observe-price fixed point one step after a baseline / observe /

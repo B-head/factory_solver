@@ -866,19 +866,20 @@ fixtures.reactor_burnt_fuel = {
     end,
 }
 
----observe-price end-to-end through the incremental solver (manage/pre_solve.lua +
----solver/observe_price.lua). Plant the data_test bootstrap-trapped catalyst loop
+---Cascade staged rescue end-to-end through the incremental solver
+---(manage/pre_solve.lua + solver/cascade.lua). Plant the data_test
+---bootstrap-trapped catalyst loop
 ----- two recipes forming a copper-plate <-> iron-gear-wheel cycle whose entry
 ---recipe is gated behind a large priced raw (a: copper + 2000 iron-plate -> gear,
 ---b: gear -> 2 copper) -- and demand copper-plate. Neither cycle material can be
 ---produced from zero and the 2000-iron real chain costs more than the shortage
----penalty, so a flat baseline fabricates copper-plate via |shortage_source| (an
----AVOIDABLE cheat). The shipped path drives this across ticks: the soft gate
----prices reachable shortages and the observe-price fixed point reprices the
----unreachable self-sustaining cycle so it runs instead of importing. The launcher
----polls state() until "finished" (which now spans the baseline + observe + verify
----solves), then calls check_catalyst_reclassify to assert the observe-price
----machine settled at zero cheat with the loop running -- a bare "finished" would
+---penalty, so a flat baseline fabricates a cycle material via |shortage_source|
+---(an AVOIDABLE cheat). The shipped path drives this across ticks: the un-gated
+---baseline leaves the cheat, then the cascade's staged rescue (Vp / Vf) drives
+---the cycle import to zero by running the placed loop on imported iron. The
+---launcher polls state() until "finished" (which now spans the baseline + the
+---cascade's stage solves), then calls check_catalyst_reclassify to assert the
+---cascade settled at zero cheat with the loop running -- a bare "finished" would
 ---also pass for a clean solve. Needs the data_test.lua synthetic recipes (always
 ---present in a dev checkout); build() asserts them so a missing one surfaces as
 ---ERROR, not a silently-degraded solve.
@@ -901,8 +902,8 @@ fixtures.catalyst_reclassify = {
         end
 
         -- Demand exactly 1 copper-plate. It is trapped in the cycle (no seed) and
-        -- the real chain is costlier than the shortage penalty, so pass 1 cheats
-        -- and the reclassify pass has an avoidable cheat to diagnose.
+        -- the real chain is costlier than the shortage penalty, so the baseline
+        -- cheats and the cascade's staged rescue has an import to drive to zero.
         ---@type Constraint
         local constraint = {
             type = "item",
@@ -1046,14 +1047,20 @@ function M.check_read_side()
     return "OK"
 end
 
----RCON entry point: assert the observe-price machine resolved the catalyst loop.
+---RCON entry point: assert the cascade resolved the catalyst loop by FABRICATION.
 ---The launcher calls this after the catalyst_reclassify fixture converges (a bare
----"finished" can't tell an observe-priced solve from a clean one). Asserts (a) the
----solve reached "finished", (b) the legacy two-pass did NOT run (forced_imports
----unset) and the observe-price state settled (observe_price.phase == "done"),
----(c) the converged primal carries no residual cheat (|shortage_source| /
----|elastic| all ~0), and (d) the placed loop recipes actually run rather than the
----cycle resolving to pure import. Returns "OK" or "ERROR: <detail>".
+---"finished" can't tell a cascaded solve from an importing one). The un-gated
+---baseline imports the cheaper of the cycle materials (gear / copper) via
+---|shortage_source| instead of running the placed loop. The cascade's staged
+---rescue (the Vp producible-import / Vf makeup-import stages) drives that import
+---to zero: it runs the full copper<->gear loop on imported IRON (legitimate raw
+---makeup), so the cycle material is fabricated rather than outsourced. (This is
+---the inverse of the retired observer, which cheap-IMPORTED the cycle material.)
+---Asserts (a) "finished", (b) the cascade settled (cascade.phase == "done"), (c)
+---no residual import / target-relaxation cheat (|shortage_source| / |elastic| all
+---~0 -- the cycle material is made, not outsourced; the iron it is made from is
+---|initial_source| makeup and not counted), and (d) the placed loop recipes
+---actually run. Returns "OK" or "ERROR: <detail>".
 ---@return string
 function M.check_catalyst_reclassify()
     local force_data = storage.forces[FORCE_INDEX]
@@ -1066,28 +1073,20 @@ function M.check_catalyst_reclassify()
         return "ERROR: solver_state is " .. tostring(solution.solver_state) .. ", not finished"
     end
 
-    -- The shipped path runs the observe-price machine (the soft gate + the fixed
-    -- point + the two-pass diagnose that cheap-imports the avoidable cheats it does
-    -- not fabricate). Prove that machine ran to completion: the state exists and
-    -- settled at "done".
-    local op = solution.observe_price
-    if not op then
-        return "ERROR: observe_price state nil -- the observe-price machine never started"
+    -- The shipped path runs the cascade (soft-gate-free baseline + the staged
+    -- rescue). Prove the cascade ran to completion: the state exists and settled
+    -- at its "done" sentinel.
+    local cc = solution.cascade
+    if not cc then
+        return "ERROR: cascade state nil -- the cascade machine never started"
     end
-    if op.phase ~= "done" then
-        return "ERROR: observe_price phase is " .. tostring(op.phase) .. ", not done (loop did not settle)"
-    end
-
-    -- This bootstrap-trapped loop is an import-correct case: the 2000-iron real
-    -- chain costs more than importing the cycle material, so the diagnose
-    -- cheap-imports it. forced_imports being non-empty proves the avoidable cheat
-    -- was actually found and re-seeded -- a bare "finished" can't tell that from a
-    -- clean solve. (A fabricate-correct cycle would instead show observe_price.plan
-    -- set; this fixture exercises the import branch.)
-    if not solution.forced_imports or next(solution.forced_imports) == nil then
-        return "ERROR: forced_imports empty -- the diagnose never re-seeded the avoidable cheat"
+    if cc.phase ~= "done" then
+        return "ERROR: cascade phase is " .. tostring(cc.phase) .. ", not done (cascade did not settle)"
     end
 
+    -- No residual cheat: the producible cycle material is fabricated, not
+    -- outsourced. (The iron it is made from leaves as |initial_source| makeup,
+    -- which is legitimate and not counted here.)
     local x = solution.raw_variables and solution.raw_variables.x or {}
     local primals = solution.problem and solution.problem.primals or {}
     local cheat = 0
@@ -1099,7 +1098,17 @@ function M.check_catalyst_reclassify()
     end
     if cheat > 1e-3 then
         return "ERROR: residual cheat " .. string.format("%.4f", cheat) ..
-            " -- the cycle material was neither fabricated nor cheap-imported"
+            " -- the producible cycle material was outsourced, not fabricated"
+    end
+
+    -- The placed loop must actually RUN (fabrication), not resolve to pure import.
+    -- A bare "finished" with zero cheat could in principle be a degenerate park;
+    -- requiring both halves of the cycle active proves the cascade ran the loop.
+    local a = x["recipe/fs-test-catalyst-a/normal"] or 0
+    local b = x["recipe/fs-test-catalyst-b/normal"] or 0
+    if a <= 1e-3 or b <= 1e-3 then
+        return "ERROR: loop idle (a=" .. string.format("%.4f", a) ..
+            ", b=" .. string.format("%.4f", b) .. ") -- the cascade did not fabricate the cycle"
     end
 
     return "OK"

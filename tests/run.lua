@@ -103,6 +103,7 @@ local case_files = {
     "lp_two_pass_reclassify",
     "lp_observe_price",
     "lp_target_rescue",
+    "lp_cascade",
     "chain_reachability",
     "explore_detect",
     "lp_substitution",

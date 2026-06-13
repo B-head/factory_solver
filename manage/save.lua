@@ -263,11 +263,14 @@ function M.reinit_force_data(force_index)
             solution.problem = nil
             solution.raw_variables = nil
             -- A configuration change is a fresh solve: drop any in-flight
-            -- observe-price plan (and its restart flag) so the rebuild below
-            -- starts from a clean baseline instead of resuming a stale plan whose
-            -- variable keys may no longer match.
+            -- observe-price plan or cascade staged-rescue state (and their
+            -- restart flags) so the rebuild below starts from a clean baseline
+            -- instead of resuming a stale plan whose variable keys -- or the
+            -- cascade's PackedVariables snapshot -- may no longer match.
             solution.observe_price = nil
             solution.op_restart = nil
+            solution.cascade = nil
+            solution.cc_restart = nil
             -- A frozen solution's counts came from an external solver, not from
             -- a Problem this configuration built, so there is nothing to
             -- re-solve -- keep it frozen through the migration.

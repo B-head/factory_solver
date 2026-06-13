@@ -220,6 +220,8 @@ __factory_solver__storage = {}
 ---@field op_restart boolean?  Internal flag: set when observe_price advances and re-arms solver_state="ready", so the rebuild keeps the in-flight plan instead of dropping it as it would for a fresh edit.
 ---@field target_rescue TargetRescueState?  In-flight lexicographic target rescue (manage/pre_solve.lua M.target_rescue_step). nil before the baseline solve; a "done" sentinel once settled. Plain table, storage-safe.
 ---@field tr_restart boolean?  Internal flag: set when the target rescue re-arms solver_state="ready", so the rebuild keeps the in-flight rescue state instead of dropping it as it would for a fresh edit.
+---@field cascade CascadeState?  In-flight cascade staged rescue (manage/pre_solve.lua M.cascade_step / solver/cascade.lua), the shipped replacement for observe_price. nil before the baseline solve; a "done" sentinel once settled. Plain tables only (it carries a PackedVariables snapshot), so it rides storage without a metatable.
+---@field cc_restart boolean?  Internal flag: set when the cascade advances and re-arms solver_state="ready", so the rebuild keeps the in-flight cascade state instead of dropping it as it would for a fresh edit.
 
 ---@class TargetRescueState
 ---@field phase "stage1"|"resolve"|"restore"|"done"  Which rescue stage the next finished solve belongs to. "resolve" is the budget-locked re-solve at ship costs; "restore" is the plain re-solve when stage 1 found no headroom; "done" is the settled sentinel.
@@ -252,6 +254,95 @@ __factory_solver__storage = {}
 ---@field mult number  Current price multiplier.
 ---@field frozen boolean  Frozen back to flat import (cone-over-promise / unavoidable).
 ---@field resolved_round integer  Round the key's shortage parked (-1 = unresolved).
+
+---In-flight cascade staged rescue (solver/cascade.lua). A plain working set --
+---no metatable -- so it rides storage and survives save/load. Most fields are
+---transient bookkeeping for whichever stage is running; the cross-tick-durable
+---ones are `phase`, `build`, the per-tier lock keys/limits (threaded into later
+---builds), `adopted_raw`/`adopted_build` (the answer to fall back to), and the
+---`hatch_exclude`/`relay` fallback markers. `*_verdicts` cache per-material fix
+---test outcomes so a grown universe does not re-screen them.
+---@class CascadeState
+---@field phase string  Which build the next M.advance consumes ("start"|"vp_*"|"vf_*"|"vc_*"|"polish"|"restore"|"done").
+---@field solves integer  Solves spent so far (diagnostic).
+---@field build CascadeBuild?  The next solve to run, or nil once settled / on restore.
+---@field intermediates table<string, true>  Produced-and-consumed material set (M.intermediates), the import-accounting key.
+---@field t_limit number  The target budget threaded into every cascade build.
+---@field adopted_raw PackedVariables  The current best answer, restored when a later stage is rejected.
+---@field adopted_build CascadeBuild  The build that produced adopted_raw (rebuilt on restore).
+---@field current_adopted boolean  True when the held solution equals the adopted one (no restore needed).
+---@field imports CascadeEntry[]  Sorted import hatches of the adopted build.
+---@field sinks CascadeEntry[]  Sorted surplus sinks of the adopted build.
+---@field recipes string[]  Sorted recipe keys (the machine count).
+---@field m_adopted number  Machine total of the adopted answer.
+---@field hatch_exclude table<string, true>?  Deletion-fallback: import hatches removed structurally (sticky once set).
+---@field relay boolean?  Staged-relay fallback: every later stage adopts its own stage solution.
+---@field vp_univ table<string, true>?  Producibility classification universe (flowing imports + probe discoveries).
+---@field vp_members table<string, true>?  Producible members of vp_univ.
+---@field vp_verdicts table<string, boolean>?  Cached individual producibility verdicts.
+---@field vp_pending string[]?  Materials awaiting an individual producibility screen.
+---@field vp_coupled boolean?  A violator re-joined: the demote-one phase must run.
+---@field vp_demoted string[]?  Phase-2 demotions (the phase-3 promotion candidates).
+---@field vp_demote_rounds integer?  Demote-one round counter.
+---@field vp_promote_queue string[]?  Remaining phase-3 promotion candidates.
+---@field vp_sweeps_left integer?  Phase-3 sweep budget.
+---@field vp_promoted_any boolean?  Whether the current sweep promoted anything.
+---@field vp_support_done boolean?  The one support probe has run.
+---@field vp_priced string[]?  The priced producible (+ never-flowed) hatch keys.
+---@field vp0 number?  Baseline priced-import sum.
+---@field vpmin number?  Stage-optimal priced-import sum.
+---@field vp_lock_keys string[]?  Vp budget lock membership (nil after the deletion fallback).
+---@field vp_lock_limit number?  Vp budget lock limit.
+---@field vp_rescued integer?  1 applied / -1 attempted-but-kept-baseline / nil not triggered.
+---@field vp_deleted integer?  1 deletion final / 2 staged relay.
+---@field vp_stage_raw PackedVariables?  Held Vp stage answer (the staged-relay adoption source).
+---@field vp_stage_build CascadeBuild?  The Vp stage build.
+---@field vf_lock_keys string[]?  Makeup-import (Vf) lock membership.
+---@field vf_lock_limit number?  Vf budget lock limit.
+---@field vf0 number?  Baseline makeup sum.
+---@field vfmin number?  Stage-optimal makeup sum.
+---@field vf_rescued integer?  1 applied / -1 kept baseline.
+---@field vc_univ table<string, true>?  Consumability classification universe (flowing dumps + probe discoveries).
+---@field vc_members table<string, true>?  Consumable members of vc_univ.
+---@field vc_verdicts table<string, boolean>?  Cached individual consumability verdicts.
+---@field vc_pending string[]?  Materials awaiting an individual consumability screen.
+---@field vc_support_done boolean?  The Vc support probe has run.
+---@field vc_lock_keys string[]?  Consumable-dump (Vc) lock membership.
+---@field vc_lock_limit number?  Vc budget lock limit.
+---@field vc0 number?  Baseline priced-surplus sum.
+---@field vcmin number?  Stage-optimal priced-surplus sum.
+---@field vc_rescued integer?  1 applied / -1 kept baseline.
+---@field m0 number?  Machine total before the polish.
+---@field mmin number?  Machine total the polish reached.
+---@field polish integer?  1 adopted / -1 kept baseline.
+
+---One cascade solve, described as plain data (storage-safe). A build is the
+---bare structural problem when `fix` is set (the reference's escape-hatch-off
+---shape), else the un-gated ship shape carrying `target_budget`, the sticky
+---`hatch_exclude`, the budget-lock `locks`, and one stage objective
+---(`stage_keys` prices those escapes / `stage_machine` prices recipes).
+---@class CascadeBuild
+---@field fix CascadeFixTest?  A producibility / consumability fix test (synthetic demand probes).
+---@field stage_keys string[]?  Escapes to price at 1 (a stage objective).
+---@field stage_machine boolean?  Price recipes at 1 (the machine polish objective).
+---@field locks CascadeLock[]?  Budget-lock rows to add.
+---@field target_budget number?  The target elastics' summed cap.
+---@field hatch_exclude table<string, true>?  Materials whose import hatch is structurally omitted.
+
+---@class CascadeFixTest
+---@field priced_kind string  The escape kind that must stay at zero for membership ("shortage_source" | "surplus_sink").
+---@field demand_sign number  The synthetic probe's material-row coefficient (-1 producibility / +1 consumability).
+---@field priced string[]  Materials whose escape is priced.
+---@field demand string[]  Materials a unit of demand is forced through.
+
+---@class CascadeLock
+---@field tier string  "vp" | "vf" | "vc" (the budget dual key suffix).
+---@field keys string[]  Escape keys summed by the lock row.
+---@field limit number  The summed-escape cap.
+
+---@class CascadeEntry
+---@field key string  The primal variable key.
+---@field material string  The base material variable key it stands in for.
 
 ---@class Constraint
 ---@field type FilterType
