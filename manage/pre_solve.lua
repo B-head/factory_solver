@@ -227,12 +227,18 @@ function M.forwerd_solve(force_data, solution)
         -- re-reduces. Stored as plain tables -- the reduced Problem gets its
         -- metatable re-attached on load alongside solution.problem (see
         -- manage/save.lua resetup_force_data_metatable).
-        -- NOT for a cascade stage build: its objective is overwritten by
-        -- shape_problem, so the fold (which conserves the ORIGINAL cost onto
-        -- the kept recipe) would corrupt the stage objective; and a stage
-        -- solves once, so the fold's speedup does not apply. The un-gated
-        -- baseline keeps the fold and its warm start.
-        if substitution_enabled and not cc_build then
+        -- Cascade stage builds are folded too. The fold runs AFTER shape_problem,
+        -- so it conserves the OVERRIDDEN stage cost (escape-singleton cost folds
+        -- onto the kept recipe; surplus_sink and the lock-row escapes are
+        -- multi-row and never folded), and the unfold below reconstructs the
+        -- priced-escape values the cascade reads back. Measured (FS_SUBST in
+        -- tests/research/probe_cascade_ship.lua): 3.5x wall-clock on the pyanodon
+        -- slice with bit-identical reference grading; the SA30 buckets stayed
+        -- inside the off-vs-off degenerate-face noise band (two un-folded runs
+        -- already varied tie 349<->343). The earlier worry that folding would
+        -- corrupt the stage objective was wrong -- reduce reads the live
+        -- (overridden) cost, not the original.
+        if substitution_enabled then
             local reduced, reconstruction = substitution.reduce(solution.problem)
             solution.problem.reduced = reduced
             solution.problem.reconstruction = reconstruction

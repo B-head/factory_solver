@@ -28,6 +28,17 @@ local problem_dump = require "tests/problem_dump"
 local ref = require "tests/research/reference_solver"
 local refcache = require "tests/research/reference_cache"
 local cascade = require "solver/cascade"
+local substitution = require "solver/substitution"
+
+-- FS_SUBST=on folds the cascade STAGE / lock / fix-test / final builds through
+-- proportional row reduction before the IPM solves them (off = the shipped
+-- behaviour, which skips the fold for cascade builds). The baseline / target-
+-- rescue builds are left untouched in BOTH arms, so the on-vs-off delta isolates
+-- exactly the effect of folding the cascade builds. Substitution conserves the
+-- objective exactly (escape-singleton cost folds onto the kept recipe; lock-row
+-- escapes are multi-row and never folded; surplus_sink is never folded), so any
+-- difference is a degenerate-face shift, not a different optimum.
+local SUBST = (os.getenv("FS_SUBST") or "off"):lower() == "on"
 
 local TOL, ITER = 1e-7, 800
 local RESCUE_TRIGGER = 1e-6
@@ -65,6 +76,19 @@ local function build_cascade(constraints, lines, build)
     if not ok then return nil end
     cascade.shape_problem(p, build)
     return p
+end
+
+-- Solve a cascade build, folding it through substitution when FS_SUBST=on
+-- (the experiment) -- exactly the reduce / solve-reduced / unfold path
+-- manage/pre_solve.lua runs for the baseline. The cascade reads full-space x,
+-- so the result is always unfolded back. The fold runs AFTER shape_problem, so
+-- the lock rows are already in place and their escapes stay multi-row (unfolded).
+local function solve_cascade(p)
+    if not SUBST then return solve(p) end
+    local reduced, reconstruction = substitution.reduce(p)
+    local s, v = solve(reduced)
+    if s ~= "finished" or not v then return s, v end
+    return s, substitution.unfold(v, reconstruction)
 end
 
 -- The shipped lexicographic target rescue (verbatim from probe_vp_rescue /
@@ -111,7 +135,7 @@ local function solve_via_cascade(constraints, lines)
             -- A build error is a terminal non-finished state for advance.
             cascade.advance(cc, p, nil, "unfeasible")
         else
-            local bs, bv = solve(bp)
+            local bs, bv = solve_cascade(bp)
             solves = solves + 1
             cascade.advance(cc, bp, bv, bs)
             if cc.phase == "restore" then
