@@ -4,88 +4,85 @@ local tn = require "manage/typed_name"
 
 local M = {}
 
+---@param machines LuaEntityPrototype[]
+---@param any_fluid_fuels string[]
+---@return string[]
+local function collect_fluid_fuels(machines, any_fluid_fuels)
+    local names = {}
+    local seen = {}
+    local include_any = false
+    for _, machine in ipairs(machines) do
+        if acc.is_use_any_fluid_fuel(machine) then
+            include_any = true
+        else
+            local energy = machine.fluid_energy_source_prototype
+            local filter = energy and energy.fluid_box.filter
+            if filter and not seen[filter.name] then
+                seen[filter.name] = true
+                names[#names + 1] = filter.name
+            end
+        end
+    end
+    if include_any then
+        for _, name in ipairs(any_fluid_fuels) do
+            if not seen[name] then
+                seen[name] = true
+                names[#names + 1] = name
+            end
+        end
+    end
+    return names
+end
+
+---Compute the fuel item names and fluid-fuel names for one category given its
+---machines. Shared by the one-shot M.cache_fuel_names and the tick-split
+---prep-fuel phases so both produce identical lists.
+---@param machines LuaEntityPrototype[]
+---@param any_fluid_fuels string[]
+---@return string[] fuels
+---@return string[] fluid_fuels
+local function compute_category_fuels(machines, any_fluid_fuels)
+    local fuel_categories = {}
+    for _, machine in ipairs(machines) do
+        local res = acc.try_get_fuel_categories(machine)
+        if res then
+            for key, _ in pairs(res) do
+                fuel_categories[key] = true
+            end
+        end
+    end
+    local fuels = flib_table.map(acc.get_fuels_in_categories(fuel_categories), function(value)
+        return value.name
+    end)
+    return fuels, collect_fluid_fuels(machines, any_fluid_fuels)
+end
+
+---@return string[]
+local function get_any_fluid_fuel_names()
+    return flib_table.map(acc.get_any_fluid_fuels(), function(value)
+        return value.name
+    end)
+end
+
 ---comment
 ---@return table<string, string[]>, table<string, string[]>, table<string, string[]>, table<string, string[]>, string[]
 function M.cache_fuel_names()
-    local any_fluid_fuels = flib_table.map(acc.get_any_fluid_fuels(), function(value)
-        return value.name
-    end)
-
-    ---@param machines LuaEntityPrototype[]
-    ---@return string[]
-    local function collect_fluid_fuels(machines)
-        local names = {}
-        local seen = {}
-        local include_any = false
-        for _, machine in ipairs(machines) do
-            if acc.is_use_any_fluid_fuel(machine) then
-                include_any = true
-            else
-                local energy = machine.fluid_energy_source_prototype
-                local filter = energy and energy.fluid_box.filter
-                if filter and not seen[filter.name] then
-                    seen[filter.name] = true
-                    names[#names + 1] = filter.name
-                end
-            end
-        end
-        if include_any then
-            for _, name in ipairs(any_fluid_fuels) do
-                if not seen[name] then
-                    seen[name] = true
-                    names[#names + 1] = name
-                end
-            end
-        end
-        return names
-    end
+    local any_fluid_fuels = get_any_fluid_fuel_names()
 
     local cache_crafting_fuels = {}
     local cache_crafting_fluid_fuels = {}
     for crafting_category_name, _ in pairs(prototypes.recipe_category) do
         local machines = acc.get_machines_in_category(crafting_category_name)
-
-        local fuel_categories = {}
-        for _, machine in ipairs(machines) do
-            local res = acc.try_get_fuel_categories(machine)
-            if not res then
-                goto continue
-            end
-            for key, _ in pairs(res) do
-                fuel_categories[key] = true
-            end
-            ::continue::
-        end
-
-        local fuels = acc.get_fuels_in_categories(fuel_categories)
-        cache_crafting_fuels[crafting_category_name] = flib_table.map(fuels, function(value)
-            return value.name
-        end)
-        cache_crafting_fluid_fuels[crafting_category_name] = collect_fluid_fuels(machines)
+        cache_crafting_fuels[crafting_category_name], cache_crafting_fluid_fuels[crafting_category_name] =
+            compute_category_fuels(machines, any_fluid_fuels)
     end
 
     local cache_resource_fuels = {}
     local cache_resource_fluid_fuels = {}
     for resource_category_name, _ in pairs(prototypes.resource_category) do
         local machines = acc.get_machines_in_resource_category(resource_category_name)
-
-        local fuel_categories = {}
-        for _, machine in ipairs(machines) do
-            local res = acc.try_get_fuel_categories(machine)
-            if not res then
-                goto continue
-            end
-            for key, _ in pairs(res) do
-                fuel_categories[key] = true
-            end
-            ::continue::
-        end
-
-        local fuels = acc.get_fuels_in_categories(fuel_categories)
-        cache_resource_fuels[resource_category_name] = flib_table.map(fuels, function(value)
-            return value.name
-        end)
-        cache_resource_fluid_fuels[resource_category_name] = collect_fluid_fuels(machines)
+        cache_resource_fuels[resource_category_name], cache_resource_fluid_fuels[resource_category_name] =
+            compute_category_fuels(machines, any_fluid_fuels)
     end
 
     return cache_crafting_fuels, cache_resource_fuels,
@@ -444,6 +441,16 @@ end
 -- not invalidate them; its effect is captured by the finalize pass instead.
 local RELATION_BUILD_BUDGET = 100
 
+-- Prep phases split the heavy one-shot setup across ticks: fuel-cache computation
+-- per recipe/resource category, then per-material RelationToRecipe allocation
+-- (item + burnt_result, fluid, virtual material). The cheap pairs snapshots and
+-- the all-false seed stay in build_relation_init -- pairs can't be resumed across
+-- ticks and those passes are light. After prep, the listing phases run.
+local RELATION_PHASE_PREP_FUEL_CRAFTING = "prep_fuel_crafting"
+local RELATION_PHASE_PREP_FUEL_RESOURCE = "prep_fuel_resource"
+local RELATION_PHASE_PREP_ALLOC_ITEM = "prep_alloc_item"
+local RELATION_PHASE_PREP_ALLOC_FLUID = "prep_alloc_fluid"
+local RELATION_PHASE_PREP_ALLOC_VMAT = "prep_alloc_vmat"
 local RELATION_PHASE_REAL = "real_recipes"
 local RELATION_PHASE_FUEL_REVERSE = "fuel_reverse"
 local RELATION_PHASE_VIRTUAL = "virtual_recipes"
@@ -462,9 +469,27 @@ local function snapshot_keys(t)
     return names
 end
 
----Start a tick-split relation build. Does the one-shot prep (fuel cache, empty
----rel, burnt_result map, recipe-name snapshots) and seeds every research-dependent
----field to false, then returns the state armed at the real-recipe phase.
+---Process up to `budget` items from names[state.cursor..], calling fn(name) for
+---each and advancing the cursor. Returns true when the array is exhausted (the
+---caller then moves to the next phase). Shared cursor loop for every array-driven
+---prep / listing phase.
+---@param state RelationBuildState
+---@param names string[]
+---@param budget integer
+---@param fn fun(name: string)
+---@return boolean done
+local function step_array(state, names, budget, fn)
+    local stop = math.min(#names, state.cursor + budget - 1)
+    for i = state.cursor, stop do fn(names[i]) end
+    state.cursor = stop + 1
+    return state.cursor > #names
+end
+
+---Start a tick-split relation build. Does ONLY the cheap, non-resumable work --
+---key snapshots (pairs is a single pass) and the all-false seed of the research-
+---dependent fields -- then returns the state armed at the first prep phase. The
+---heavy setup (fuel cache, per-material table allocation, burnt_result map) is
+---deferred to build_relation_step's prep phases so no single tick pays it all.
 ---
 ---Seeding enabled_recipe / virtual_recipe_researched / virtual_material_researched
 ---to false (not leaving them nil) is required for correctness: the finalize pass
@@ -477,23 +502,48 @@ end
 ---@return RelationBuildState
 function M.build_relation_init(force_index)
     local force = game.forces[force_index]
-    local rel = create_empty_rel()
+
+    local item_names = snapshot_keys(prototypes.item)
+    local fluid_names = snapshot_keys(prototypes.fluid)
+    local virtual_material_names = snapshot_keys(storage.virtuals.material)
     local real_recipe_names = snapshot_keys(force.recipes)
     local virtual_recipe_names = snapshot_keys(storage.virtuals.recipe)
 
+    ---@type RelationToRecipes
+    local rel = {
+        enabled_recipe = {},
+        item = {},
+        fluid = {},
+        virtual_recipe = {},
+        virtual_recipe_researched = {},
+        virtual_material_researched = {},
+        recipes_by_category = {},
+        contributes = {},
+    }
     for _, name in ipairs(real_recipe_names) do rel.enabled_recipe[name] = false end
     for _, name in ipairs(virtual_recipe_names) do rel.virtual_recipe_researched[name] = false end
-    for name, _ in pairs(storage.virtuals.material) do rel.virtual_material_researched[name] = false end
+    for _, name in ipairs(virtual_material_names) do rel.virtual_material_researched[name] = false end
 
     ---@type RelationBuildState
     return {
-        phase = RELATION_PHASE_REAL,
+        phase = RELATION_PHASE_PREP_FUEL_CRAFTING,
         rel = rel,
         cursor = 1,
         real_recipe_names = real_recipe_names,
         virtual_recipe_names = virtual_recipe_names,
-        fuel = build_fuel_cache(),
-        burnt_result_names = build_burnt_result_names(),
+        item_names = item_names,
+        fluid_names = fluid_names,
+        virtual_material_names = virtual_material_names,
+        crafting_category_names = snapshot_keys(prototypes.recipe_category),
+        resource_category_names = snapshot_keys(prototypes.resource_category),
+        fuel = {
+            crafting_fuels = {},
+            resource_fuels = {},
+            crafting_fluid_fuels = {},
+            resource_fluid_fuels = {},
+            any_fluid_fuels = get_any_fluid_fuel_names(),
+        },
+        burnt_result_names = {},
     }
 end
 
@@ -506,7 +556,56 @@ end
 local function build_relation_step(state, force_index, budget)
     local rel = state.rel
 
-    if state.phase == RELATION_PHASE_REAL then
+    if state.phase == RELATION_PHASE_PREP_FUEL_CRAFTING then
+        local fuel = state.fuel
+        if step_array(state, state.crafting_category_names, budget, function(cat)
+                fuel.crafting_fuels[cat], fuel.crafting_fluid_fuels[cat] =
+                    compute_category_fuels(acc.get_machines_in_category(cat), fuel.any_fluid_fuels)
+            end) then
+            state.phase = RELATION_PHASE_PREP_FUEL_RESOURCE
+            state.cursor = 1
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_PREP_FUEL_RESOURCE then
+        local fuel = state.fuel
+        if step_array(state, state.resource_category_names, budget, function(cat)
+                fuel.resource_fuels[cat], fuel.resource_fluid_fuels[cat] =
+                    compute_category_fuels(acc.get_machines_in_resource_category(cat), fuel.any_fluid_fuels)
+            end) then
+            state.phase = RELATION_PHASE_PREP_ALLOC_ITEM
+            state.cursor = 1
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_PREP_ALLOC_ITEM then
+        -- Allocate item RelationToRecipe tables and resolve each item's
+        -- burnt_result in the same item pass (both keyed by item name).
+        local burnt = state.burnt_result_names
+        if step_array(state, state.item_names, budget, function(name)
+                rel.item[name] = create_relation_table()
+                local b = prototypes.item[name].burnt_result
+                if b then burnt[name] = b.name end
+            end) then
+            state.phase = RELATION_PHASE_PREP_ALLOC_FLUID
+            state.cursor = 1
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_PREP_ALLOC_FLUID then
+        if step_array(state, state.fluid_names, budget, function(name)
+                rel.fluid[name] = create_relation_table()
+            end) then
+            state.phase = RELATION_PHASE_PREP_ALLOC_VMAT
+            state.cursor = 1
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_PREP_ALLOC_VMAT then
+        if step_array(state, state.virtual_material_names, budget, function(name)
+                rel.virtual_recipe[name] = create_relation_table()
+            end) then
+            state.phase = RELATION_PHASE_REAL
+            state.cursor = 1
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_REAL then
         local recipes = game.forces[force_index].recipes
         local names = state.real_recipe_names
         local stop = math.min(#names, state.cursor + budget - 1)

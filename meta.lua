@@ -135,13 +135,18 @@ __factory_solver__storage = {}
 ---snapshots walked by the integer cursor, and the recipe set is stable across
 ---research so the lists never go stale mid-build.
 ---@class RelationBuildState
----@field phase string One of the build phases ("prep" / "real_recipes" / "fuel_reverse" / "virtual_recipes" / "finalize" / "done").
+---@field phase string Current build phase: prep_fuel_crafting / prep_fuel_resource / prep_alloc_item / prep_alloc_fluid / prep_alloc_vmat / real_recipes / fuel_reverse / virtual_recipes / finalize / done.
 ---@field rel RelationToRecipes Partially built relation cache (filled phase by phase; enabled-dependent fields stay all-false until the finalize pass).
 ---@field cursor integer Next index into the current phase's name array; reset to 1 on each phase transition.
 ---@field real_recipe_names string[] Snapshot of force.recipes keys, in pairs() order, walked by the real_recipes phase.
 ---@field virtual_recipe_names string[] Snapshot of storage.virtuals.recipe keys, in pairs() order, walked by the virtual_recipes phase.
----@field fuel RelationBuildFuelCache cache_fuel_names' result (name-string arrays only), reused across the real / virtual recipe passes.
----@field burnt_result_names table<string, string> Fuel item name -> its burnt_result item name, resolved once in the prep phase.
+---@field item_names string[] Snapshot of prototypes.item keys, walked by prep_alloc_item (table alloc + burnt_result resolution).
+---@field fluid_names string[] Snapshot of prototypes.fluid keys, walked by prep_alloc_fluid.
+---@field virtual_material_names string[] Snapshot of storage.virtuals.material keys, walked by prep_alloc_vmat.
+---@field crafting_category_names string[] Snapshot of prototypes.recipe_category keys, walked by prep_fuel_crafting.
+---@field resource_category_names string[] Snapshot of prototypes.resource_category keys, walked by prep_fuel_resource.
+---@field fuel RelationBuildFuelCache cache_fuel_names' result, built incrementally across the prep_fuel phases; reused by the real / virtual recipe passes.
+---@field burnt_result_names table<string, string> Fuel item name -> burnt_result item name, built incrementally in prep_alloc_item.
 
 ---cache_fuel_names' five return values bundled for storage. All name-string
 ---arrays / maps, so storage-safe.
