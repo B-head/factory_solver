@@ -82,6 +82,19 @@ local function read_ref(ref)
     return ref.target, read_quality(ref.quality)
 end
 
+---Split a fluid name that may carry YAFC's "@<temperature>" suffix into its bare
+---name and the temperature. Returns (name, nil) when there is no suffix.
+---@param name string
+---@return string base_name
+---@return number? temperature
+local function split_fluid_temperature(name)
+    local base, temp = string.match(name, "^(.+)@(%-?%d+)$")
+    if base then
+        return base, tonumber(temp)
+    end
+    return name, nil
+end
+
 ---Split the inflated envelope into its version line and JSON body. Returns
 ---(version, json) or (nil, nil) when the header does not match. `.` matches
 ---newlines in Lua patterns, so the final capture grabs the whole JSON body.
@@ -152,6 +165,24 @@ end
 ---@return string
 local function to_ref(typed_name)
     local target = to_token(typed_name.type, typed_name.name)
+    -- YAFC keys a fluid at a non-default temperature as "Fluid.<name>@<temp>"
+    -- (FactorioDataDeserializer renames each variant `name += "@" + temperature`),
+    -- and resolves the string form by an *exact* objectsByTypeName lookup. So the
+    -- temperature must match a real YAFC variant. factory_solver stores a [min,max]
+    -- range; take the lower bound, then clamp into the fluid's physical range
+    -- [default_temperature, max_temperature] so a fuel whose factory_solver
+    -- temperature sits below default (e.g. 0) maps to YAFC's default variant
+    -- (e.g. uf6@39) instead of a non-existent uf6@0. A single-temperature fluid
+    -- keeps a bare "Fluid.x" object, which resolves regardless of the suffix.
+    if typed_name.type == "fluid" and typed_name.minimum_temperature then
+        local temp = typed_name.minimum_temperature
+        local proto = prototypes.fluid[typed_name.name]
+        if proto then
+            if temp < proto.default_temperature then temp = proto.default_temperature end
+            if temp > proto.max_temperature then temp = proto.max_temperature end
+        end
+        target = string.format("%s@%d", target, math.floor(temp + 0.5))
+    end
     return ref_string(target, typed_name.quality or "normal")
 end
 
@@ -329,7 +360,14 @@ local function unpack_fuel(fuel_ref, machine_typed_name, player_index)
         if prefix == "Item" and name then
             return { type = "item", name = name, quality = quality }
         elseif prefix == "Fluid" and name then
-            return { type = "fluid", name = name, quality = "normal" }
+            local fluid_name, temp = split_fluid_temperature(name)
+            return {
+                type = "fluid",
+                name = fluid_name,
+                quality = "normal",
+                minimum_temperature = temp,
+                maximum_temperature = temp,
+            }
         end
         -- Power.* and anything else: no fuel channel.
     end
@@ -371,12 +409,19 @@ function M.yafc_to_payload(page, player_index)
             local prefix, name = split_token(target)
             local filter_type = prefix and PREFIX_TO_FILTER_TYPE[prefix]
             if filter_type and name then
+                local min_temp, max_temp
+                if filter_type == "fluid" then
+                    name, min_temp = split_fluid_temperature(name)
+                    max_temp = min_temp
+                end
                 constraints[#constraints + 1] = {
                     type = filter_type,
                     name = name,
                     quality = quality,
                     limit_type = "lower",
                     limit_amount_per_second = math.abs(amount),
+                    minimum_temperature = min_temp,
+                    maximum_temperature = max_temp,
                 }
             end
         end
