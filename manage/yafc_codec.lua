@@ -724,20 +724,42 @@ function M.encode(solutions)
                 modules = pack_modules(line),
             }
 
-            -- Omit the crafting entity for a <grow> plant recipe: factory_solver
-            -- models the plant entity itself as the machine (yumako-tree,
-            -- jellystem), but YAFC has no EntityCrafter for it and crafts plant
-            -- harvesting in the agricultural tower, so let YAFC pick the default.
+            -- Omit the crafting entity when it is not a YAFC EntityCrafter, so
+            -- YAFC assigns a sensible default crafter instead of logging a
+            -- not-found object:
+            --   * "entity-unknown" -- factory_solver's no-crafter sentinel (spoilage).
+            --   * a <grow> plant recipe -- factory_solver models the plant entity
+            --     itself as the machine (yumako-tree, jellystem), but YAFC crafts
+            --     plant harvesting in the agricultural tower.
             local machine = line.machine_typed_name
             local is_grow = recipe_tn.type == "virtual_recipe"
                 and string.match(recipe_tn.name, "^<grow>") ~= nil
-            if machine and not is_grow then
+            if machine and machine.name ~= "entity-unknown" and not is_grow then
                 row.entity = to_ref(machine)
             end
 
             local fuel = line.fuel_typed_name
             if fuel then
-                row.fuel = to_ref(fuel)
+                if fuel.type == "item" or fuel.type == "fluid" then
+                    -- Item and fluid fuels both map to a YAFC fuel object via the
+                    -- string form. A fluid fuel carries its temperature: a YAFC
+                    -- source round-trips to the exact same variant (e.g. py
+                    -- encodes uranium enrichment as the fluid temperature, so
+                    -- uf6@9999 lands back on uf6@9999), while an FS-native
+                    -- acceptance temperature snaps to YAFC's closest variant -- a
+                    -- minor temperature approximation, not the whole-row rejection
+                    -- the old quality-first object form used to cause.
+                    row.fuel = to_ref(fuel)
+                else
+                    -- Any other energy source (the <heat> virtual_material a
+                    -- heat-exchanger / steam-turbine consumes) has no YAFC fuel
+                    -- object. Emitting its raw token (e.g. "<heat>") makes YAFC
+                    -- log a not-found object; drop it -- YAFC drives heat from the
+                    -- reactor chain, not a fuel item.
+                    warnings[#warnings + 1] = {
+                        "factory-solver-yafc-export-warning-heat-fuel", fuel.name,
+                    }
+                end
             else
                 row.fuel = ref_string("Power.electricity", "normal")
             end
