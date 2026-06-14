@@ -1320,12 +1320,14 @@ end
 ---RCON entry point: assert the tick-split relation build reproduces the
 ---synchronous one. create_relation_to_recipes runs build + recompute_dynamic in
 ---one pass; the split build (build_relation_init + build_relation_step) lists the
----recipes across ticks with everything enabled=false, then a finalize pass flips
----the live-enabled recipes via apply_research_change. Both must yield a
----field-for-field identical cache -- this is the contract the on_tick driver and
----the get_relation_to_recipes fallback rely on. Also runs the build one recipe per
----step (budget reentry) to exercise the cursor the way the driver does across
----ticks. Returns "OK" or "ERROR: <detail>". Base-game prototypes only.
+---recipes across ticks with everything enabled=false, then tick-split finalize
+---phases credit the live-enabled recipes. All variants must yield a field-for-field
+---identical cache -- this is the contract the on_tick driver and the
+---get_relation_to_recipes fallback rely on. Runs three: a one-shot finish; a drip
+---(one advance at a time, exercising the cursor reentry); and an interleave that
+---injects redundant apply_research_change calls during the finalize phases (standing
+---in for a research finishing mid-build, exercising idempotency under the
+---structure_ready gate). Returns "OK" or "ERROR: <detail>". Base-game prototypes only.
 ---@return string
 function M.check_relation_split()
     local ok, err = pcall(function()
@@ -1342,6 +1344,26 @@ function M.check_relation_split()
         repeat
             dripped = relation.advance_relation_build(drip_state, FORCE_INDEX)
         until dripped
+
+        -- Interleave: drive a split build and, once listing is done (structure_ready),
+        -- inject a redundant apply_research_change for every live-enabled recipe
+        -- before each advance -- standing in for a research finishing during the
+        -- tick-split finalize. The finalize phases' guarded credits must absorb these,
+        -- so the result still equals the synchronous build (idempotency under
+        -- interleave; mirrors save.apply_research_change's structure_ready gate, which
+        -- routes a mid-finalize research to relation.apply_research_change on rel).
+        local enabled = {}
+        for name, recipe in pairs(game.forces[FORCE_INDEX].recipes) do
+            if recipe.enabled then enabled[#enabled + 1] = name end
+        end
+        local il_state = relation.build_relation_init()
+        local interleaved
+        repeat
+            if il_state.structure_ready then
+                relation.apply_research_change(il_state.rel, nil, FORCE_INDEX, enabled, true)
+            end
+            interleaved = relation.advance_relation_build(il_state, FORCE_INDEX)
+        until interleaved
 
         local function assert_lists_equal(label, a, b)
             assert(#a == #b, label .. " length mismatch (" .. #a .. " vs " .. #b .. ")")
@@ -1387,6 +1409,7 @@ function M.check_relation_split()
 
         compare(finished, "finish")
         compare(dripped, "drip")
+        compare(interleaved, "interleave")
     end)
     if not ok then
         return "ERROR: relation-split check raised: " .. tostring(err)

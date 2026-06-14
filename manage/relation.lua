@@ -436,10 +436,13 @@ end
 -- cache. This spreads the recipe listing over ticks: build_relation_init allocates
 -- the empty skeleton, build_relation_step walks each source table
 -- RELATION_BUILD_BUDGET entries per call (resuming the pairs iterator from a stored
--- key), and a final atomic pass flips the currently-enabled recipes via
--- apply_research_change. The listing phases are research-invariant (force.recipes
--- holds every recipe regardless of enabled), so a research finished mid-build does
--- not invalidate them; its effect is captured by the finalize pass instead.
+-- key), then the finalize phases credit the currently-enabled recipes -- also
+-- tick-split. The listing phases are research-invariant (force.recipes holds every
+-- recipe regardless of enabled), so a research finished while they run does not
+-- invalidate them; the finalize phases read the live enabled flag, and once they
+-- begin (structure_ready) a concurrent research is applied incrementally to the
+-- in-flight rel rather than skipped (save.apply_research_change) -- the guarded
+-- credits make that interleave idempotent.
 local RELATION_BUILD_BUDGET = 100
 
 -- Prep phases split the heavy one-shot setup across ticks: fuel-cache computation
@@ -449,7 +452,7 @@ local RELATION_BUILD_BUDGET = 100
 -- (step_table), so no single tick pays a full pass. The all-false seed of the
 -- research-dependent fields rides along on the phase that walks the matching table
 -- (real -> enabled_recipe, virtual -> virtual_recipe_researched, vmat ->
--- virtual_material_researched), all complete before the finalize pass reads them.
+-- virtual_material_researched), all complete before the finalize phases read them.
 -- After prep, the listing phases run.
 local RELATION_PHASE_PREP_FUEL_CRAFTING = "prep_fuel_crafting"
 local RELATION_PHASE_PREP_FUEL_RESOURCE = "prep_fuel_resource"
@@ -459,7 +462,9 @@ local RELATION_PHASE_PREP_ALLOC_VMAT = "prep_alloc_vmat"
 local RELATION_PHASE_REAL = "real_recipes"
 local RELATION_PHASE_FUEL_REVERSE = "fuel_reverse"
 local RELATION_PHASE_VIRTUAL = "virtual_recipes"
-local RELATION_PHASE_FINALIZE = "finalize"
+local RELATION_PHASE_FINALIZE_REAL = "finalize_real"
+local RELATION_PHASE_FINALIZE_VRECIPE = "finalize_vrecipe"
+local RELATION_PHASE_FINALIZE_VMAT = "finalize_vmat"
 local RELATION_PHASE_DONE = "done"
 
 ---Process up to `budget` entries of the live table `t`, resuming after
@@ -627,23 +632,75 @@ local function build_relation_step(state, force_index, budget)
                 rel.virtual_recipe_researched[name] = false
                 process_virtual_recipe(rel, recipe, fuel, burnt)
             end) then
-            state.phase = RELATION_PHASE_FINALIZE
+            -- Listing done: contributes / seeds / virtual tables are all in place, so
+            -- apply_research_change is now structurally safe. Flag it so a research
+            -- finishing during the (tick-split) finalize is applied incrementally to
+            -- this rel instead of skipped (save.apply_research_change). The finalize
+            -- phases are guarded (idempotent), so an interleaved apply and a phase's
+            -- own credit converge.
+            state.structure_ready = true
+            state.phase = RELATION_PHASE_FINALIZE_REAL
         end
         return false
-    elseif state.phase == RELATION_PHASE_FINALIZE then
-        -- Atomic, single tick: read the recipes enabled right now (the live
-        -- research state) and flip them in one apply_research_change. Because the
-        -- read and the apply share this tick, no research event can interleave
-        -- between them, so any research finished while the listing phases ran is
-        -- captured here. group_infos = nil: only relation is tick-split, the group
-        -- cache is rebuilt lazily afterwards (group_infos_needs_updating).
-        local enabled_names = {}
-        for name, recipe in pairs(game.forces[force_index].recipes) do
-            if recipe.enabled then enabled_names[#enabled_names + 1] = name end
+    elseif state.phase == RELATION_PHASE_FINALIZE_REAL then
+        -- Credit the currently-enabled real recipes (the listing seeded every
+        -- enabled_recipe false). Walks force.recipes live, so a research finished
+        -- during the listing phases is captured here by the live enabled flag. The
+        -- flip guard (not already enabled_recipe[name]) makes this idempotent with
+        -- any apply_research_change that interleaved once structure became ready.
+        -- group_infos is rebuilt after the build, so credit with nil.
+        local contributes = rel.contributes
+        if step_table(state, game.forces[force_index].recipes, budget, function(name, recipe)
+                if recipe.enabled and not rel.enabled_recipe[name] then
+                    rel.enabled_recipe[name] = true
+                    if not recipe.hidden then
+                        for _, m in ipairs(contributes[name]) do
+                            local info = get_info(rel, m.type, m.name)
+                            info.craftable_count = info.craftable_count + 1
+                        end
+                    end
+                end
+            end) then
+            state.phase = RELATION_PHASE_FINALIZE_VRECIPE
         end
-        M.apply_research_change(rel, nil, force_index, enabled_names, true)
-        state.phase = RELATION_PHASE_DONE
-        return true
+        return false
+    elseif state.phase == RELATION_PHASE_FINALIZE_VRECIPE then
+        -- Evaluate each virtual recipe's researched state against the now-final real
+        -- craftable_count (the real-before-virtual order recompute_relation_dynamic
+        -- relies on) and credit the researched non-hidden ones. The researched flip
+        -- guard keeps it idempotent with an interleaved apply.
+        local force = game.forces[force_index]
+        local contributes = rel.contributes
+        if step_table(state, storage.virtuals.recipe, budget, function(name, recipe)
+                local now = compute_researched(rel, recipe, force)
+                if now ~= rel.virtual_recipe_researched[name] then
+                    rel.virtual_recipe_researched[name] = now
+                    if not recipe.hidden then
+                        local d = now and 1 or -1
+                        for _, m in ipairs(contributes[name]) do
+                            local info = get_info(rel, m.type, m.name)
+                            info.craftable_count = info.craftable_count + d
+                        end
+                    end
+                end
+            end) then
+            state.phase = RELATION_PHASE_FINALIZE_VMAT
+        end
+        return false
+    elseif state.phase == RELATION_PHASE_FINALIZE_VMAT then
+        -- Virtual materials' researched state derives from their source's (now-final)
+        -- craftable_count. No craftable credit -- this only records the flag (a later
+        -- group_infos rebuild consumes it). Guarded flip. Last phase: done on exhaust.
+        if step_table(state, storage.virtuals.material, budget, function(name, vm)
+                local now = not acc.is_unresearched(vm, rel)
+                if now ~= rel.virtual_material_researched[name] then
+                    rel.virtual_material_researched[name] = now
+                end
+            end) then
+            state.phase = RELATION_PHASE_DONE
+            return true
+        end
+        return false
     end
 
     return true

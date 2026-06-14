@@ -448,13 +448,21 @@ end
 ---@param now_enabled boolean
 function M.apply_research_change(force_index, recipe_names, now_enabled)
     local force_data = storage.forces[force_index]
-    -- relation_build non-nil means a tick-split build is mid-flight: its partial
-    -- rel has empty contributes / recipe_for_* for not-yet-listed recipes, so an
-    -- incremental apply would miscount. The finalize pass applies the live enabled
-    -- set atomically instead, so skipping here loses nothing.
-    if not force_data
-        or force_data.relation_to_recipes_needs_updating
-        or force_data.relation_build then
+    if not force_data or force_data.relation_to_recipes_needs_updating then
+        return
+    end
+    local build = force_data.relation_build
+    if build then
+        -- A tick-split build is mid-flight. While it is still listing, the partial
+        -- rel has empty contributes for not-yet-listed recipes, so an incremental
+        -- apply would miscount -- skip; the finalize_real phase reads the live
+        -- enabled flag and credits this research then. Once listing is done
+        -- (structure_ready) the rel is structurally complete, so apply to the
+        -- in-flight rel the finalize phases are filling. Their credits are guarded
+        -- (idempotent), so the interleave converges; group_infos is rebuilt after the
+        -- build (group_infos_needs_updating), hence nil here.
+        if not build.structure_ready then return end
+        relation.apply_research_change(build.rel, nil, force_index, recipe_names, now_enabled)
         return
     end
     -- Patch group_infos in lockstep when it is already built; if it isn't, pass

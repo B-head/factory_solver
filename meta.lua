@@ -135,9 +135,10 @@ __factory_solver__storage = {}
 ---stored-key pairs resume (step_table), and the recipe set is stable across research
 ---so the walk never goes stale mid-build.
 ---@class RelationBuildState
----@field phase string Current build phase: prep_fuel_crafting / prep_fuel_resource / prep_alloc_item / prep_alloc_fluid / prep_alloc_vmat / real_recipes / fuel_reverse / virtual_recipes / finalize / done.
----@field rel RelationToRecipes Partially built relation cache (filled phase by phase; enabled-dependent fields stay all-false until the finalize pass).
+---@field phase string Current build phase: prep_fuel_crafting / prep_fuel_resource / prep_alloc_item / prep_alloc_fluid / prep_alloc_vmat / real_recipes / fuel_reverse / virtual_recipes / finalize_real / finalize_vrecipe / finalize_vmat / done.
+---@field rel RelationToRecipes Partially built relation cache (filled phase by phase; enabled-dependent fields stay all-false until the finalize phases credit them).
 ---@field cursor_key string? Key last processed in the current phase's source table; the next step resumes the pairs iterator after it. nil = start of phase (also reset to nil when a phase is exhausted).
+---@field structure_ready boolean? Set true when the listing phases finish (entering finalize_real): contributes / seeds / virtual tables are complete, so apply_research_change is structurally safe and a research finishing during the tick-split finalize is applied to rel incrementally instead of skipped. nil/false during listing.
 ---@field fuel RelationBuildFuelCache cache_fuel_names' result, built incrementally across the prep_fuel phases; reused by the real / virtual recipe passes.
 ---@field burnt_result_names table<string, string> Fuel item name -> burnt_result item name, built incrementally in prep_alloc_item.
 
