@@ -57,6 +57,29 @@ local function compute_category_fuels(machines, any_fluid_fuels)
     return fuels, collect_fluid_fuels(machines, any_fluid_fuels)
 end
 
+-- The "parameters" recipe category belongs to the blueprint-parameter system, not
+-- real crafting: hundreds of machines declare it so they can expose parameter slots
+-- (651 of 1383 category-machine memberships on a pyanodon set), but no fuel-burning
+-- recipe runs in it, so its fuel lists are never meaningfully read -- only
+-- process_real_recipe's burnt-fuel registration and the fuel-consumer picker, both
+-- of which a parameter placeholder should leave empty. Computing them scans those
+-- machines twice and dominated the prep-fuel pass (~8ms on pyanodon, irreducible by
+-- budget since it is one category), so short-circuit to empty lists. They stay
+-- present (not nil) so process_real_recipe's ipairs over the category never faults.
+local PARAMETER_RECIPE_CATEGORY = "parameters"
+
+---Fuel item names and fluid-fuel names for one recipe (crafting) category by name,
+---skipping the parameter category. Shared by M.cache_fuel_names and the tick-split
+---prep_fuel_crafting phase so both produce identical lists.
+---@param category_name string
+---@param any_fluid_fuels string[]
+---@return string[] fuels
+---@return string[] fluid_fuels
+local function compute_recipe_category_fuels(category_name, any_fluid_fuels)
+    if category_name == PARAMETER_RECIPE_CATEGORY then return {}, {} end
+    return compute_category_fuels(acc.get_machines_in_category(category_name), any_fluid_fuels)
+end
+
 ---@return string[]
 local function get_any_fluid_fuel_names()
     return flib_table.map(acc.get_any_fluid_fuels(), function(value)
@@ -72,9 +95,8 @@ function M.cache_fuel_names()
     local cache_crafting_fuels = {}
     local cache_crafting_fluid_fuels = {}
     for crafting_category_name, _ in pairs(prototypes.recipe_category) do
-        local machines = acc.get_machines_in_category(crafting_category_name)
         cache_crafting_fuels[crafting_category_name], cache_crafting_fluid_fuels[crafting_category_name] =
-            compute_category_fuels(machines, any_fluid_fuels)
+            compute_recipe_category_fuels(crafting_category_name, any_fluid_fuels)
     end
 
     local cache_resource_fuels = {}
@@ -467,6 +489,25 @@ local RELATION_PHASE_FINALIZE_VRECIPE = "finalize_vrecipe"
 local RELATION_PHASE_FINALIZE_VMAT = "finalize_vmat"
 local RELATION_PHASE_DONE = "done"
 
+-- Per-phase budget overrides for advance_relation_build. Per-entry work is uneven
+-- both across phases and within them (a chunk's cost ~= budget x the heaviest
+-- entries it happens to cover), and the on_tick budget is shared with one IPM solver
+-- iteration, so the heavy phases are capped to keep the worst advance ~5ms. On a
+-- pyanodon set at budget 100 the worst advance was real_recipes ~9ms (recipes in
+-- fuel-rich categories run a long burnt-fuel loop) and the prep_fuel phases ~8ms
+-- (compute_*_category_fuels' per-category machine/fuel scan); every other phase
+-- stays <=~1.6ms. real_recipes and prep_fuel_resource scale ~linearly with the
+-- budget; prep_fuel_crafting additionally needed compute_recipe_category_fuels to
+-- drop the "parameters" category (651 machines -- a fixed ~4ms add-on no budget
+-- could split). Counts, not wall-clock (os.clock is non-deterministic -> desync).
+-- Tuned from a pyanodon (worst-case) measurement; smaller modpacks stay well under.
+-- Phases absent here fall back to RELATION_BUILD_BUDGET.
+local RELATION_PHASE_BUDGET = {
+    [RELATION_PHASE_PREP_FUEL_CRAFTING] = 40,
+    [RELATION_PHASE_PREP_FUEL_RESOURCE] = 25,
+    [RELATION_PHASE_REAL] = 30,
+}
+
 ---Process up to `budget` entries of the live table `t`, resuming after
 ---state.cursor_key (nil = from the start), calling fn(name, value) for each and
 ---advancing the cursor. Returns true once the table is exhausted (the caller then
@@ -561,7 +602,7 @@ local function build_relation_step(state, force_index, budget)
         local fuel = state.fuel
         if step_table(state, prototypes.recipe_category, budget, function(cat)
                 fuel.crafting_fuels[cat], fuel.crafting_fluid_fuels[cat] =
-                    compute_category_fuels(acc.get_machines_in_category(cat), fuel.any_fluid_fuels)
+                    compute_recipe_category_fuels(cat, fuel.any_fluid_fuels)
             end) then
             state.phase = RELATION_PHASE_PREP_FUEL_RESOURCE
         end
@@ -706,13 +747,15 @@ local function build_relation_step(state, force_index, budget)
     return true
 end
 
----Advance a build by one tick's worth (RELATION_BUILD_BUDGET recipes). Returns the
+---Advance a build by one tick's worth (the current phase's budget -- see
+---RELATION_PHASE_BUDGET, falling back to RELATION_BUILD_BUDGET). Returns the
 ---finished cache when done, nil while still building.
 ---@param state RelationBuildState
 ---@param force_index integer
 ---@return RelationToRecipes?
 function M.advance_relation_build(state, force_index)
-    if build_relation_step(state, force_index, RELATION_BUILD_BUDGET) then
+    local budget = RELATION_PHASE_BUDGET[state.phase] or RELATION_BUILD_BUDGET
+    if build_relation_step(state, force_index, budget) then
         return state.rel
     end
     return nil
