@@ -86,7 +86,7 @@ M.FLOW_TH = 1e-4 -- an escape above this is "flowing" (classification universe m
 M.FIX_TOL = 1e-4 -- fixpoint own-residual dust threshold (= the reference's)
 M.ADOPT_REL = 5e-3 -- stage adoption threshold; REL on purpose -- the margin-spend guard
 M.BUDGET_REL, M.BUDGET_ABS = 1e-3, 1e-6
-local EPS_RECIPE = 2 ^ -20 -- stage face regularizer (the reference's)
+local EPS_RECIPE = 2 ^ -20 -- stage face regularizer (the reference's). NOT a tie-break: it lets recipes run at near-zero cost so a fix-test measures whether a material is producible. Raising it (tried 2^-6) makes recipes costly enough that fix-tests prefer import, mis-classifying producibility (cold drifts to Vp=832 vs ref 0 on seed_100). Keep at the reference's value.
 
 ---Budget-row limit over a stage optimum: relative slack for the IPM's
 ---relative-residual convergence plus an absolute floor when the optimum is 0.

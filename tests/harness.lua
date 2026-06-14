@@ -116,17 +116,18 @@ end
 ---@param lp table The required `solver/linear_programming` module.
 ---@param problem Problem
 ---@param opts { tolerance?: number, iterate_limit?: number }?
+---@param warm_vars PackedVariables? optional warm-start handoff (nil = cold Mehrotra start). The A2 fix-test warm-start experiment chains each cascade build off the previous solve.
 ---@return SolverState terminal_state
 ---@return PackedVariables? raw_variables
 ---@return integer step_count
-function M.solve_to_completion(lp, problem, opts)
+function M.solve_to_completion(lp, problem, opts, warm_vars)
     opts = opts or {}
     local tol = opts.tolerance or default_tolerance
     local limit = opts.iterate_limit or default_iterate_limit
 
     local state = "ready"
     local iteration = nil
-    local vars = nil
+    local vars = warm_vars
     local steps = 0
     while state == "calculating" or state == "ready" do
         state, iteration, vars = lp.solve(problem, state, iteration, vars, tol, limit)

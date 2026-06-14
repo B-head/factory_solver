@@ -198,10 +198,47 @@ end
 ---@return CsrMatrix #Variables in vector form.
 function M:make_primal_variables(raw_variables)
     local prev_x = raw_variables and raw_variables.x or {}
-    local ret = {}
-    for k, v in pairs(self.primals) do
-        ret[v.index] = prev_x[k] or 100
+    -- Non-slack variables warm-start from prev_x (default 100). Slack variables
+    -- are DEPENDENT: their constraint is Σ(non-slack terms) + coef·slack = limit
+    -- (coef = +1 for an upper-limit pos_slack, -1 for a lower-limit neg_slack),
+    -- so the only feasible value is slack = (limit - Σ non-slack) / coef. A
+    -- carried-over or default-100 slack puts the warm point OUTSIDE any freshly
+    -- added constraint (e.g. a cascade budget-lock or target-budget row), so the
+    -- IPM starts infeasible and the iteration count explodes. Recomputing the
+    -- slacks here keeps the warm start feasible.
+    local x = {}
+    local dual_sum = {} -- dual key -> Σ(non-slack primal value × coefficient)
+    for k, p in pairs(self.primals) do
+        if p.kind ~= "slack" then
+            local val = prev_x[k] or 100
+            x[k] = val
+            local terms = self.subject_terms[k]
+            if terms then
+                for dk, coef in pairs(terms) do
+                    dual_sum[dk] = (dual_sum[dk] or 0) + val * coef
+                end
+            end
+        end
     end
+    for k, p in pairs(self.primals) do
+        if p.kind == "slack" then
+            -- A slack carried over from the previous solve stays warm (so
+            -- edit-to-edit warm-start is unchanged). Only a FRESHLY added slack
+            -- -- one with no prev_x value, e.g. a new cascade budget-lock row --
+            -- is derived feasibly from its constraint, so the warm point lands
+            -- inside the new constraints instead of outside them.
+            local val = prev_x[k]
+            if not val then
+                for dk, coef in pairs(self.subject_terms[k] or {}) do
+                    local d = self.duals[dk]
+                    if d then val = (d.limit - (dual_sum[dk] or 0)) / coef end
+                end
+            end
+            x[k] = math.max(val or 100, 0)
+        end
+    end
+    local ret = {}
+    for k, p in pairs(self.primals) do ret[p.index] = x[k] end
     return csr_matrix.with_vector(ret, self.primal_length)
 end
 

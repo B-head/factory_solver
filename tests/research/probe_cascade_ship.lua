@@ -39,6 +39,26 @@ local substitution = require "solver/substitution"
 -- escapes are multi-row and never folded; surplus_sink is never folded), so any
 -- difference is a degenerate-face shift, not a different optimum.
 local SUBST = (os.getenv("FS_SUBST") or "off"):lower() == "on"
+-- FS_WARM=on chains each cascade build's solve off the PREVIOUS solve's packed
+-- result (warm start) instead of a cold Mehrotra start. The A2 experiment:
+-- fix-tests rewrite the cost vector wholesale (priced=1 / recipe=eps / else 0)
+-- but share the constraint matrix, so the previous solve's x MAY seed the next
+-- near-optimally. Measured via ship_steps (total IPM iterations) cold vs warm.
+local WARM = (os.getenv("FS_WARM") or "off"):lower() == "on"
+-- FS_TRACE_X=on prints each cascade build's solve phase + the relative L2
+-- distance of its x from the baseline and from the previous build (cold
+-- solves), to stderr. Reveals which solves cluster -- the observation that the
+-- builds' optima are NOT unrelated, so a well-chosen warm seed may yet help.
+local TRACE_X = (os.getenv("FS_TRACE_X") or "off"):lower() == "on"
+local function reldiff(a, b)
+    local num, den = 0, 0
+    for k, va in pairs(a) do
+        local vb = b[k] or 0
+        num = num + (va - vb) * (va - vb)
+        den = den + va * va
+    end
+    return den > 0 and math.sqrt(num / den) or 0
+end
 
 local TOL, ITER = 1e-7, 800
 local RESCUE_TRIGGER = 1e-6
@@ -83,12 +103,12 @@ end
 -- manage/pre_solve.lua runs for the baseline. The cascade reads full-space x,
 -- so the result is always unfolded back. The fold runs AFTER shape_problem, so
 -- the lock rows are already in place and their escapes stay multi-row (unfolded).
-local function solve_cascade(p)
-    if not SUBST then return solve(p) end
+local function solve_cascade(p, warm)
+    if not SUBST then return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }, warm) end
     local reduced, reconstruction = substitution.reduce(p)
-    local s, v = solve(reduced)
-    if s ~= "finished" or not v then return s, v end
-    return s, substitution.unfold(v, reconstruction)
+    local s, v, steps = harness.solve_to_completion(lp, reduced, { tolerance = TOL, iterate_limit = ITER }, warm)
+    if s ~= "finished" or not v then return s, v, steps end
+    return s, substitution.unfold(v, reconstruction), steps
 end
 
 -- The shipped lexicographic target rescue (verbatim from probe_vp_rescue /
@@ -111,46 +131,84 @@ local function rescue_target(constraints, lines, prob, x0, s0)
     return p2, v2.x, v2.s, limit, 2
 end
 
--- Drive solver/cascade.lua to settlement, COLD (no warm start), exactly as the
--- pump would but synchronously. Returns the final (problem, x, solves).
+-- Drive solver/cascade.lua to settlement (COLD by default; FS_WARM=on chains
+-- each build off the previous solve), exactly as the pump would but
+-- synchronously. Returns (problem, state, x, solves, total_steps). total_steps
+-- = baseline + cascade-build IPM iterations (rescue solves excluded: they are
+-- cold in both arms, so the cold-vs-warm delta isolates the cascade builds).
 local function solve_via_cascade(constraints, lines)
     local prob = build_ship(constraints, lines, nil)
-    if not prob then return nil, "build-error", nil, 0 end
-    local s, v = solve(prob)
-    if s ~= "finished" then return prob, s, nil, 1 end
-    local solves = 1
+    if not prob then return nil, "build-error", nil, 0, 0 end
+    local s, v, steps0 = solve(prob)
+    if s ~= "finished" then return prob, s, nil, 1, steps0 end
+    local solves, total_steps = 1, steps0
 
     local p, x, sl, rescue_budget, rsolves = rescue_target(constraints, lines, prob, v.x, v.s)
     solves = solves + rsolves
 
     local raw = { x = x, s = sl }
     local cc = cascade.begin(p, raw, lines, rescue_budget)
+    -- Warm seed: the (target-rescued) baseline answer feeds the first cascade
+    -- build; each finished build then seeds the next. Cost differs build to
+    -- build but the constraint matrix is shared, so prev x is a candidate.
+    -- Phase-aware warm seed (FS_WARM=on): the trace showed fix-tests solve
+    -- cheaply cold and warming them from the previous optimum hurts (different
+    -- active set = boundary warm off the central path), while stage/final/polish
+    -- builds are the heavy ones AND sit almost on top of each other (vf_stage
+    -- d_prev 0.04 off vp_final, polish 0.0007 off vc_stage). So fix-tests stay
+    -- cold; only the stage chain warms, off the PREVIOUS stage/final (skipping
+    -- the fix-tests in between).
+    local prev_stage = WARM and raw or nil
+    local x_base, x_prev = raw.x, raw.x -- trace references
+    local stage_seed_trace = raw -- prev stage/final answer, tracked even when cold (for the residual)
     local guard = 0
     while cc.build do
         guard = guard + 1
-        if guard > 2000 then return p, "cascade-stuck", x, solves end
+        if guard > 2000 then return p, "cascade-stuck", x, solves, total_steps end
         local b = cc.build
+        local ph = cc.phase
         local bp = build_cascade(constraints, lines, b)
         if not bp then
             -- A build error is a terminal non-finished state for advance.
             cascade.advance(cc, p, nil, "unfeasible")
         else
-            local bs, bv = solve_cascade(bp)
+            local is_fix = b.fix ~= nil
+            local seed = (not is_fix) and prev_stage or nil
+            local bs, bv, bsteps = solve_cascade(bp, seed)
             solves = solves + 1
+            total_steps = total_steps + (bsteps or 0)
+            if TRACE_X and bv and bv.x then
+                -- Warm-seed feasibility: relative primal residual ||A·x_seed - b||
+                -- of the PREVIOUS stage/final answer against THIS build's matrix.
+                -- Large => the warm point is outside this build's constraints (the
+                -- infeasible-start the reflection explosion looks like).
+                local wr = -1
+                if not is_fix then
+                    local A = bp:generate_subject_matrix()
+                    local bvec = bp:generate_limit_vector()
+                    local xw = bp:make_primal_variables(stage_seed_trace)
+                    wr = (A * xw - bvec):euclidean_norm() / (1 + bvec:euclidean_norm())
+                end
+                io.stderr:write(string.format("  %-18s steps=%-4d d_base=%.4g d_prev=%.4g warm_resid=%.4g\n",
+                    tostring(ph), bsteps or 0, reldiff(bv.x, x_base), reldiff(bv.x, x_prev), wr))
+                x_prev = bv.x
+                if not is_fix then stage_seed_trace = bv end
+            end
+            if WARM and not is_fix and bs == "finished" and bv then prev_stage = bv end
             cascade.advance(cc, bp, bv, bs)
             if cc.phase == "restore" then
                 local rp = build_cascade(constraints, lines, cc.build)
-                return rp or bp, "finished", cc.adopted_raw.x, solves
+                return rp or bp, "finished", cc.adopted_raw.x, solves, total_steps
             end
         end
     end
     local fp = build_cascade(constraints, lines, cc.adopted_build)
-    return fp, "finished", cc.adopted_raw.x, solves
+    return fp, "finished", cc.adopted_raw.x, solves, total_steps
 end
 
 local COLS = { "label", "n_mats", "ref_state", "T_ref", "Vp_ref", "Vc_ref", "Vf_ref", "M_ref", "S_ref",
     "Nv_ref", "ref_steps", "ref_cached",
-    "ship_state", "T_ship", "Vp_ship", "Vc_ship", "Vf_ship", "M_ship", "S_ship", "Nv_ship", "ship_solves" }
+    "ship_state", "T_ship", "Vp_ship", "Vc_ship", "Vf_ship", "M_ship", "S_ship", "Nv_ship", "ship_solves", "ship_steps" }
 
 local function process(prob, label, path, emit)
     local intermediates = ref.intermediates(prob.normalized_lines)
@@ -173,7 +231,7 @@ local function process(prob, label, path, emit)
     local producible = list_to_set(entry.producible)
     local consumable = list_to_set(entry.consumable)
 
-    local sp, sstate, sx, solves = solve_via_cascade(prob.constraints, prob.normalized_lines)
+    local sp, sstate, sx, solves, ssteps = solve_via_cascade(prob.constraints, prob.normalized_lines)
     local T_s, Vp_s, Vc_s, Vf_s, M_s, S_s, Nv_s = -1, -1, -1, -1, -1, -1, -1
     if sstate == "finished" and sx then
         T_s = ref.total_of(sp, sx, ref.TARGET_KINDS)
@@ -187,7 +245,7 @@ local function process(prob, label, path, emit)
         Vc_ref = entry.Vc, Vf_ref = entry.Vf, M_ref = entry.M, S_ref = entry.S, Nv_ref = entry.Nv,
         ref_steps = entry.steps, ref_cached = cached and 1 or 0,
         ship_state = sstate, T_ship = T_s, Vp_ship = Vp_s, Vc_ship = Vc_s, Vf_ship = Vf_s,
-        M_ship = M_s, S_ship = S_s, Nv_ship = Nv_s, ship_solves = solves })
+        M_ship = M_s, S_ship = S_s, Nv_ship = Nv_s, ship_solves = solves, ship_steps = ssteps })
 end
 
 -- ---- main -------------------------------------------------------------------
