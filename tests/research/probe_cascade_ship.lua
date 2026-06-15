@@ -11,10 +11,19 @@
 -- self-diff noise band. This is the 1:1-port safety net for the wiring.
 --
 -- The build shapes here mirror cascade.build_options / cascade.shape_problem
--- (which is what pre_solve calls), so the only difference from the in-game path
--- is that these solves are COLD (the pump warm-starts) -- a degenerate-face
--- difference within the solver's tolerance, the same one the baseline already
--- has between probe and ship.
+-- (which is what pre_solve calls). FS_WARM selects the start strategy:
+--   off (default) -- every build COLD: the reference-equivalent path.
+--   on            -- the PRODUCTION path: cold the classification builds
+--                    (cascade.is_cold -- fix tests + support probes), warm the
+--                    heavy stage/final/polish off the immediately preceding
+--                    solve, exactly as pre_solve's pump does (M.arm_cascade_build
+--                    nulls solution.raw_variables for cold builds). Verdict-stable
+--                    against cold within the self-diff noise band (the cold
+--                    classification builds are the verdict-drift fix).
+--   on + FS_WARM_ALL -- the production PRE-FIX path (warm EVERY build): the bug
+--                    the fix removes -- warming the classification builds drifts
+--                    their degenerate vertex off cold/ref and corrupts the
+--                    producibility/consumability verdicts (nondeterministically).
 --
 -- Single-shot contract: `<lua> probe_cascade_ship.lua <dump>` -> one row.
 --   pwsh tests/research/run_corpus.ps1 -Driver tests/research/probe_cascade_ship.lua -Collect '^seed=' -Out <tsv>
@@ -29,6 +38,13 @@ local ref = require "tests/research/reference_solver"
 local refcache = require "tests/research/reference_cache"
 local cascade = require "solver/cascade"
 local substitution = require "solver/substitution"
+local problem_generator = require "solver/problem_generator"
+
+-- FS_TIE: heavy-build tie-break magnitude (solver/problem_generator), applied per
+-- build (0 on cascade.is_cold builds, FS_TIE on the heavy / baseline builds) to
+-- check whether collapsing the degenerate face to a unique vertex preserves the
+-- reference 5-tier grading (it should: the perturbation is << the recipe cost 1).
+local TIE = tonumber(os.getenv("FS_TIE") or "") or 0
 
 -- FS_SUBST=on folds the cascade STAGE / lock / fix-test / final builds through
 -- proportional row reduction before the IPM solves them (off = the shipped
@@ -44,7 +60,31 @@ local SUBST = (os.getenv("FS_SUBST") or "off"):lower() == "on"
 -- fix-tests rewrite the cost vector wholesale (priced=1 / recipe=eps / else 0)
 -- but share the constraint matrix, so the previous solve's x MAY seed the next
 -- near-optimally. Measured via ship_steps (total IPM iterations) cold vs warm.
+-- FS_WARM=on is the PRODUCTION-FAITHFUL warm path: it warm-starts every cascade
+-- build off the immediately preceding solve EXCEPT the classification-determining
+-- builds (cascade.is_cold -- fix tests + support probes), which it colds, exactly
+-- as manage/pre_solve.lua M.arm_cascade_build does (it nulls solution.raw_variables
+-- for those). Off = cold every build (the reference-equivalent path Round 9
+-- validated). The cold classification builds are the verdict-drift fix: their
+-- nonzero set is read vertex-dependently and a warm seed picks a different
+-- degenerate vertex than cold/ref.
 local WARM = (os.getenv("FS_WARM") or "off"):lower() == "on"
+-- FS_WARM_SUPPORT=on force-warms the SUPPORT probes too (not the fix tests),
+-- reproducing one half of the pre-fix verdict-drift bug for A/B measurement.
+local WARM_SUPPORT = (os.getenv("FS_WARM_SUPPORT") or "off"):lower() == "on"
+-- FS_WARM_ALL=on warms EVERY build (ignores cascade.is_cold) off the immediately
+-- preceding solve -- the FAITHFUL production-PRE-FIX path (pre_solve kept
+-- solution.raw_variables across every cascade build, fix tests and support
+-- probes included). This is the bug the fix removes; A/B it against FS_WARM=on
+-- (production-fixed) and FS_WARM=off (cold) to size the verdict drift.
+local WARM_ALL = (os.getenv("FS_WARM_ALL") or "off"):lower() == "on"
+-- FS_WARM_INDIV=on force-warms the INDIVIDUAL (single-material) fix tests but
+-- keeps the support probes and JOINT fix tests (prescreen/demote/promote) cold.
+-- The hypothesis: an individual test's verdict reads x[mat_import], which AT the
+-- optimum equals the priced objective (the unique minimum), so it is vertex-
+-- INDEPENDENT and safe to warm -- only the support/joint reads are the
+-- irreducibly center-defined (degenerate) ones.
+local WARM_INDIV = (os.getenv("FS_WARM_INDIV") or "off"):lower() == "on"
 -- FS_TRACE_X=on prints each cascade build's solve phase + the relative L2
 -- distance of its x from the baseline and from the previous build (cold
 -- solves), to stderr. Reveals which solves cluster -- the observation that the
@@ -137,6 +177,7 @@ end
 -- = baseline + cascade-build IPM iterations (rescue solves excluded: they are
 -- cold in both arms, so the cold-vs-warm delta isolates the cascade builds).
 local function solve_via_cascade(constraints, lines)
+    problem_generator.set_tie_break(TIE) -- baseline + rescue are heavy builds
     local prob = build_ship(constraints, lines, nil)
     if not prob then return nil, "build-error", nil, 0, 0 end
     local s, v, steps0 = solve(prob)
@@ -148,19 +189,16 @@ local function solve_via_cascade(constraints, lines)
 
     local raw = { x = x, s = sl }
     local cc = cascade.begin(p, raw, lines, rescue_budget)
-    -- Warm seed: the (target-rescued) baseline answer feeds the first cascade
-    -- build; each finished build then seeds the next. Cost differs build to
-    -- build but the constraint matrix is shared, so prev x is a candidate.
-    -- Phase-aware warm seed (FS_WARM=on): the trace showed fix-tests solve
-    -- cheaply cold and warming them from the previous optimum hurts (different
-    -- active set = boundary warm off the central path), while stage/final/polish
-    -- builds are the heavy ones AND sit almost on top of each other (vf_stage
-    -- d_prev 0.04 off vp_final, polish 0.0007 off vc_stage). So fix-tests stay
-    -- cold; only the stage chain warms, off the PREVIOUS stage/final (skipping
-    -- the fix-tests in between).
-    local prev_stage = WARM and raw or nil
+    -- Warm seed (FS_WARM=on, production-faithful): the (target-rescued) baseline
+    -- answer feeds the first cascade build; each finished build seeds the next off
+    -- the immediately preceding solve, mirroring production keeping the result in
+    -- solution.raw_variables. The classification builds (cascade.is_cold) cold-
+    -- start (production nulls raw_variables for them) -- the verdict-drift fix.
+    -- Cost differs build to build but the constraint matrix is shared, so prev x
+    -- is a feasible candidate once the freshly added lock-row slacks are derived
+    -- (problem_generator.make_primal_variables feasible-slack).
+    local prev_any = WARM and raw or nil    -- immediately preceding result (the warm seed; mirrors solution.raw_variables)
     local x_base, x_prev = raw.x, raw.x -- trace references
-    local stage_seed_trace = raw -- prev stage/final answer, tracked even when cold (for the residual)
     local guard = 0
     while cc.build do
         guard = guard + 1
@@ -172,29 +210,54 @@ local function solve_via_cascade(constraints, lines)
             -- A build error is a terminal non-finished state for advance.
             cascade.advance(cc, p, nil, "unfeasible")
         else
-            local is_fix = b.fix ~= nil
-            local seed = (not is_fix) and prev_stage or nil
+            -- cascade.is_cold marks the classification-determining builds (fix
+            -- tests + support probes) that must not warm: their nonzero set is
+            -- read vertex-dependently (verdict / universe growth), so a warm seed
+            -- picks a different degenerate vertex than cold/ref and corrupts the
+            -- classification. FS_WARM_SUPPORT force-warms the support probes (not
+            -- the fix tests) to reproduce the bug. The heavy stage/final/polish
+            -- builds warm off the immediately preceding solve, exactly as
+            -- production does (it keeps solution.raw_variables across those builds).
+            local is_cold_build = cascade.is_cold(b)
+            -- Tie-break heavy builds only (classification keeps EPS clean).
+            problem_generator.set_tie_break(is_cold_build and 0 or TIE)
+            if WARM_ALL then is_cold_build = false end
+            if WARM_SUPPORT and b.cold and not b.fix then is_cold_build = false end
+            if WARM_INDIV and b.fix and #b.fix.priced == 1 then is_cold_build = false end
+            local seed = (not is_cold_build) and prev_any or nil
             local bs, bv, bsteps = solve_cascade(bp, seed)
             solves = solves + 1
             total_steps = total_steps + (bsteps or 0)
             if TRACE_X and bv and bv.x then
                 -- Warm-seed feasibility: relative primal residual ||A·x_seed - b||
-                -- of the PREVIOUS stage/final answer against THIS build's matrix.
+                -- of the ACTUAL seed used (prev_any) against THIS build's matrix.
                 -- Large => the warm point is outside this build's constraints (the
-                -- infeasible-start the reflection explosion looks like).
+                -- infeasible-start the reflection explosion looks like). -1 = cold.
                 local wr = -1
-                if not is_fix then
+                if seed then
                     local A = bp:generate_subject_matrix()
                     local bvec = bp:generate_limit_vector()
-                    local xw = bp:make_primal_variables(stage_seed_trace)
+                    local xw = bp:make_primal_variables(seed)
                     wr = (A * xw - bvec):euclidean_norm() / (1 + bvec:euclidean_norm())
                 end
-                io.stderr:write(string.format("  %-18s steps=%-4d d_base=%.4g d_prev=%.4g warm_resid=%.4g\n",
-                    tostring(ph), bsteps or 0, reldiff(bv.x, x_base), reldiff(bv.x, x_prev), wr))
+                -- The build's stage OBJECTIVE (sum of priced/stage_keys |x|): the
+                -- minimized quantity, UNIQUE at any optimum. Compare cold vs warm
+                -- here: equal objective + different x = pure degeneracy (the verdict
+                -- reads a non-unique vertex); worse warm objective = a warm-start
+                -- convergence failure (the deeper bug).
+                local obj = -1
+                if b.stage_keys then
+                    obj = 0
+                    for _, k in ipairs(b.stage_keys) do obj = obj + math.abs(bv.x[k] or 0) end
+                end
+                io.stderr:write(string.format("  %-18s%s steps=%-4d obj=%.8g d_base=%.4g d_prev=%.4g warm_resid=%.4g\n",
+                    tostring(ph), is_cold_build and " COLD" or "    ", bsteps or 0, obj,
+                    reldiff(bv.x, x_base), reldiff(bv.x, x_prev), wr))
                 x_prev = bv.x
-                if not is_fix then stage_seed_trace = bv end
             end
-            if WARM and not is_fix and bs == "finished" and bv then prev_stage = bv end
+            -- The next build warms off this result (production keeps it in
+            -- solution.raw_variables); a cold build then nulls it before solving.
+            if WARM and bs == "finished" and bv then prev_any = bv end
             cascade.advance(cc, bp, bv, bs)
             if cc.phase == "restore" then
                 local rp = build_cascade(constraints, lines, cc.build)

@@ -155,12 +155,40 @@ function M:add_subject_term(primal_variable, dual_variable, coefficient)
     self.subject_terms[primal_variable][dual_variable] = t + coefficient
 end
 
+-- Tie-break: a tiny DISTINCT per-variable cost added to every objective so the
+-- LP optimum is a unique point instead of a degenerate face. On a degenerate
+-- face the IPM's stopping vertex depends on the starting point (cold Mehrotra vs
+-- a warm seed) AND non-monotonically on the tolerance, so the cascade's vertex-
+-- reading verdicts drift. A distinct perturbation collapses the face to one
+-- point both starts converge to. 0 = off (default; research-set via set_tie_break).
+local tie_break = 0
+---@param x number
+function M.set_tie_break(x) tie_break = x or 0 end
+
+-- Deterministic hash of a variable key to [0,1): MP-safe (no RNG, no wall clock)
+-- and portable across Lua 5.2 / LuaJIT / the engine (no bitwise ops). This hashes
+-- the WHOLE opaque key, not a sliced prefix -- it reads no semantics out of the
+-- string, so it is not the key-parsing the var_key contract forbids.
+local function key_hash(s)
+    local h = 0
+    for i = 1, #s do h = (h * 131 + s:byte(i)) % 1000003 end
+    return h / 1000003
+end
+
 ---Make a vector of the coefficient of the primal problem.
 ---@return CsrMatrix
 function M:generate_cost_vector()
     local ret = {}
-    for _, v in pairs(self.primals) do
-        ret[v.index] = v.cost
+    if tie_break ~= 0 then
+        for _, v in pairs(self.primals) do
+            -- Slacks carry no objective; perturbing them would bias the
+            -- constraint balance, so only the genuine objective variables.
+            ret[v.index] = v.cost + (v.kind ~= "slack" and tie_break * key_hash(v.key) or 0)
+        end
+    else
+        for _, v in pairs(self.primals) do
+            ret[v.index] = v.cost
+        end
     end
     return csr_matrix.with_vector(ret, self.primal_length)
 end
