@@ -216,6 +216,12 @@ end
 function M.dfs_lower(start_element)
     local element_stack = { start_element }
     local index_stack = { 0 }
+    -- Cache each node's children array. LuaGuiElement.children allocates a fresh
+    -- array on every read, so re-reading it once per traversal step (as a naive
+    -- version does) makes visiting a node with C children O(C^2) -- a multi-second
+    -- stall for a wide table (e.g. a recipe picker with thousands of slots). Fetch
+    -- it once when the node is pushed and reuse it; traversal is then O(node count).
+    local children_stack = { start_element.children }
 
     local function it()
         local tail = #element_stack
@@ -224,7 +230,7 @@ function M.dfs_lower(start_element)
         end
 
         local current = element_stack[tail]
-        local children = current.children
+        local children = children_stack[tail]
 
         local index = index_stack[tail]
         index_stack[tail] = index + 1
@@ -232,12 +238,15 @@ function M.dfs_lower(start_element)
         if index == 0 then
             return current
         elseif index <= #children then
-            table.insert(element_stack, children[index])
+            local child = children[index]
+            table.insert(element_stack, child)
             table.insert(index_stack, 0)
+            table.insert(children_stack, child.children)
             return it()
         else
             table.remove(element_stack)
             table.remove(index_stack)
+            table.remove(children_stack)
             return it()
         end
     end
