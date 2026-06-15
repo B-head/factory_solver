@@ -162,6 +162,37 @@ local function has_nan(vector)
     return false
 end
 
+---Per-variable least-norm magnitude estimate: |x̃| where x̃ = Aᵀ(A·Aᵀ)⁻¹b is the
+---minimum-norm solution of A·x = b (the same seed mehrotra_start uses). Its
+---magnitude reflects coefficient-driven amplification (a small input cap fanning
+---through a small coefficient into a large internal throughput) and is
+---OBJECTIVE-INDEPENDENT -- it depends only on A and b, not on the cost vector or
+---which degenerate vertex the solve lands on -- so it is a deterministic,
+---vertex-stable per-column scale. Returns nil if A·Aᵀ is not factorable (A not
+---full row rank) or the result is non-finite, so the caller falls back to a flat
+---tie-break. Research hook for tie-break magnitude normalization (C-2
+---equilibration); NOT on the solve path.
+---@param problem Problem
+---@return table<string, number>? #key -> |x̃_key|, or nil when unavailable
+function M.least_norm_magnitude(problem)
+    local A = problem:generate_subject_matrix()
+    local AT = A:T()
+    local b = problem:generate_limit_vector()
+    local ok, L, D = pcall(csr_matrix.cholesky_decomposition, A * AT)
+    if not ok or not L or not D then return nil end
+    local LD = L * D
+    local LT = L:T()
+    local z = csr_matrix.backward_substitution(LT, csr_matrix.forward_substitution(LD, b))
+    local x_tilde = csr_matrix.to_list(AT * z)
+    local map = {}
+    for key, p in pairs(problem.primals) do
+        local v = x_tilde[p.index] or 0
+        if v ~= v or v == math.huge or v == -math.huge then return nil end
+        map[key] = v < 0 and -v or v
+    end
+    return map
+end
+
 ---Solve linear programming problems.
 ---Feasibility-budgeted greedy snap: the safe fallback path for certify_zeros.
 ---Snaps candidate zeros to 0 in ascending feasibility impact (x_i²·‖col_i‖²),

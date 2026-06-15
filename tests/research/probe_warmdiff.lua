@@ -42,6 +42,25 @@ local SUBST = (os.getenv("FS_SUBST") or "off"):lower() == "on"
 -- build (degenerate or not) to the unique analytic center, making the solution
 -- initial-point invariant without colding anything.
 local WARMALL = (os.getenv("FS_WARMALL") or "off"):lower() == "on"
+-- FS_TIESCALE=on enables C-2 magnitude normalization: the heavy-build tie-break
+-- is divided per variable by an estimate of |x_k*| taken from the baseline ship
+-- solve, so a single (tier-safe, small) FS_TIE breaks both big and small
+-- degenerate ties uniformly. The scale map comes from the baseline, which is
+-- solved cold in BOTH the cold and warm runs, so the map is identical between
+-- them -- isolating the warm-seed effect. FS_TIEFLOOR caps the division.
+-- FS_TIESCALE: off=flat | on=baseline-solution magnitude | struct=per-build
+-- least-norm (lp.least_norm_magnitude) structural magnitude. "struct" is the
+-- principled source: objective-independent, vertex-stable, and captures the
+-- amplification of bridges the baseline optimum leaves at zero.
+local TIESCALE = (os.getenv("FS_TIESCALE") or "off"):lower()
+local TIEFLOOR = tonumber(os.getenv("FS_TIEFLOOR") or "") or 1e-3
+-- FS_TIE_KINDS: comma-separated PrimalKinds to restrict the tie-break to (e.g.
+-- "recipe,bridge"); empty/unset = every non-slack.
+local TIE_KINDS = nil
+do local s = os.getenv("FS_TIE_KINDS")
+    if s and s ~= "" then TIE_KINDS = {}; for k in s:gmatch("[^,]+") do TIE_KINDS[k] = true end end
+end
+problem_generator.set_tie_kinds(TIE_KINDS)
 
 local function solve(p, warm) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }, warm) end
 local function budget(opt) return opt * (1 + BUDGET_REL) + BUDGET_ABS end
@@ -88,10 +107,19 @@ end
 -- the rest warm off the immediately preceding solve). Returns the final x.
 local function run_cascade(constraints, lines, warm)
     problem_generator.set_tie_break(TIE) -- baseline + rescue are heavy builds
+    problem_generator.set_tie_scale(nil) -- baseline/rescue flat: they ARE the scale source
     local prob = build_ship(constraints, lines, nil)
     if not prob then return nil end
     local s, v = solve(prob)
     if s ~= "finished" then return nil end
+    -- C-2: per-variable magnitude estimate from the baseline solution. Cold in
+    -- both runs, so identical across them. Used to normalize the heavy-build
+    -- tie-break leverage (set below per build); nil keys fall back to flat.
+    local scale_map = nil
+    if TIESCALE == "on" then
+        scale_map = {}
+        for k, val in pairs(v.x) do scale_map[k] = val end
+    end
     local p, x, sl, rescue_budget = rescue_target(constraints, lines, prob, v.x, v.s)
     local raw = { x = x, s = sl }
     local cc = cascade.begin(p, raw, lines, rescue_budget)
@@ -108,7 +136,12 @@ local function run_cascade(constraints, lines, warm)
             local cold_this = cascade.is_cold(b) and not WARMALL
             -- Tie-break the heavy builds only; classification builds keep their
             -- EPS regularizer clean (and are cold in both runs anyway).
-            problem_generator.set_tie_break(cascade.is_cold(b) and 0 or TIE)
+            local heavy = not cascade.is_cold(b)
+            problem_generator.set_tie_break(heavy and TIE or 0)
+            local smap = nil
+            if heavy and TIESCALE == "struct" then smap = lp.least_norm_magnitude(bp)
+            elseif heavy and TIESCALE == "on" then smap = scale_map end
+            problem_generator.set_tie_scale(smap, TIEFLOOR)
             local seed = (warm and not cold_this) and prev_any or nil
             local bs, bv = solve_cascade(bp, seed)
             if warm and bs == "finished" and bv then prev_any = bv end

@@ -165,6 +165,31 @@ local tie_break = 0
 ---@param x number
 function M.set_tie_break(x) tie_break = x or 0 end
 
+-- Research hook (C-2 magnitude normalization): an optional per-variable scale
+-- map. When set, the tie-break on variable k is divided by max(|scale[k]|,
+-- floor), so each variable's tie-break OBJECTIVE contribution (delta_k * x_k) is
+-- ~uniform instead of being dominated by the largest-magnitude variables. The
+-- motivation: the flat tie-break's leverage scales with x, so a single tau that
+-- breaks a 1e4-magnitude degenerate tie overrides the cost tiers, while a tau
+-- small enough to stay tier-safe cannot break the same tie. Normalizing by an
+-- estimate of |x_k*| decouples leverage from magnitude. nil = flat (default).
+-- Keys absent from the map are left flat (no division). Floor guards against
+-- inflating the tie-break on near-zero estimates.
+local tie_scale = nil ---@type table<string, number>?
+local tie_floor = 1e-3
+---@param map table<string, number>?
+---@param floor number?
+function M.set_tie_scale(map, floor) tie_scale = map; if floor then tie_floor = floor end end
+
+-- Research hook: restrict the tie-break to a set of PrimalKinds. The escape
+-- variables (initial_source / shortage_source / elastic / *_sink) carry the LP's
+-- cost tiers, so perturbing them shifts the tier optimum; the genuine degenerate
+-- freedom is in the flow variables (recipe / bridge). nil = every non-slack (the
+-- original behaviour).
+local tie_kinds = nil ---@type table<string, boolean>?
+---@param set table<string, boolean>?
+function M.set_tie_kinds(set) tie_kinds = set end
+
 -- Deterministic hash of a variable key to [0,1): MP-safe (no RNG, no wall clock)
 -- and portable across Lua 5.2 / LuaJIT / the engine (no bitwise ops). This hashes
 -- the WHOLE opaque key, not a sliced prefix -- it reads no semantics out of the
@@ -180,10 +205,23 @@ end
 function M:generate_cost_vector()
     local ret = {}
     if tie_break ~= 0 then
+        local scale, floor = tie_scale, tie_floor
         for _, v in pairs(self.primals) do
             -- Slacks carry no objective; perturbing them would bias the
             -- constraint balance, so only the genuine objective variables.
-            ret[v.index] = v.cost + (v.kind ~= "slack" and tie_break * key_hash(v.key) or 0)
+            local jit = 0
+            if v.kind ~= "slack" and (not tie_kinds or tie_kinds[v.kind]) then
+                jit = tie_break * key_hash(v.key)
+                if scale then
+                    local s = scale[v.key]
+                    if s then
+                        local a = s < 0 and -s or s
+                        if a < floor then a = floor end
+                        jit = jit / a
+                    end
+                end
+            end
+            ret[v.index] = v.cost + jit
         end
     else
         for _, v in pairs(self.primals) do

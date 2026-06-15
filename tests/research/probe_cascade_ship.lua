@@ -45,6 +45,27 @@ local problem_generator = require "solver/problem_generator"
 -- check whether collapsing the degenerate face to a unique vertex preserves the
 -- reference 5-tier grading (it should: the perturbation is << the recipe cost 1).
 local TIE = tonumber(os.getenv("FS_TIE") or "") or 0
+-- FS_TIESCALE=on enables C-2 magnitude normalization of the heavy-build tie-break
+-- (solver/problem_generator.set_tie_scale): each variable's tie-break is divided
+-- by an estimate of |x_k*| from the baseline ship solve, so a single small
+-- (tier-safe) FS_TIE breaks both big and small degenerate ties uniformly instead
+-- of the flat tie-break's leverage growing with magnitude. This driver GRADES the
+-- result against the reference 5-tier optimum -- the decisive test of whether the
+-- normalization keeps the tie-break below the cost tiers (vs the flat 1e-2 that
+-- perturbs the Vp/target escapes). FS_TIEFLOOR caps the division.
+-- off=flat | on=baseline-solution magnitude | struct=per-build least-norm
+-- (lp.least_norm_magnitude) structural magnitude (objective-independent,
+-- vertex-stable, captures amplification bridges the optimum leaves at zero).
+local TIESCALE = (os.getenv("FS_TIESCALE") or "off"):lower()
+local TIEFLOOR = tonumber(os.getenv("FS_TIEFLOOR") or "") or 1e-3
+-- FS_TIE_KINDS: comma-separated PrimalKinds to restrict the tie-break to (e.g.
+-- "recipe,bridge" to keep it off the tier-carrying source/sink/elastic escapes).
+-- Empty/unset = every non-slack variable (the original behaviour).
+local TIE_KINDS = nil
+do local s = os.getenv("FS_TIE_KINDS")
+    if s and s ~= "" then TIE_KINDS = {}; for k in s:gmatch("[^,]+") do TIE_KINDS[k] = true end end
+end
+problem_generator.set_tie_kinds(TIE_KINDS)
 
 -- FS_SUBST=on folds the cascade STAGE / lock / fix-test / final builds through
 -- proportional row reduction before the IPM solves them (off = the shipped
@@ -177,12 +198,25 @@ end
 -- = baseline + cascade-build IPM iterations (rescue solves excluded: they are
 -- cold in both arms, so the cold-vs-warm delta isolates the cascade builds).
 local function solve_via_cascade(constraints, lines)
-    problem_generator.set_tie_break(TIE) -- baseline + rescue are heavy builds
+    -- Baseline + rescue stay tie-break-FREE: the baseline is only a seed (the
+    -- cascade refines it) and the target-only rescue is a MEASUREMENT build whose
+    -- 2^-20 target_rescue_epsilon a >=1e-3 tie-break would swamp (corrupting the
+    -- measured tmin, exactly as it swamps a fix-test's EPS). The tie-break is
+    -- applied only to the adopted heavy builds (stage/final/polish) in the loop.
+    problem_generator.set_tie_break(0)
+    problem_generator.set_tie_scale(nil)
     local prob = build_ship(constraints, lines, nil)
     if not prob then return nil, "build-error", nil, 0, 0 end
     local s, v, steps0 = solve(prob)
     if s ~= "finished" then return prob, s, nil, 1, steps0 end
     local solves, total_steps = 1, steps0
+    -- C-2: per-variable magnitude estimate from the baseline (cold) solution,
+    -- used to normalize the heavy-build tie-break leverage (applied per build).
+    local scale_map = nil
+    if TIESCALE == "on" then
+        scale_map = {}
+        for k, val in pairs(v.x) do scale_map[k] = val end
+    end
 
     local p, x, sl, rescue_budget, rsolves = rescue_target(constraints, lines, prob, v.x, v.s)
     solves = solves + rsolves
@@ -220,7 +254,12 @@ local function solve_via_cascade(constraints, lines)
             -- production does (it keeps solution.raw_variables across those builds).
             local is_cold_build = cascade.is_cold(b)
             -- Tie-break heavy builds only (classification keeps EPS clean).
-            problem_generator.set_tie_break(is_cold_build and 0 or TIE)
+            local heavy = not is_cold_build
+            problem_generator.set_tie_break(heavy and TIE or 0)
+            local smap = nil
+            if heavy and TIESCALE == "struct" then smap = lp.least_norm_magnitude(bp)
+            elseif heavy and TIESCALE == "on" then smap = scale_map end
+            problem_generator.set_tie_scale(smap, TIEFLOOR)
             if WARM_ALL then is_cold_build = false end
             if WARM_SUPPORT and b.cold and not b.fix then is_cold_build = false end
             if WARM_INDIV and b.fix and #b.fix.priced == 1 then is_cold_build = false end
