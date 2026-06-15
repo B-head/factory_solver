@@ -414,9 +414,7 @@ function M.cascade_step(solution, lines)
         -- begin always leaves a build wanted (the pipeline ends with the
         -- polish), but guard anyway.
         if cc.build then
-            solution.cc_restart = true
-            solution.solver_state = "ready"
-            solution.solver_iteration = nil
+            M.arm_cascade_build(solution, cc.build)
         end
         return
     end
@@ -455,15 +453,34 @@ function M.cascade_step(solution, lines)
     end
 
     if cc.build then
-        solution.cc_restart = true
-        solution.solver_state = "ready"
-        solution.solver_iteration = nil
+        M.arm_cascade_build(solution, cc.build)
     else
         -- phase == "done": the held solution IS the adopted answer (its
         -- filter_result already ran this tick). Fold to the sentinel so idle
         -- ticks do not re-enter.
         solution.cascade = settled()
     end
+end
+
+---Re-arm the per-tick pump for the next cascade build: flip solver_state back
+---to "ready" with cc_restart so the rebuild keeps the in-flight cascade state.
+---A classification-determining build (cascade.is_cold -- fix-test verdict or
+---support-probe universe growth) is solved COLD: drop the warm seed
+---(solution.raw_variables) so the IPM restarts from the cold Mehrotra central
+---path the reference solves on. Warming these reads a different degenerate
+---vertex and corrupts the classification (the verdict drift); the heavy stage /
+---final / polish builds read only optimal values and keep the warm seed for the
+---incremental-solve speedup. solution.raw_variables is only the warm SEED here
+---(the cascade's adopted answer lives in cc.adopted_raw), so dropping it is
+---safe; unfold(nil) / filter_result(nil) both no-op until the cold solve fills
+---it back in.
+---@param solution Solution
+---@param build CascadeBuild
+function M.arm_cascade_build(solution, build)
+    solution.cc_restart = true
+    solution.solver_state = "ready"
+    solution.solver_iteration = nil
+    if cascade.is_cold(build) then solution.raw_variables = nil end
 end
 
 ---Advance the observe-price fixed point one step after a baseline / observe /

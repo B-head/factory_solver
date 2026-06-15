@@ -94,6 +94,23 @@ local EPS_RECIPE = 2 ^ -20 -- stage face regularizer (the reference's). NOT a ti
 ---@return number
 function M.budget(opt) return opt * (1 + M.BUDGET_REL) + M.BUDGET_ABS end
 
+---Whether a build MUST be solved cold (no warm seed). A classification-
+---determining build reads which variables are nonzero (a fix-test's own-escape
+---residual for the verdict; a support probe's flow for the universe growth) --
+---a vertex-dependent read on a degenerate face. A warm seed picks a different
+---optimal vertex than the cold Mehrotra central path that the reference solves
+---on, so warming these builds corrupts the classification (and does so
+---non-deterministically). Measured: warming every cascade build off the previous
+---solve drifts SA30 to tie 304 (45 verdict diffs vs the cold 349, far past the
+---4-row self-diff floor) and runs 4.3x more IPM iterations; colding the
+---classification builds restores the cold/reference verdicts within noise. The
+---heavy stage / final / polish builds read only optimal VALUES (unique), so they
+---may warm. The driver (pre_solve's pump, the probe) honours this; cascade.lua
+---only declares it.
+---@param build CascadeBuild
+---@return boolean
+function M.is_cold(build) return build.fix ~= nil or build.cold == true end
+
 --------------------------------------------------------------------------------
 -- Small helpers (deterministic by construction).
 --------------------------------------------------------------------------------
@@ -447,7 +464,9 @@ vp_fixpoint_done = function(state)
             if state.vp_members[e.material] then member_keys[#member_keys + 1] = e.key end
         end
         if #member_keys > 0 then
-            return set_build(state, "vp_support", ship_build(state, { stage_keys = member_keys }))
+            -- cold: this probe's nonzero set grows the classification universe
+            -- (a vertex-dependent read); a warm seed would drift the universe.
+            return set_build(state, "vp_support", ship_build(state, { stage_keys = member_keys, cold = true }))
         end
     end
     vp_price(state)
@@ -556,6 +575,7 @@ vc_after_individual = function(state)
             return set_build(state, "vc_support", ship_build(state, {
                 stage_keys = member_keys,
                 locks = current_locks(state, true, true, false),
+                cold = true, -- universe-growth probe: vertex-dependent, must not warm
             }))
         end
     end

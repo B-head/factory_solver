@@ -328,6 +328,7 @@ __factory_solver__storage = {}
 ---@field locks CascadeLock[]?  Budget-lock rows to add.
 ---@field target_budget number?  The target elastics' summed cap.
 ---@field hatch_exclude table<string, true>?  Materials whose import hatch is structurally omitted.
+---@field cold boolean?  A classification-determining build (the support probe) that must NOT warm-start: its nonzero set is read vertex-dependently (universe growth), so a warm seed picks a different degenerate vertex than cold/ref and corrupts the classification. Fix-test builds (`fix ~= nil`) are cold for the same reason; M.is_cold folds both.
 
 ---@class CascadeFixTest
 ---@field priced_kind string  The escape kind that must stay at zero for membership ("shortage_source" | "surplus_sink").
