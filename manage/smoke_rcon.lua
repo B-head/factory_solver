@@ -45,16 +45,22 @@
 
 local flib_table = require "__flib__/table"
 local fs_log = require "fs_log"
+local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local fp_codec = require "manage/factoryplanner_codec"
 local helmod_codec = require "manage/helmod_codec"
 local yafc_codec = require "manage/yafc_codec"
 local preset = require "manage/preset"
+local recipe_filter = require "manage/recipe_filter"
 local relation = require "manage/relation"
 local report = require "manage/report"
 local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
 local tn = require "manage/typed_name"
+-- ui/common is reached for the picker-prep profiler's faithful replica of
+-- on_make_choose_table (create_decorated_sprite_button et al.). require runs at
+-- load time only, so it cannot live inside the profiler function.
+local common = require "ui/common"
 
 local log = fs_log.for_module("smoke_rcon")
 
@@ -2044,6 +2050,233 @@ function M.check_offshore_pump_filter()
     return "OK"
 end
 
+---RCON entry point: headless profile of the recipe-picker's pure-Lua candidate
+---filter (ui/production_line_adder's on_make_choose_table prep delegates to
+---manage/recipe_filter.pickable_recipe_names). This is the GUI-free half of a
+---picker open -- the other half, fs_util.add_gui -> LuaGuiElement.add, is engine
+---C++ and only reachable with a connected player, so it is deliberately out of
+---scope here. The point is to triage where a picker's per-open cost lives: if
+---this filter is cheap on a heavy mod set, the cost is engine-side (a real-player
+---harness), not algorithmic.
+---
+---Builds the force relation cache, then picks the WORST-CASE reference for `kind`:
+---the fluid whose recipe_for_<kind> candidate list is longest. A fluid reference
+---carrying a temperature is what drives the expensive recipe_temperature_compatible
+---path (item / virtual_material references only de-dup), so this is the heaviest
+---realistic filter call. Times pickable_recipe_names over `reps` repetitions and
+---divides by reps. The duration is emitted via rcon.print(profiler) -- the only
+---form that resolves to a "Duration: Xms" string (tostring does not) -- and the
+---return value carries the reference / candidate / kept metadata. Force-scoped,
+---no player. Call from console.ps1 against a heavy mod set (e.g. pyanodon) for
+---meaningful numbers; on a small set the candidate lists are short and the timing
+---is dominated by loop overhead.
+---@param kind string "product" | "ingredient" | "fuel" | "spent"
+---@param reps integer?
+---@return string
+function M.profile_picker_filter(kind, reps)
+    reps = reps or 50
+    local field = ({
+        product = "recipe_for_product",
+        spent = "recipe_for_burnt_result",
+        ingredient = "recipe_for_ingredient",
+        fuel = "recipe_for_fuel",
+    })[kind]
+    if not field then
+        return "ERROR: unknown kind '" .. tostring(kind) .. "' (want product/ingredient/fuel/spent)"
+    end
+
+    local ok, result = pcall(function()
+        local rel = relation.create_relation_to_recipes(FORCE_INDEX)
+
+        -- Worst-case fluid reference: the fluid with the longest candidate list
+        -- for this kind that the prototype set still defines (rel can outlive a
+        -- removed prototype across reloads; pickable would just skip it, but the
+        -- reference TypedName must resolve to a real fluid for the temperatures).
+        -- Candidate list for a fluid+kind, mirroring on_make_choose_table: the
+        -- fuel picker's consumer list is built lazily via expand_fuel_consumers
+        -- (the shipped relation leaves recipe_for_fuel empty), so the fuel timing
+        -- legitimately includes that expansion -- it is paid on every fuel picker
+        -- open. The other kinds read the pre-populated stored list directly.
+        local function candidates_for(info)
+            if kind == "fuel" then
+                return relation.expand_fuel_consumers(rel, info)
+            end
+            return info[field]
+        end
+
+        local best_name, best_n = nil, -1
+        for name, info in pairs(rel.fluid) do
+            if prototypes.fluid[name] then
+                local list = candidates_for(info)
+                if list and #list > best_n then
+                    best_name, best_n = name, #list
+                end
+            end
+        end
+        if not best_name then
+            return "SKIP: no fluid has any candidates for kind '" .. kind .. "' on this mod set"
+        end
+
+        local fluid = prototypes.fluid[best_name]
+        local reference = tn.create_typed_name("fluid", best_name, "normal",
+            fluid.default_temperature, fluid.max_temperature)
+
+        -- Warm steady state once (the function builds a fresh per-call
+        -- category_fuel_cache, so this only settles allocator / prototype reads).
+        local kept = recipe_filter.pickable_recipe_names(reference, candidates_for(rel.fluid[best_name]), kind)
+
+        local p = helpers.create_profiler()
+        for _ = 1, reps do
+            local list = candidates_for(rel.fluid[best_name])
+            recipe_filter.pickable_recipe_names(reference, list, kind)
+        end
+        p.stop()
+        p.divide(reps)
+
+        local note = (kind == "fuel") and " (incl. expand_fuel_consumers)" or ""
+        rcon.print("profile_picker_filter[" .. kind .. "] fluid=" .. best_name
+            .. " candidates=" .. best_n .. " kept=" .. #kept .. " reps=" .. reps .. " per-call" .. note .. ":")
+        rcon.print(p)
+        return "OK: profiled " .. kind .. " on fluid '" .. best_name .. "' (candidates="
+            .. best_n .. ", kept=" .. #kept .. ", reps=" .. reps .. ")"
+    end)
+    if not ok then
+        return "ERROR: profile_picker_filter raised: " .. tostring(result)
+    end
+    return result
+end
+
+---RCON entry point: headless profile of the recipe-picker's ENTIRE pure-Lua prep
+----- everything ui/production_line_adder.on_make_choose_table does before the
+---engine-side fs_util.add_gui (elem.clear + LuaGuiElement.add are excluded; they
+---need a connected player and are unmeasurable headless). This is the companion
+---to profile_picker_filter: that times the candidate filter alone, this times the
+---filter PLUS the heavier downstream work the picker pays on every open -- the
+---map to prototypes, the group/subgroup bucketing and prototype sorting, and the
+---per-candidate decorated-sprite-button def construction (common.create_decorated_-
+---sprite_button, which builds nested def tables but touches no GUI element). The
+---gap between the two numbers is the def-building loop's cost.
+---
+---IMPORTANT: this is a faithful REPLICA of on_make_choose_table's prep, not a call
+---into it (the handler is GUI-coupled: event.element, dialog tags, elem.clear).
+---Keep it in sync with that handler. Worst-case knobs for an upper bound: needle=""
+---(no name filter -> every candidate survives to a button) and a player_data with
+---both visibility flags on (no candidate hidden out). Force-scoped, no player.
+---@param kind string "product" | "ingredient" | "fuel" | "spent"
+---@param reps integer?
+---@return string
+function M.profile_picker_prep(kind, reps)
+    reps = reps or 20
+    local field = ({
+        product = "recipe_for_product",
+        spent = "recipe_for_burnt_result",
+        ingredient = "recipe_for_ingredient",
+        fuel = "recipe_for_fuel",
+    })[kind]
+    if not field then
+        return "ERROR: unknown kind '" .. tostring(kind) .. "' (want product/ingredient/fuel/spent)"
+    end
+
+    local ok, result = pcall(function()
+        local rel = relation.create_relation_to_recipes(FORCE_INDEX)
+
+        -- Upper-bound knobs: show everything, no name filter (also headless-safe --
+        -- the flib dictionaries are untranslated with no player, so the real
+        -- handler degrades to needle="" / nil dicts here anyway).
+        local player_data = { hidden_craft_visible = true, unresearched_craft_visible = true }
+        local needle = ""
+
+        local function candidates_for(info)
+            if kind == "fuel" then
+                return relation.expand_fuel_consumers(rel, info)
+            end
+            return info[field]
+        end
+
+        local best_name, best_n = nil, -1
+        for name, info in pairs(rel.fluid) do
+            if prototypes.fluid[name] then
+                local list = candidates_for(info)
+                if list and #list > best_n then
+                    best_name, best_n = name, #list
+                end
+            end
+        end
+        if not best_name then
+            return "SKIP: no fluid has any candidates for kind '" .. kind .. "' on this mod set"
+        end
+
+        local fluid = prototypes.fluid[best_name]
+        local reference = tn.create_typed_name("fluid", best_name, "normal",
+            fluid.default_temperature, fluid.max_temperature)
+
+        -- Replica of on_make_choose_table's prep, sans GUI. Returns the button count
+        -- so the result is observable and the def-building work cannot be optimised
+        -- away. Mirror any change to the handler here.
+        local function build_prep()
+            local recipe_names = recipe_filter.pickable_recipe_names(
+                reference, candidates_for(rel.fluid[best_name]), kind)
+            local used_recipes = flib_table.map(recipe_names, function(name)
+                return assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
+            end)
+            local grouped = fs_util.group_by(used_recipes, function(value)
+                if value.group then return value.group.name else return value.group_name end
+            end)
+            local groups = fs_util.sort_prototypes(fs_util.to_list(prototypes.item_group))
+            local buttons = 0
+            for _, group in ipairs(groups) do
+                local group_recipes = grouped[group.name] or {}
+                local subgrouped = fs_util.group_by(group_recipes, function(value)
+                    if value.subgroup then return value.subgroup.name else return value.subgroup_name end
+                end)
+                local subgroups = fs_util.sort_prototypes(fs_util.to_list(group.subgroups))
+                for _, subgroup in ipairs(subgroups) do
+                    local subgroup_recipes = subgrouped[subgroup.name] or {}
+                    local sorted = fs_util.sort_prototypes(fs_util.to_list(subgroup_recipes))
+                    for _, recipe in ipairs(sorted) do
+                        local typed_name = tn.craft_to_typed_name(recipe)
+                        local is_hidden = acc.is_hidden(recipe)
+                        local is_unresearched = acc.is_unresearched(recipe, rel)
+                        if common.craft_visible(is_hidden, is_unresearched, player_data)
+                            and common.name_filter_matches(needle, recipe.name, nil) then
+                            -- handler payload is a stand-in: its content does not
+                            -- affect the def-build cost (it is stored by reference).
+                            local _def = common.create_decorated_sprite_button {
+                                typed_name = typed_name,
+                                is_hidden = is_hidden,
+                                is_unresearched = is_unresearched,
+                                tags = { recipe_typed_name = typed_name, kind = kind },
+                                handler = {},
+                            }
+                            buttons = buttons + 1
+                        end
+                    end
+                end
+            end
+            return buttons
+        end
+
+        local buttons = build_prep() -- warm
+        local p = helpers.create_profiler()
+        for _ = 1, reps do
+            build_prep()
+        end
+        p.stop()
+        p.divide(reps)
+
+        local note = (kind == "fuel") and " (incl. expand_fuel_consumers)" or ""
+        rcon.print("profile_picker_prep[" .. kind .. "] fluid=" .. best_name
+            .. " candidates=" .. best_n .. " buttons=" .. buttons .. " reps=" .. reps .. " per-open" .. note .. ":")
+        rcon.print(p)
+        return "OK: prep " .. kind .. " on fluid '" .. best_name .. "' (candidates="
+            .. best_n .. ", buttons=" .. buttons .. ", reps=" .. reps .. ")"
+    end)
+    if not ok then
+        return "ERROR: profile_picker_prep raised: " .. tostring(result)
+    end
+    return result
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -2066,6 +2299,8 @@ function M.register()
         check_required_fluid_mining = M.check_required_fluid_mining,
         check_quality_module_slots = M.check_quality_module_slots,
         check_offshore_pump_filter = M.check_offshore_pump_filter,
+        profile_picker_filter = M.profile_picker_filter,
+        profile_picker_prep = M.profile_picker_prep,
     })
 end
 
