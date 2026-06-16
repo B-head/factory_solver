@@ -195,4 +195,37 @@ function M.pickable_recipe_names(reference, recipe_names, kind)
     return out
 end
 
+---True if at least one recipe in `recipe_names` survives the same drop / de-dup /
+---temperature filter as `pickable_recipe_names`. Short-circuits on the first kept
+---candidate, so a visibility check ("is this section non-empty?") need not build
+---the whole deduped list -- which, for a common burnt_result like ash (tens of
+---thousands of raw entries), is the difference between an O(1)-ish probe and a
+---multi-millisecond pass. Keep in sync with pickable_recipe_names.
+---@param reference TypedName
+---@param recipe_names string[]
+---@param kind string
+---@return boolean
+function M.has_pickable_recipe(reference, recipe_names, kind)
+    local filter_temp = reference.type == "fluid" and reference.minimum_temperature ~= nil
+    local seen = {}
+    local category_fuel_cache = {} ---@type table<string, boolean>
+    for _, name in ipairs(recipe_names) do
+        if not seen[name] then
+            seen[name] = true
+            local recipe = storage.virtuals.recipe[name] or prototypes.recipe[name]
+            local keep = recipe ~= nil
+            if keep and recipe.object_name ~= nil and recipe.parameter then
+                keep = false
+            end
+            if keep and filter_temp then
+                keep = recipe_temperature_compatible(recipe, reference, kind, category_fuel_cache)
+            end
+            if keep then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 return M

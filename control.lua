@@ -11,6 +11,7 @@ local dictionary = require "manage/dictionary"
 local common = require "ui/common"
 local main_window = require "ui/main_window"
 local build_assistant = require "ui/build_assistant"
+local picker_build = require "ui/picker_build"
 
 -- factoriomod-debug injects __DebugAdapter as a truthy global only when the
 -- VM is running under the debugger. The injection happens before any mod
@@ -276,6 +277,12 @@ script.on_event(defines.events.on_tick, function(event)
     -- independent of the solver (the solve path never reads relation_to_recipes), so
     -- both run every tick.
     save.advance_relation_builds()
+
+    -- Advance the tick-split recipe-picker build (ui/picker_build.lua) -- a large
+    -- picker would otherwise build thousands of buttons in one tick, which under
+    -- lockstep freezes every client. One section advances per tick; PLAN may read
+    -- the relation cache, so run it after advance_relation_builds.
+    picker_build.advance_all()
 
     local force_data, solution = pre_solve.find_the_need_for_solve()
     if force_data and solution then

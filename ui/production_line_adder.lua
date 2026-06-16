@@ -7,6 +7,7 @@ local save = require "manage/save"
 local tn = require "manage/typed_name"
 local relation = require "manage/relation"
 local common = require "ui/common"
+local picker_build = require "ui/picker_build"
 
 local handlers = {}
 
@@ -72,149 +73,38 @@ function handlers.on_init_choose_visiblity(event)
         assert()
     end
     elem.visible = allowed
-        and 0 < #recipe_filter.pickable_recipe_names(reference_typed_name, recipe_names, kind)
+        and recipe_filter.has_pickable_recipe(reference_typed_name, recipe_names, kind)
 end
 
+---@param event EventDataTrait
+-- The actual build is heavy (a pyanodon spent picker is thousands of buttons) and
+-- runs on every client in lockstep, so it must not happen synchronously here.
+-- Clear the table and arm a tick-split build (ui/picker_build.lua); control.lua's
+-- on_tick fills it in at a bounded budget per tick. Re-firing (filter / craft-
+-- visible change) overwrites the request = cancel + restart. The matching build
+-- spec is registered below (production_line_picker_spec).
 ---@param event EventDataTrait
 function handlers.on_make_choose_table(event)
     local elem = event.element
     local dialog = assert(common.find_root_element(event.player_index, "factory_solver_production_line_adder"))
     local dialog_tags = dialog.tags
 
-    local player_data = save.get_player_data(event.player_index)
     local kind = elem.tags.kind --[[@as string]]
-    local choose_typed_name = dialog_tags.typed_name --[[@as TypedName]]
-    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
-
-    -- Name filter (title-bar textfield). Recipes here are real (prototypes.recipe,
-    -- dictionary "recipe") or virtual (storage.virtuals.recipe, dictionary
-    -- "virtual"); both share the same picker, so look up the display name in the
-    -- right dictionary per entry. The dictionaries are the ones already built for
-    -- the constraint adder. get returns nil until the player's language finishes
-    -- translating, so the filter degrades to name-only meanwhile.
+    local reference = dialog_tags.typed_name --[[@as TypedName]]
     local raw_filter = dialog_tags.filter_text --[[@as string?]] or ""
     local needle = (raw_filter ~= "") and helpers.multilingual_to_lower(raw_filter) or ""
-    local recipe_dict = (needle ~= "") and flib_dictionary.get(event.player_index, "recipe") or nil
-    local virtual_dict = (needle ~= "") and flib_dictionary.get(event.player_index, "virtual") or nil
-
-    local relation_to_recipe
-    if choose_typed_name.type == "item" then
-        relation_to_recipe = relation_to_recipes.item[choose_typed_name.name]
-    elseif choose_typed_name.type == "fluid" then
-        relation_to_recipe = relation_to_recipes.fluid[choose_typed_name.name]
-    elseif choose_typed_name.type == "virtual_material" then
-        relation_to_recipe = relation_to_recipes.virtual_recipe[choose_typed_name.name]
-    else
-        assert()
-    end
-
-    local recipe_names
-    if kind == "product" then
-        recipe_names = relation_to_recipe.recipe_for_product
-    elseif kind == "spent" then
-        recipe_names = relation_to_recipe.recipe_for_burnt_result
-    elseif kind == "ingredient" then
-        recipe_names = relation_to_recipe.recipe_for_ingredient
-    elseif kind == "fuel" then
-        recipe_names = relation.expand_fuel_consumers(relation_to_recipes, relation_to_recipe)
-    else
-        assert()
-    end
-    recipe_names = recipe_filter.pickable_recipe_names(choose_typed_name, recipe_names, kind)
-
-    local used_recipes = flib_table.map(recipe_names, function(name)
-        return assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
-    end) --[=[@as (LuaRecipePrototype | VirtualRecipe)[]]=]
-
-    local grouped = fs_util.group_by(used_recipes, function(value)
-        if value.group then
-            return value.group.name
-        else
-            return value.group_name
-        end
-    end) --[=[@as table<string, (LuaRecipePrototype | VirtualRecipe)[]>]=]
-
-    local groups = fs_util.to_list(prototypes.item_group)
-    groups = fs_util.sort_prototypes(groups)
+    -- table -> scroll-pane -> recipe_for_* frame (the section, used as the build key).
+    local section = elem.parent.parent
 
     elem.clear()
-    for _, group in ipairs(groups) do
-        local group_name = group.name
-
-        local group_recipes = grouped[group_name] or {}
-        local subgrouped = fs_util.group_by(group_recipes, function(value)
-            if value.subgroup then
-                return value.subgroup.name
-            else
-                return value.subgroup_name
-            end
-        end) --[=[@as table<string, (LuaRecipePrototype | VirtualRecipe)[]>]=]
-
-        local subgroups = fs_util.to_list(group.subgroups)
-        subgroups = fs_util.sort_prototypes(subgroups)
-
-        local def_buttons = {}
-        for _, subgroup in ipairs(subgroups) do
-            local subgroup_recipes = subgrouped[subgroup.name] or {}
-            local sorted = fs_util.sort_prototypes(fs_util.to_list(subgroup_recipes))
-            for _, recipe in ipairs(sorted) do
-                local typed_name = tn.craft_to_typed_name(recipe)
-                local is_hidden = acc.is_hidden(recipe)
-                local is_unresearched = acc.is_unresearched(recipe, relation_to_recipes)
-                if not common.craft_visible(is_hidden, is_unresearched, player_data) then
-                    goto inner_continue
-                end
-                -- A real recipe is a LuaRecipePrototype (object_name set); a virtual
-                -- is a plain table. They live in different dictionaries.
-                local dict = (recipe.object_name ~= nil) and recipe_dict or virtual_dict
-                if not common.name_filter_matches(needle, recipe.name, dict and dict[recipe.name] or nil) then
-                    goto inner_continue
-                end
-
-                local def = common.create_decorated_sprite_button {
-                    typed_name = typed_name,
-                    is_hidden = is_hidden,
-                    is_unresearched = is_unresearched,
-                    tags = {
-                        recipe_typed_name = typed_name,
-                        kind = kind
-                    },
-                    handler = {
-                        [defines.events.on_gui_click] = handlers.on_production_line_picker_button_click,
-                    },
-                }
-                flib_table.insert(def_buttons, def)
-                ::inner_continue::
-            end
-        end
-
-        if #def_buttons == 0 then
-            goto outer_continue
-        end
-
-        local def_sprite = {
-            type = "sprite",
-            style = "factory_solver_group_sprite",
-            sprite = "item-group/" .. group_name,
-            resize_to_sprite = false,
-            tooltip = group.localised_name,
-        }
-        fs_util.add_gui(elem, def_sprite)
-
-        local def_table = {
-            type = "frame",
-            style = "factory_solver_recipe_slot_background_frame",
-            {
-                type = "table",
-                style = "filter_slot_table",
-                column_count = 6,
-                children = def_buttons,
-            },
-        }
-        fs_util.add_gui(elem, def_table)
-
-        ::outer_continue::
-    end
+    picker_build.request(event.player_index, section.name, {
+        spec_id = "production_line_adder",
+        kind = kind,
+        reference = reference,
+        needle = needle,
+        dialog_name = "factory_solver_production_line_adder",
+        section_name = section.name,
+    })
 end
 
 ---@param event EventDataTrait
@@ -382,6 +272,162 @@ function handlers.on_name_filter_textfield_changed(event)
     fs_util.dispatch_to_subtree(dialog, "on_filter_text_changed")
 end
 
+-- Tick-split build spec for the recipe picker (driven by ui/picker_build.lua from
+-- control.lua's on_tick). `plan` is the old on_make_choose_table prep, emitting the
+-- ordered recipe-name list instead of building buttons; `make_button` /
+-- `open_group` materialise one chunk per tick.
+picker_build.register_spec {
+    id = "production_line_adder",
+
+    -- Re-find the target choose-table by name. Navigate via recipe_choose_flow
+    -- (found before its section subtrees, so cheap) then the named section frame
+    -- (direct child) then the named table -- never a DFS through the built buttons.
+    find_table = function(player_index, req)
+        local dialog = common.find_root_element(player_index, req.dialog_name)
+        if not dialog then return nil end
+        local flow = fs_util.find_lower(dialog, "recipe_choose_flow")
+        if not flow then return nil end
+        local section = flow[req.section_name]
+        if not section or not section.valid then return nil end
+        return fs_util.find_lower(section, "fs_choose_table")
+    end,
+
+    -- Append a group's icon + an (empty) slot table; return the slot table. The
+    -- choose-table is a 2-column table: [group sprite, slot-table frame] per group.
+    open_group = function(player_index, req, choose_table, group_name)
+        local group = prototypes.item_group[group_name]
+        fs_util.add_gui(choose_table, {
+            type = "sprite",
+            style = "factory_solver_group_sprite",
+            sprite = "item-group/" .. group_name,
+            resize_to_sprite = false,
+            tooltip = group and group.localised_name or nil,
+        })
+        fs_util.add_gui(choose_table, {
+            type = "frame",
+            style = "factory_solver_recipe_slot_background_frame",
+            {
+                type = "table",
+                style = "filter_slot_table",
+                column_count = 6,
+            },
+        })
+        local kids = choose_table.children
+        return kids[#kids].children[1]
+    end,
+
+    -- The current (last-opened) group's slot table = last child's only child. O(1)
+    -- via the children array (no name lookup, no DFS over prior buttons).
+    current_slot = function(player_index, req, choose_table)
+        local kids = choose_table.children
+        return kids[#kids].children[1]
+    end,
+
+    -- The former on_make_choose_table prep, emitting names + group instead of GUI.
+    plan = function(player_index, req)
+        local relation_to_recipes = save.get_relation_to_recipes(player_index)
+        local kind = req.kind
+        local reference = req.reference --[[@as TypedName]]
+
+        local relation_to_recipe
+        if reference.type == "item" then
+            relation_to_recipe = relation_to_recipes.item[reference.name]
+        elseif reference.type == "fluid" then
+            relation_to_recipe = relation_to_recipes.fluid[reference.name]
+        elseif reference.type == "virtual_material" then
+            relation_to_recipe = relation_to_recipes.virtual_recipe[reference.name]
+        else
+            assert()
+        end
+
+        local recipe_names
+        if kind == "product" then
+            recipe_names = relation_to_recipe.recipe_for_product
+        elseif kind == "spent" then
+            recipe_names = relation_to_recipe.recipe_for_burnt_result
+        elseif kind == "ingredient" then
+            recipe_names = relation_to_recipe.recipe_for_ingredient
+        elseif kind == "fuel" then
+            recipe_names = relation.expand_fuel_consumers(relation_to_recipes, relation_to_recipe)
+        else
+            assert()
+        end
+        recipe_names = recipe_filter.pickable_recipe_names(reference, recipe_names, kind)
+
+        local used_recipes = flib_table.map(recipe_names, function(name)
+            return assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
+        end) --[=[@as (LuaRecipePrototype | VirtualRecipe)[]]=]
+
+        local grouped = fs_util.group_by(used_recipes, function(value)
+            if value.group then return value.group.name else return value.group_name end
+        end) --[=[@as table<string, (LuaRecipePrototype | VirtualRecipe)[]>]=]
+
+        local groups = fs_util.sort_prototypes(fs_util.to_list(prototypes.item_group))
+
+        local entries, group_of = {}, {}
+        for _, group in ipairs(groups) do
+            local group_recipes = grouped[group.name] or {}
+            local subgrouped = fs_util.group_by(group_recipes, function(value)
+                if value.subgroup then return value.subgroup.name else return value.subgroup_name end
+            end) --[=[@as table<string, (LuaRecipePrototype | VirtualRecipe)[]>]=]
+            local subgroups = fs_util.sort_prototypes(fs_util.to_list(group.subgroups))
+            for _, subgroup in ipairs(subgroups) do
+                local subgroup_recipes = subgrouped[subgroup.name] or {}
+                local sorted = fs_util.sort_prototypes(fs_util.to_list(subgroup_recipes))
+                -- Emit every pickable recipe in display order; the hidden /
+                -- unresearched / name-filter checks run per-entry in make_button so
+                -- they are spread across ticks too (an all-filtered group then never
+                -- opens an empty slot table -- make_button returns nil there).
+                for _, recipe in ipairs(sorted) do
+                    entries[#entries + 1] = recipe.name
+                    group_of[#group_of + 1] = group.name
+                end
+            end
+        end
+        ---@type PickerBuildPlan
+        return { entries = entries, group_of = group_of }
+    end,
+
+    -- Build one decorated button, or return nil to skip this entry. The hidden /
+    -- unresearched / name-filter checks (the former on_make_choose_table per-recipe
+    -- filter) run here so they are spread across ticks; is_hidden / is_unresearched
+    -- are computed once and used for both the skip decision and the styling. The
+    -- relation cache is stable mid-build (a rebuild closes all GUIs).
+    make_button = function(player_index, req, plan, i)
+        local name = plan.entries[i]
+        local recipe = assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
+        local relation_to_recipes = save.get_relation_to_recipes(player_index)
+        local player_data = save.get_player_data(player_index)
+        local is_hidden = acc.is_hidden(recipe)
+        local is_unresearched = acc.is_unresearched(recipe, relation_to_recipes)
+        if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+            return nil
+        end
+        local needle = req.needle or ""
+        if needle ~= "" then
+            -- real = LuaRecipePrototype (object_name set), virtual = plain table;
+            -- they live in different dictionaries.
+            local dict = flib_dictionary.get(player_index, recipe.object_name ~= nil and "recipe" or "virtual")
+            if not common.name_filter_matches(needle, recipe.name, dict and dict[recipe.name] or nil) then
+                return nil
+            end
+        end
+        local typed_name = tn.craft_to_typed_name(recipe)
+        return common.create_decorated_sprite_button {
+            typed_name = typed_name,
+            is_hidden = is_hidden,
+            is_unresearched = is_unresearched,
+            tags = {
+                recipe_typed_name = typed_name,
+                kind = req.kind,
+            },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_production_line_picker_button_click,
+            },
+        }
+    end,
+}
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -487,6 +533,7 @@ return {
                     },
                     {
                         type = "table",
+                        name = "fs_choose_table",
                         style = "factory_solver_choose_table",
                         column_count = 2,
                         draw_horizontal_lines = true,
@@ -525,6 +572,7 @@ return {
                     },
                     {
                         type = "table",
+                        name = "fs_choose_table",
                         style = "factory_solver_choose_table",
                         column_count = 2,
                         draw_horizontal_lines = true,
@@ -563,6 +611,7 @@ return {
                     },
                     {
                         type = "table",
+                        name = "fs_choose_table",
                         style = "factory_solver_choose_table",
                         column_count = 2,
                         draw_horizontal_lines = true,
@@ -601,6 +650,7 @@ return {
                     },
                     {
                         type = "table",
+                        name = "fs_choose_table",
                         style = "factory_solver_choose_table",
                         column_count = 2,
                         draw_horizontal_lines = true,
