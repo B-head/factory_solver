@@ -15,9 +15,14 @@
 -- owns the generic cursor/budget loop. Callbacks:
 --   plan(player_index, req)            -> PickerBuildPlan { entries, group_of }
 --   find_table(player_index, req)      -> the LuaGuiElement to build into, or nil
---   open_group(pi, req, table, group)  -> appends the group's slot table, returns it
+--   open_group(pi, req, table, group, plan) -> appends the group's slot table, returns it
+--                                         (plan is passed so a spec can read per-group
+--                                         metadata, e.g. a row caption keyed by group)
 --   current_slot(pi, req, table)       -> the current (last) slot table to append to
 --   make_button(pi, req, plan, i)      -> a GuiElemDef for entry i, or nil to skip it
+--   on_done(pi, req, table)            -> OPTIONAL; called once when the build finishes
+--                                         (including an empty plan), e.g. to hide a
+--                                         section whose build placed no rows
 --   close_group(pi, req, table)        -> OPTIONAL; called when the current group ends
 --                                         (group change or build completion). Used by
 --                                         single-table pickers (constraint_adder) to pad
@@ -75,7 +80,13 @@ local function advance_one(player_index, state, budget)
         local t = spec.find_table(player_index, state.req)
         if not t or not t.valid then return true end
         state.plan = spec.plan(player_index, state.req)
-        state.phase = (#state.plan.entries == 0) and "done" or "build"
+        if #state.plan.entries == 0 then
+            -- Even an empty build runs on_done (e.g. hide a section that got no rows).
+            if spec.on_done then spec.on_done(player_index, state.req, t) end
+            state.phase = "done"
+        else
+            state.phase = "build"
+        end
         return state.phase == "done"
     end
 
@@ -114,7 +125,7 @@ local function advance_one(player_index, state, budget)
                     if state.current_group ~= nil and spec.close_group then
                         spec.close_group(player_index, state.req, t)
                     end
-                    slot = spec.open_group(player_index, state.req, t, g)
+                    slot = spec.open_group(player_index, state.req, t, g, plan)
                     state.current_group = g
                 elseif not slot then
                     slot = spec.current_slot(player_index, state.req, t)
@@ -130,6 +141,7 @@ local function advance_one(player_index, state, budget)
             if state.current_group ~= nil and spec.close_group then
                 spec.close_group(player_index, state.req, t)
             end
+            if spec.on_done then spec.on_done(player_index, state.req, t) end
             state.phase = "done"
         end
         return state.phase == "done"

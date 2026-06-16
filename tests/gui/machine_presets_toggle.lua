@@ -8,6 +8,7 @@
 -- Verdict: prints exactly one "GUITEST PASS:" / "GUITEST FAIL:" line for gui_rcon.ps1.
 local fs_util = package.loaded["__factory_solver__/fs_util.lua"]
 local save = package.loaded["__factory_solver__/manage/save.lua"]
+local picker_build = package.loaded["__factory_solver__/ui/picker_build.lua"]
 local machine_presets = package.loaded["__factory_solver__/ui/machine_presets.lua"]
 
 local function collect(root)
@@ -42,6 +43,15 @@ local ok, err = pcall(function()
     if screen.factory_solver_machine_presets then screen.factory_solver_machine_presets.destroy() end
     fs_util.add_gui(screen, machine_presets)
     local dialog = screen.factory_solver_machine_presets
+
+    -- The preset sections build via tick-split now (armed on open, not built yet);
+    -- drive them to completion synchronously before inspecting toggled states.
+    local pd = save.get_player_data(pix)
+    if pd.picker_builds then
+        local keys = {}
+        for k in pairs(pd.picker_builds) do keys[#keys + 1] = k end
+        for _, k in ipairs(keys) do picker_build.finish(pix, k) end
+    end
 
     local before = collect(dialog)
     local n_buttons, n_toggled = 0, 0

@@ -5,43 +5,15 @@ local save = require "manage/save"
 local preset = require "manage/preset"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
+local picker_build = require "ui/picker_build"
 
 local handlers = {}
 
----@param event EventDataTrait
-function handlers.on_memorize_machine_presets(event)
-    local elem = event.element
-    local player_data = save.get_player_data(event.player_index)
-
-    elem.tags = {
-        presets = flib_table.deep_copy(player_data.presets),
-    }
-end
-
----@param event EventDataTrait
-function handlers.on_make_preset_tables(event)
-    local elem = event.element
-    local preset_type = elem.tags.preset_type
-    local player_data = save.get_player_data(event.player_index)
-    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
-
-    -- Read the dialog's presets ONCE here and set each button's toggled state at
-    -- build time, rather than building untoggled buttons and re-syncing them with a
-    -- post-build dispatch_to_subtree(on_preset_changed). LuaGuiElement.tags returns
-    -- a fresh snapshot of the whole presets table on every read, so the old toggle
-    -- handler -- fired per button by a dialog-wide dispatch run once per preset
-    -- table (5x) -- copied presets thousands of times: ~1.3s of the dialog open at
-    -- pyanodon scale. Build-time toggle reads it once per table instead. The click
-    -- path keeps the on_preset_changed handler for the narrow per-row re-sync.
-    local dialog = assert(fs_util.find_upper(elem, "factory_solver_machine_presets"))
-    local presets = dialog.tags.presets --[[@as Presets]]
-
-    -- This runs both on_added (initial build) and on_craft_visible_changed (filter
-    -- toggle), so it must clear prior rows first; otherwise every toggle appends a
-    -- fresh, unfiltered copy on top of the old one — the filter appears inert and
-    -- the table grows without bound.
-    elem.clear()
-
+-- The (key, caption, crafts) rows of one preset section. Most preset types are one
+-- row per category; machine presets split a category into ingredient_count tiers
+-- (preset.machine_preset_tiers), each its own row and key. `crafts` holds prototype
+-- objects (machines / fuels), resolved to names + TypedNames in the build plan.
+local function preset_rows(preset_type)
     local categories
     if preset_type == "fuel" then
         categories = storage.virtuals.fuel_categories_dictionary
@@ -57,170 +29,80 @@ function handlers.on_make_preset_tables(event)
         assert()
     end
 
-    local rows_emitted = 0
+    local out = {}
     for category_name, value in pairs(categories) do
         -- The engine auto-adds the core "parameters" crafting category to every
-        -- crafting machine so parametrised blueprints can target any of them. It
-        -- holds only the parameter-N placeholder recipes (filtered out elsewhere
-        -- via .parameter), so its preset row would just duplicate every real
-        -- machine under a meaningless heading. Skip it.
-        if preset_type == "machine" and category_name == "parameters" then
-            goto continue
-        end
-
-        -- Each row is one preset entry: a (key, caption, choices) triple, where
-        -- key is what the pick is stored under in presets[preset_type]. Most preset
-        -- types are one row per category; machine presets split a category into
-        -- ingredient_count tiers, each its own row and key (preset.machine_preset_tiers).
-        local rows
-        if preset_type == "fuel" then
-            rows = { {
-                key = category_name,
-                caption = category_name,
-                crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]])
-            } }
-        elseif preset_type == "fluid_fuel" then
-            rows = { {
-                key = category_name,
-                caption = category_name,
-                crafts = acc.get_any_fluid_fuels()
-            } }
-        elseif preset_type == "resource" then
-            rows = { {
-                key = category_name,
-                caption = category_name,
-                crafts = acc.get_machines_in_resource_category(category_name)
-            } }
-        elseif preset_type == "machine" then
-            -- Tier machine lists already exclude fixed_recipe machines: those are
-            -- offered per-recipe, never as a category default.
-            rows = {}
-            for _, tier in ipairs(preset.machine_preset_tiers(category_name)) do
-                local caption = tier.threshold
-                    and { "factory-solver-machine-preset-tier", category_name, tostring(tier.threshold) }
-                    or category_name
-                flib_table.insert(rows, { key = tier.key, caption = caption, crafts = tier.machines })
-            end
-        elseif preset_type == "fixed_recipe" then
-            -- One row per recipe craftable only by >=2 fixed_recipe machines; key is
-            -- the recipe name and the choices are exactly those fixed machines.
-            local recipe = prototypes.recipe[category_name]
-            rows = { {
-                key = category_name,
-                caption = recipe.localised_name,
-                crafts = acc.get_machines_for_recipe(recipe)
-            } }
-        else
-            assert()
-        end
-
-        for _, row in ipairs(rows) do
-            if #row.crafts <= 1 then
-                goto continue_row
-            end
-
-            -- The currently-selected preset for this row, used to set toggled at
-            -- build time. fluid_fuel is a single global pick; the rest are dicts
-            -- keyed by the row's preset key. Mirrors on_preset_change_toggle's
-            -- lookup (explicit per type, not dynamic, to keep the Presets type
-            -- checkable).
-            local selected
+        -- crafting machine for parametrised blueprints; its row would just duplicate
+        -- every real machine under a meaningless heading, so skip it.
+        if not (preset_type == "machine" and category_name == "parameters") then
             if preset_type == "fuel" then
-                selected = presets.fuel[row.key]
+                out[#out + 1] = { key = category_name, caption = category_name,
+                    crafts = acc.get_fuels_in_categories(value --[[@as { [string]: true }]]) }
             elseif preset_type == "fluid_fuel" then
-                selected = presets.fluid_fuel
+                out[#out + 1] = { key = category_name, caption = category_name,
+                    crafts = acc.get_any_fluid_fuels() }
             elseif preset_type == "resource" then
-                selected = presets.resource[row.key]
+                out[#out + 1] = { key = category_name, caption = category_name,
+                    crafts = acc.get_machines_in_resource_category(category_name) }
             elseif preset_type == "machine" then
-                selected = presets.machine[row.key]
-            elseif preset_type == "fixed_recipe" then
-                selected = presets.fixed_recipe[row.key]
-            end
-
-            -- Build the buttons first so a row whose every choice is filtered out
-            -- by the visibility switches contributes nothing: no label and no empty
-            -- slot frame are emitted, and it does not count toward rows_emitted.
-            local def_buttons = {}
-            for _, craft in ipairs(row.crafts) do
-                local typed_name = tn.craft_to_typed_name(craft)
-                local is_hidden = acc.is_hidden(craft)
-                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
-
-                if not common.craft_visible(is_hidden, is_unresearched, player_data) then
-                    goto continue_button
+                for _, tier in ipairs(preset.machine_preset_tiers(category_name)) do
+                    local caption = tier.threshold
+                        and { "factory-solver-machine-preset-tier", category_name, tostring(tier.threshold) }
+                        or category_name
+                    out[#out + 1] = { key = tier.key, caption = caption, crafts = tier.machines }
                 end
-
-                local def = common.create_decorated_sprite_button {
-                    typed_name = typed_name,
-                    is_hidden = is_hidden,
-                    is_unresearched = is_unresearched,
-                    -- Dialog slots opt out of the per-hover full-grid refresh_highlight.
-                    no_hover_highlight = true,
-                    tags = {
-                        typed_name = typed_name,
-                        category_name = row.key,
-                        preset_type = preset_type,
-                    },
-                    handler = {
-                        [defines.events.on_gui_click] = handlers.on_preset_button_click,
-                        on_preset_changed = handlers.on_preset_change_toggle,
-                    },
-                }
-                -- toggled is a LuaGuiElement property (set post-creation), so it
-                -- rides in elem_mods on the returned def rather than the add_param.
-                def.elem_mods = {
-                    toggled = selected ~= nil and tn.equals_typed_name(selected, typed_name, true) or false,
-                }
-                flib_table.insert(def_buttons, def)
-                ::continue_button::
+            elseif preset_type == "fixed_recipe" then
+                local recipe = prototypes.recipe[category_name]
+                out[#out + 1] = { key = category_name, caption = recipe.localised_name,
+                    crafts = acc.get_machines_for_recipe(recipe) }
             end
-
-            if #def_buttons == 0 then
-                goto continue_row
-            end
-            rows_emitted = rows_emitted + 1
-
-            do
-                local def = {
-                    type = "label",
-                    caption = row.caption,
-                    -- Wrap inside the 160px-wide first column instead of clipping;
-                    -- single_line is a LuaStyle property so it must go in style_mods
-                    -- (ignored at element top level). Long ingredient_count tier
-                    -- captions span two lines; short category names stay one.
-                    style_mods = { single_line = false, maximal_width = 160 },
-                }
-                fs_util.add_gui(elem, def)
-            end
-
-            do
-                local def_table = {
-                    type = "frame",
-                    style = "factory_solver_slot_background_frame",
-                    {
-                        type = "table",
-                        style = "filter_slot_table",
-                        column_count = 6,
-                        children = def_buttons,
-                    },
-                }
-                fs_util.add_gui(elem, def_table)
-            end
-            ::continue_row::
         end
-        ::continue::
     end
+    return out
+end
 
-    -- The Fixed-recipe machines section is empty for vanilla and most mods (no
-    -- recipe has >=2 fixed_recipe machines), so hide its whole frame rather than
-    -- leave a bare heading. Its table is the only child of its section frame, so
-    -- toggling the parent is safe; the fuel section shares one frame across two
-    -- tables and is never empty, so it is not affected. Set both ways: a filter
-    -- switch can empty the section and a later toggle can repopulate it, so the
-    -- frame must be able to come back.
-    if preset_type == "fixed_recipe" then
-        elem.parent.visible = rows_emitted > 0
+-- The currently-selected preset for one row (explicit per type, not dynamic, to
+-- keep the Presets type checkable). Mirrors on_preset_change_toggle's lookup.
+local function preset_selected(presets, preset_type, row_key)
+    if preset_type == "fuel" then
+        return presets.fuel[row_key]
+    elseif preset_type == "fluid_fuel" then
+        return presets.fluid_fuel
+    elseif preset_type == "resource" then
+        return presets.resource[row_key]
+    elseif preset_type == "machine" then
+        return presets.machine[row_key]
+    elseif preset_type == "fixed_recipe" then
+        return presets.fixed_recipe[row_key]
     end
+end
+
+---@param event EventDataTrait
+function handlers.on_memorize_machine_presets(event)
+    local elem = event.element
+    local player_data = save.get_player_data(event.player_index)
+
+    elem.tags = {
+        presets = flib_table.deep_copy(player_data.presets),
+    }
+end
+
+---Light handler: clear the section's layout table and arm a tick-split build.
+---Each preset section can be hundreds of rows / ~1000 buttons (machine alone is one
+---tier-row per recipe_category), so building all five synchronously on dialog open
+---froze ~100ms in one tick. ui/picker_build spreads the build across ticks (one
+---section advanced per tick via control.lua's on_tick -> advance_all). Runs on
+---on_added and on_craft_visible_changed; re-arming overwrites = cancel + restart.
+---@param event EventDataTrait
+function handlers.on_make_preset_tables(event)
+    local elem = event.element
+    local preset_type = elem.tags.preset_type --[[@as string]]
+    elem.clear()
+    picker_build.request(event.player_index, "preset_" .. preset_type, {
+        spec_id = "machine_presets",
+        preset_type = preset_type,
+        dialog_name = "factory_solver_machine_presets",
+    })
 end
 
 ---@param event EventData.on_gui_click
@@ -293,6 +175,136 @@ function handlers.on_machine_presets_confirm(event)
     common.on_close_self(re_event)
 end
 
+-- Tick-split spec for the five preset sections. Each section is its own build keyed
+-- "preset_<type>"; find_table re-finds that section's named layout table. The layout
+-- table is a 2-column table, one row = [caption label, slot-table frame]; open_group
+-- starts a row (label + empty slot table), make_button fills it. group_of is the row
+-- key (a row change = a new label + table). Toggled is set at build time from the
+-- plan's per-row selected preset (reading dialog.tags.presets once in plan, never
+-- per button); the click path keeps on_preset_changed for the narrow per-row re-sync.
+picker_build.register_spec {
+    id = "machine_presets",
+
+    find_table = function(player_index, req)
+        local dialog = common.find_root_element(player_index, req.dialog_name)
+        if not dialog then return nil end
+        -- The scroll-pane is found high in the tree (before any built buttons); its
+        -- section frames hold the named layout tables among their few direct children,
+        -- so this never DFS-walks the rows already placed.
+        local scroll = fs_util.find_lower(dialog, "fs_preset_scroll")
+        if not scroll then return nil end
+        local target = "fs_preset_" .. req.preset_type
+        for _, frame in ipairs(scroll.children) do
+            for _, child in ipairs(frame.children) do
+                if child.name == target then return child end
+            end
+        end
+        return nil
+    end,
+
+    plan = function(player_index, req)
+        local preset_type = req.preset_type
+        local relation_to_recipes = save.get_relation_to_recipes(player_index)
+        local dialog = common.find_root_element(player_index, req.dialog_name)
+        local presets = dialog and dialog.tags.presets --[[@as Presets?]]
+
+        local entries, group_of = {}, {}
+        local typed_name_of, is_hidden_of, is_unresearched_of = {}, {}, {}
+        local row_caption, row_selected = {}, {}
+        for _, row in ipairs(preset_rows(preset_type)) do
+            -- A single (or empty) choice is not a meaningful preset; skip the row.
+            if #row.crafts > 1 then
+                row_caption[row.key] = row.caption
+                if presets then row_selected[row.key] = preset_selected(presets, preset_type, row.key) end
+                for _, craft in ipairs(row.crafts) do
+                    entries[#entries + 1] = craft.name
+                    group_of[#group_of + 1] = row.key
+                    typed_name_of[#typed_name_of + 1] = tn.craft_to_typed_name(craft)
+                    is_hidden_of[#is_hidden_of + 1] = acc.is_hidden(craft)
+                    is_unresearched_of[#is_unresearched_of + 1] = acc.is_unresearched(craft, relation_to_recipes)
+                end
+            end
+        end
+        ---@type PickerBuildPlan
+        return {
+            entries = entries,
+            group_of = group_of,
+            typed_name_of = typed_name_of,
+            is_hidden_of = is_hidden_of,
+            is_unresearched_of = is_unresearched_of,
+            row_caption = row_caption,
+            row_selected = row_selected,
+        }
+    end,
+
+    -- Start a row: the caption label (col 1) + a slot-table frame (col 2); return
+    -- the inner slot table. plan carries the per-row caption keyed by group_of.
+    open_group = function(player_index, req, layout_table, row_key, plan)
+        fs_util.add_gui(layout_table, {
+            type = "label",
+            caption = plan.row_caption[row_key],
+            -- single_line is a LuaStyle property, so it rides in style_mods; long
+            -- ingredient-count tier captions then wrap inside the 160px column.
+            style_mods = { single_line = false, maximal_width = 160 },
+        })
+        fs_util.add_gui(layout_table, {
+            type = "frame",
+            style = "factory_solver_slot_background_frame",
+            { type = "table", style = "filter_slot_table", column_count = 6 },
+        })
+        local kids = layout_table.children
+        return kids[#kids].children[1]
+    end,
+
+    current_slot = function(player_index, req, layout_table)
+        local kids = layout_table.children
+        return kids[#kids].children[1]
+    end,
+
+    make_button = function(player_index, req, plan, i)
+        local player_data = save.get_player_data(player_index)
+        local is_hidden = plan.is_hidden_of[i]
+        local is_unresearched = plan.is_unresearched_of[i]
+        if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+            return nil
+        end
+        local typed_name = plan.typed_name_of[i]
+        local row_key = plan.group_of[i]
+        local selected = plan.row_selected[row_key]
+        local def = common.create_decorated_sprite_button {
+            typed_name = typed_name,
+            is_hidden = is_hidden,
+            is_unresearched = is_unresearched,
+            -- Dialog slots opt out of the per-hover full-grid refresh_highlight.
+            no_hover_highlight = true,
+            tags = {
+                typed_name = typed_name,
+                category_name = row_key,
+                preset_type = req.preset_type,
+            },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_preset_button_click,
+                on_preset_changed = handlers.on_preset_change_toggle,
+            },
+        }
+        -- toggled is a LuaGuiElement property; it rides in elem_mods on the def.
+        def.elem_mods = {
+            toggled = selected ~= nil and tn.equals_typed_name(selected, typed_name, true) or false,
+        }
+        return def
+    end,
+
+    -- The Fixed-recipe section is empty for vanilla / most mods (no recipe has >=2
+    -- fixed_recipe machines), so hide its whole frame when the finished build placed
+    -- no rows. The layout table is the section frame's only sizeable child, so
+    -- toggling the parent is safe; runs on completion even for an empty plan.
+    on_done = function(player_index, req, layout_table)
+        if req.preset_type == "fixed_recipe" then
+            layout_table.parent.visible = #layout_table.children > 0
+        end
+    end,
+}
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -335,10 +347,12 @@ return {
         style = "inside_shallow_frame",
         direction = "vertical",
         style_mods = {
+            width = 440,
             bottom_padding = 12,
         },
         {
             type = "scroll-pane",
+            name = "fs_preset_scroll",
             style = "factory_solver_preset_scroll_pane",
             direction = "vertical",
             horizontal_scroll_policy = "never",
@@ -354,6 +368,7 @@ return {
                 },
                 {
                     type = "table",
+                    name = "fs_preset_fuel",
                     style = "factory_solver_preset_layout_table",
                     column_count = 2,
                     tags = {
@@ -366,6 +381,7 @@ return {
                 },
                 {
                     type = "table",
+                    name = "fs_preset_fluid_fuel",
                     style = "factory_solver_preset_layout_table",
                     column_count = 2,
                     tags = {
@@ -388,6 +404,7 @@ return {
                 },
                 {
                     type = "table",
+                    name = "fs_preset_resource",
                     style = "factory_solver_preset_layout_table",
                     column_count = 2,
                     tags = {
@@ -410,6 +427,7 @@ return {
                 },
                 {
                     type = "table",
+                    name = "fs_preset_machine",
                     style = "factory_solver_preset_layout_table",
                     column_count = 2,
                     tags = {
@@ -432,6 +450,7 @@ return {
                 },
                 {
                     type = "table",
+                    name = "fs_preset_fixed_recipe",
                     style = "factory_solver_preset_layout_table",
                     column_count = 2,
                     tags = {

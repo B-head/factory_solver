@@ -67,6 +67,7 @@ __factory_solver__storage = {}
 ---@field section_name string? production_line_adder: section frame name to re-find the target table.
 ---@field filter_type string? constraint_adder: item | fluid | recipe | virtual_recipe | external.
 ---@field group_name string? constraint_adder: selected item-group whose subgroups are built.
+---@field preset_type string? machine_presets: fuel | fluid_fuel | resource | machine | fixed_recipe.
 
 ---Deterministic, storage-safe build plan: entry names in final display order plus
 ---the grouping key each belongs to (group change drives open_group / close_group).
@@ -77,6 +78,11 @@ __factory_solver__storage = {}
 ---@field group_of string[] Parallel: grouping key per entry (item-group for production_line_adder, subgroup for constraint_adder); drives open_group / close_group.
 ---@field sort_of string[]? Parallel: sort-run key per entry (subgroup name). A change marks a new run that spec.sort_run sorts in place. nil = entries are already sorted (no in-build sort).
 ---@field is_material boolean[]? Parallel: constraint_adder virtual_recipe tab only -- true if the entry resolves from storage.virtuals.material (else .recipe), since material / recipe names share one namespace.
+---@field typed_name_of TypedName[]? Parallel: machine_presets -- resolved TypedName per entry (crafts mix items / fluids / entities, so the type is precomputed).
+---@field is_hidden_of boolean[]? Parallel: machine_presets -- is_hidden per entry (computed in plan from the craft).
+---@field is_unresearched_of boolean[]? Parallel: machine_presets -- is_unresearched per entry.
+---@field row_caption table<string, LocalisedString>? machine_presets -- row label caption keyed by group_of (read by open_group).
+---@field row_selected table<string, TypedName>? machine_presets -- selected preset per row key (drives build-time toggled).
 
 ---Progress state for one section's tick-split build.
 ---@class PickerBuildState
