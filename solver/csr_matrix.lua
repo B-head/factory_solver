@@ -932,6 +932,255 @@ function M.cholesky_decomposition(symmetric_matrix)
         M.with_diagonal(diagonal, origin_height)
 end
 
+-- Memoized LDLᵀ. The reduced normal-equations matrix P = A·D²·Aᵀ keeps a FIXED
+-- sparsity across the IPM iterations of a build (only the diagonal D² moves), so
+-- the no-cancellation fill structure of L, and the exact multiply-accumulate
+-- operands the merge loop visits, are invariant. A one-time symbolic pass
+-- (build_cholesky_tape) records the structure (out_col/out_rr) and a flat tape of
+-- the (i,k,w) operand-index triples of every Schur-complement dot product plus the
+-- origin index that supplies each pivot's P entry; every later call replays the
+-- tape branch-free into fresh value/diagonal arrays.
+--
+-- Bit-identity with cholesky_decomposition: the tape records ONLY the aligned
+-- columns (both factors structurally present) in increasing-column order -- the
+-- exact terms the merge loop accumulates -- so each pivot sum is formed in the same
+-- order over the same operands. The structure is the no-cancellation SUPERSET, so
+-- the memo may keep an explicit zero where the fused pass dropped a c == 0 entry; a
+-- stored zero contributes 0 to every consumer (substitution, L·D, Lᵀ, the diagonal
+-- squares) and to every later pivot sum (its operand value is 0), so the
+-- factorization APPLIES identically. The cache is keyed by an EXACT comparison of
+-- P's pattern and lives per-process (never in storage); since the replayed result
+-- is bit-identical to the fused path, a cold-cache and a warm-cache client compute
+-- the same numbers -- no lockstep divergence.
+-- Multi-slot, memory-bounded tape cache. The cascade INTERLEAVES a small set of
+-- recurring P patterns (measured: ~68 distinct over ~1800 factorizations, 96% of
+-- calls served by a perfect cache), so a single slot thrashes -- each build switch
+-- evicts the tape the next switch needs back. A map keyed by the pattern's hash
+-- keeps every recurring pattern warm; an LRU eviction capped by total tape size
+-- bounds memory (the dense pyanodon tapes run tens of MB each, so caching all 68
+-- unbounded would be gigabytes). Keyed by hash with an exact-pattern re-check on
+-- hit, so a hash collision can never return the wrong tape (it just rebuilds).
+local chol_cache = {}          -- hash -> entry
+local chol_cache_keys = {}     -- list of live hashes (for eviction scan)
+local chol_cache_entries = 0   -- total tape (#ti) summed over cached entries
+local chol_clock = 0           -- monotonic LRU stamp
+-- ~8M tape entries ≈ a few hundred MB of Lua arrays; comfortably caches the small
+-- hot fix-test patterns plus a handful of the big stage/baseline ones.
+M.cholesky_cache_budget = 8e6
+
+-- Diagnostic: how many times a tape has been built (a cache miss). A warm cache
+-- leaves this near the distinct-pattern count; a value that tracks the call count
+-- means the cache is thrashing (working set over budget, or unstable patterns).
+M.cholesky_rebuild_count = 0
+
+local function chol_pattern_hash(row_ranges, column_indexes)
+    local n = #column_indexes
+    local h = (#row_ranges * 1000003 + n) % 2147483647
+    for i = 1, n do h = (h * 31 + column_indexes[i]) % 2147483647 end
+    return h
+end
+
+---Build the symbolic structure + numeric replay tape for P's sparsity pattern.
+---Runs the cholesky structure forward but emits every position the no-cancellation
+---fill reaches (an origin entry OR an aligned-column contribution), recording each
+---aligned column's operand indices. P's VALUES are never read, so the tape is valid
+---for every matrix sharing this pattern.
+---@param symmetric_matrix CsrMatrix
+---@return table memo
+function M.build_cholesky_tape(symmetric_matrix)
+    local origin_column_indexes = symmetric_matrix.column_indexes
+    local origin_row_ranges = symmetric_matrix.row_ranges
+    local width = symmetric_matrix.width
+    local h = #origin_row_ranges - 1
+
+    local out_col = {}
+    local out_rr = { 1 }
+    local ti, tk, tw = {}, {}, {} -- flat operand tape (one entry per aligned column)
+    local tstart = {}             -- tstart[t]..tstart[t+1]-1 = tape range for position t
+    local tov = {}                -- origin value index for off-diagonal position t (0 = none)
+    local d_ov = {}               -- origin value index for the diagonal of row y (0 = none)
+
+    local t, tp = 1, 1
+    for y = 1, h do
+        local m, me = origin_row_ranges[y], origin_row_ranges[y + 1]
+        local oc = (m < me) and origin_column_indexes[m] or int_max
+        local row_start = t
+
+        for x = 1, y - 1 do
+            local i, ie = row_start, t
+            local k, ke = out_rr[x], out_rr[x + 1]
+            local u = (i < ie) and out_col[i] or int_max
+            local v = (k < ke) and out_col[k] or int_max
+
+            local tape_begin = tp
+            local has_fill = false
+            while u < x or v < x do
+                if u == v then
+                    ti[tp] = i; tk[tp] = k; tw[tp] = u; tp = tp + 1
+                    has_fill = true
+                    i = i + 1; u = (i < ie) and out_col[i] or int_max
+                    k = k + 1; v = (k < ke) and out_col[k] or int_max
+                elseif u < v then
+                    i = i + 1; u = (i < ie) and out_col[i] or int_max
+                else
+                    k = k + 1; v = (k < ke) and out_col[k] or int_max
+                end
+            end
+
+            local ovi = 0
+            if oc == x then
+                ovi = m
+                m = m + 1
+                oc = (m < me) and origin_column_indexes[m] or int_max
+            end
+
+            if ovi > 0 or has_fill then
+                out_col[t] = x
+                tstart[t] = tape_begin
+                tov[t] = ovi
+                t = t + 1
+            else
+                tp = tape_begin -- not emitted: reclaim its (all-structural, harmless) tape span
+            end
+        end
+
+        out_col[t] = y
+        tstart[t] = tp -- diagonal carries no dot product; empty range
+        tov[t] = 0
+        t = t + 1
+        out_rr[y + 1] = t
+
+        local d = 0
+        if oc == y then
+            d = m
+            m = m + 1
+            oc = (m < me) and origin_column_indexes[m] or int_max
+        end
+        d_ov[y] = d
+    end
+    tstart[t] = tp -- sentinel: bounds the last position's range
+
+    local sig_rr, sig_col = {}, {}
+    for i = 1, #origin_row_ranges do sig_rr[i] = origin_row_ranges[i] end
+    for i = 1, #origin_column_indexes do sig_col[i] = origin_column_indexes[i] end
+
+    return {
+        width = width, height = h, sig_rr = sig_rr, sig_col = sig_col,
+        out_col = out_col, out_rr = out_rr,
+        ti = ti, tk = tk, tw = tw, tstart = tstart, tov = tov, d_ov = d_ov,
+    }
+end
+
+---Memoized LDLᵀ -- bit-identical to cholesky_decomposition (see the note above),
+---but replays a cached tape instead of rediscovering the fill and merging with
+---branches each call. Rebuilds the tape only when P's pattern changes.
+---@param symmetric_matrix CsrMatrix
+---@return CsrMatrix, CsrMatrix
+function M.cholesky_decomposition_memo(symmetric_matrix)
+    local origin_values = symmetric_matrix.values
+    local origin_column_indexes = symmetric_matrix.column_indexes
+    local origin_row_ranges = symmetric_matrix.row_ranges
+    local width = symmetric_matrix.width
+    local h = #origin_row_ranges - 1
+
+    local key = chol_pattern_hash(origin_row_ranges, origin_column_indexes)
+    local memo = chol_cache[key]
+    -- Exact re-check guards a hash collision (two patterns, same hash): treat a
+    -- mismatch as a miss and rebuild, so the wrong tape can never be replayed.
+    if memo then
+        local valid = memo.width == width
+            and #memo.sig_rr == #origin_row_ranges
+            and #memo.sig_col == #origin_column_indexes
+        if valid then
+            local srr, scol = memo.sig_rr, memo.sig_col
+            for i = 1, #origin_row_ranges do
+                if srr[i] ~= origin_row_ranges[i] then valid = false; break end
+            end
+            if valid then
+                for i = 1, #origin_column_indexes do
+                    if scol[i] ~= origin_column_indexes[i] then valid = false; break end
+                end
+            end
+        end
+        if not valid then memo = nil end
+    end
+
+    if not memo then
+        memo = M.build_cholesky_tape(symmetric_matrix)
+        memo.key = key
+        memo.n_entries = #memo.ti
+        M.cholesky_rebuild_count = M.cholesky_rebuild_count + 1
+        if chol_cache[key] then
+            chol_cache_entries = chol_cache_entries - chol_cache[key].n_entries
+        else
+            chol_cache_keys[#chol_cache_keys + 1] = key
+        end
+        chol_cache[key] = memo
+        chol_cache_entries = chol_cache_entries + memo.n_entries
+        -- Evict least-recently-used patterns until back under the tape budget.
+        -- Eviction is rare (only on a fresh large pattern), so the O(#keys) scan
+        -- for the oldest stamp is cheap.
+        while chol_cache_entries > M.cholesky_cache_budget and #chol_cache_keys > 1 do
+            local oldest, oi = nil, nil
+            for idx = 1, #chol_cache_keys do
+                local e = chol_cache[chol_cache_keys[idx]]
+                if e ~= memo and (not oldest or e.stamp < oldest.stamp) then oldest, oi = e, idx end
+            end
+            if not oldest then break end
+            chol_cache_entries = chol_cache_entries - oldest.n_entries
+            chol_cache[oldest.key] = nil
+            chol_cache_keys[oi] = chol_cache_keys[#chol_cache_keys]
+            chol_cache_keys[#chol_cache_keys] = nil
+        end
+    end
+    chol_clock = chol_clock + 1
+    memo.stamp = chol_clock
+
+    local out_col, out_rr = memo.out_col, memo.out_rr
+    local ti, tk, tw, tstart, tov, d_ov = memo.ti, memo.tk, memo.tw, memo.tstart, memo.tov, memo.d_ov
+    local vals, diag = {}, {}
+
+    for y = 1, h do
+        local rs = out_rr[y]
+        local diag_pos = out_rr[y + 1] - 1
+        for tt = rs, diag_pos - 1 do
+            local s = 0
+            for p = tstart[tt], tstart[tt + 1] - 1 do
+                s = s + vals[ti[p]] * vals[tk[p]] * diag[tw[p]]
+            end
+            local ovi = tov[tt]
+            local ov = (ovi > 0) and origin_values[ovi] or 0
+            vals[tt] = (ov - s) / diag[out_col[tt]]
+        end
+        vals[diag_pos] = 1
+
+        local s = 0
+        for i = rs, diag_pos - 1 do
+            local v = vals[i]
+            s = s + v * v * diag[out_col[i]]
+        end
+        local ovi = d_ov[y]
+        local ov = (ovi > 0) and origin_values[ovi] or 0
+        local pivot = ov - s
+        local scale = (ov > s) and ov or s
+        local floor = scale * cholesky_pivot_floor_rel
+        if floor <= 0 then floor = 2 ^ -522 end
+        if pivot < floor then pivot = floor end
+        diag[y] = pivot
+    end
+
+    return M.new(width, vals, out_col, out_rr), M.with_diagonal(diag, h)
+end
+
+---Reset the per-process cholesky memo cache (tests / benchmarks that switch
+---between unrelated matrices call this to force a rebuild).
+function M.reset_cholesky_memo()
+    chol_cache = {}
+    chol_cache_keys = {}
+    chol_cache_entries = 0
+    chol_clock = 0
+end
+
 ---Use lower triangular matrix to solve linear equations.
 ---@param lower_triangular_matrix CsrMatrix
 ---@param augment_column CsrMatrix

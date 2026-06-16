@@ -47,6 +47,24 @@ local purify_zeros = true
 
 local M = {}
 
+-- Memoized LDLᵀ (csr_matrix.cholesky_decomposition_memo) for solve_step. P = A·D²·Aᵀ
+-- keeps a fixed sparsity across a build's IPM iterations, so the memo caches the
+-- fill structure + the multiply-accumulate tape once and replays it branch-free --
+-- bit-identical to the fused factorization (verified: headless suite green + a
+-- max|Δz|=0 RHS-applied check, so MP lockstep is safe).
+--
+-- DEFAULT OFF. It is ~2x faster under stock `lua` (tests/research/bench_cholesky),
+-- but a controlled in-engine A/B (chain_explorer.profile_ab, same-boot back-to-back
+-- to cancel the ~30% cross-boot machine-load noise) measured NO speedup in
+-- Factorio's Lua 5.2 fork even with the cache 98% warm: the fused path is the same
+-- speed in both VMs, but the tape replay that stock lua runs ~2x faster runs at the
+-- fused speed in-engine (the alloc/GC saving stock lua rewards, and the branch
+-- removal, are both ~free in Factorio's VM, while the tape's extra indirection
+-- offsets them). Kept gated as a verified, reusable factorization -- do not enable
+-- without re-measuring with profile_ab in the engine, not stock lua / a micro-bench.
+-- A field (not a constant) so probes can flip it for an A/B.
+M.cholesky_memo = false
+
 ---@param vector CsrMatrix
 ---@return number
 local function vector_sum(vector)
@@ -567,12 +585,14 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     -- with zero residual failures below 1e-10. The two-tier shape keeps the
     -- well-conditioned majority bias-free: try unregularised first, fall back to
     -- the fat ε·I only on detected NaN.
+    local cholesky = M.cholesky_memo and csr_matrix.cholesky_decomposition_memo
+        or csr_matrix.cholesky_decomposition
     local function solve_step(reg_epsilon)
         local P = A * SX * AT
         if reg_epsilon > 0 then
             P = P + csr_matrix.with_diagonal(reg_epsilon, d_degree)
         end
-        local L, D = csr_matrix.cholesky_decomposition(P)
+        local L, D = cholesky(P)
         local y_step_ = csr_matrix.backward_substitution(L:T(),
             csr_matrix.forward_substitution(L * D, aug))
         local s_step_ = AT * -y_step_ - dual

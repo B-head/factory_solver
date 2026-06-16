@@ -1731,6 +1731,18 @@ function M.profile_solve(args_str)
     local print_ticks = extra.ticks ~= "off"
     local cap = math.floor(tonumber(extra.cap) or 8000)
 
+    -- memo=off forces the fused cholesky for an A/B against the memoized default.
+    local lp = package.loaded["__factory_solver__/solver/linear_programming.lua"]
+    local csr0 = package.loaded["__factory_solver__/solver/csr_matrix.lua"]
+    local prev_memo = lp.cholesky_memo
+    if extra.memo == "off" then lp.cholesky_memo = false end
+    -- budget=<N> overrides the tape-cache entry budget (millions of entries) to
+    -- probe how much of the regression is eviction vs rebuild cost.
+    local prev_budget = csr0.cholesky_cache_budget
+    if extra.budget then csr0.cholesky_cache_budget = tonumber(extra.budget) * 1e6 end
+    csr0.reset_cholesky_memo()
+    local rebuilds0 = csr0.cholesky_rebuild_count
+
     local csr = package.loaded["__factory_solver__/solver/csr_matrix.lua"]
     -- A throwaway matrix exposes the shared metatable every solve_step multiply
     -- (A * SX * AT, AT * -y, ...) dispatches through. Wrapping __mul here catches
@@ -1743,10 +1755,22 @@ function M.profile_solve(args_str)
     local mul_acc = game.create_profiler(true)
     local chol_calls, mul_calls = 0, 0
 
+    -- Wrap BOTH cholesky variants: solve_step dispatches to the memoized one when
+    -- lp.cholesky_memo is set, the fused one otherwise, so CHOL must time whichever
+    -- actually runs.
     local orig_chol = csr.cholesky_decomposition
+    local orig_chol_memo = csr.cholesky_decomposition_memo
     csr.cholesky_decomposition = function(...)
         local p = game.create_profiler()
         local a, b = orig_chol(...)
+        p.stop()
+        chol_acc.add(p)
+        chol_calls = chol_calls + 1
+        return a, b
+    end
+    csr.cholesky_decomposition_memo = function(...)
+        local p = game.create_profiler()
+        local a, b = orig_chol_memo(...)
         p.stop()
         chol_acc.add(p)
         chol_calls = chol_calls + 1
@@ -1785,18 +1809,149 @@ function M.profile_solve(args_str)
         if steps > cap then break end
     end
 
-    -- Restore the real functions / log level before any return path.
+    -- Restore the real functions / log level / memo flag before any return path.
     fs_log.set_level(prev_level)
     csr.cholesky_decomposition = orig_chol
+    csr.cholesky_decomposition_memo = orig_chol_memo
     mt.__mul = orig_mul
+    lp.cholesky_memo = prev_memo
+    local rebuilds = csr0.cholesky_rebuild_count - rebuilds0
+    csr0.cholesky_cache_budget = prev_budget
 
     rcon.print({ "", "PROF_TOTAL ", total_acc })
     rcon.print({ "", "PROF_CHOL ", chol_acc })
     rcon.print({ "", "PROF_MATMUL ", mul_acc })
     return string.format(
-        "PROF_META seed=%d built=%d ticks=%d state=%s chol_calls=%d mul_calls=%d%s",
+        "PROF_META seed=%d built=%d ticks=%d state=%s memo=%s rebuilds=%d chol_calls=%d mul_calls=%d%s",
         ctx.seed, ctx.built, steps, tostring(solution.solver_state),
-        chol_calls, mul_calls, solve_err and (" ERR=" .. tostring(solve_err)) or "")
+        tostring(extra.memo ~= "off"), rebuilds, chol_calls, mul_calls,
+        solve_err and (" ERR=" .. tostring(solve_err)) or "")
+end
+
+---RCON entry point: build a chain like M.explore, solve it, and report the
+---STRUCTURE of the cholesky inputs (no timing). The fill density and the
+---"empty outer-x" waste decide the factorization-memoization design: a dense L
+---means the win is removing per-element branch / allocation overhead (a flat
+---numeric replay), while a sparse L with high waste means the win also includes
+---skipping the for x=1,y-1 iterations the fused pass spends on positions that
+---never fill. Wraps csr cholesky_decomposition to read h / nnz(P) / nnz(L) off
+---each call (plain numbers, so no profiler needed); restored before returning.
+---@param args_str string?
+---@return string
+function M.cholesky_census(args_str)
+    local r = build_problem(args_str)
+    if not r.ok then return assert(r.message) end
+    local solution = assert(r.solution)
+    local ctx = assert(r.ctx)
+
+    local csr = package.loaded["__factory_solver__/solver/csr_matrix.lua"]
+    -- Force the fused path so EVERY cholesky call routes through the one wrapper
+    -- below (with the memo on, solve_step would dispatch most calls to the memo
+    -- variant and the count would be wrong). The pattern SEQUENCE is the same either
+    -- way -- it is set by the cascade's builds, not by which factoriser runs.
+    local lp = package.loaded["__factory_solver__/solver/linear_programming.lua"]
+    local prev_memo = lp.cholesky_memo
+    lp.cholesky_memo = false
+    local orig_chol = csr.cholesky_decomposition
+    local calls, max_h, max_nnzP, max_nnzL, sum_nnzP, sum_nnzL = 0, 0, 0, 0, 0, 0
+    -- Pattern diversity: a memo keyed by P's sparsity is only worth its rebuild cost
+    -- if patterns RECUR. distinct = how many unique patterns; warm_frac = the share
+    -- of calls a perfect (unbounded) pattern-keyed cache would serve without a
+    -- rebuild (= 1 - distinct/calls). A low warm_frac means the cascade's builds
+    -- mostly don't repeat, so memoization thrashes (the in-engine regression).
+    local pat_count = {}
+    local distinct = 0
+    csr.cholesky_decomposition = function(P, ...)
+        local L, D = orig_chol(P, ...)
+        calls = calls + 1
+        local h = #P.row_ranges - 1
+        local nnzP = P.row_ranges[#P.row_ranges] - 1
+        local nnzL = L.row_ranges[#L.row_ranges] - 1
+        sum_nnzP, sum_nnzL = sum_nnzP + nnzP, sum_nnzL + nnzL
+        if h > max_h then max_h, max_nnzP, max_nnzL = h, nnzP, nnzL end
+        local ci = P.column_indexes
+        local key = h * 1000003 + nnzP
+        for i = 1, nnzP do key = (key * 31 + ci[i]) % 2147483647 end
+        if not pat_count[key] then distinct = distinct + 1 end
+        pat_count[key] = (pat_count[key] or 0) + 1
+        return L, D
+    end
+
+    local prev_level = fs_log.get_level()
+    fs_log.set_level("warn")
+    solution.solver_state = "ready"
+    local force_data = storage.forces[FORCE_INDEX]
+    local steps = 0
+    while solution.solver_state == "ready" or solution.solver_state == "calculating" do
+        local ok = pcall(pre_solve.forwerd_solve, force_data, solution)
+        steps = steps + 1
+        if not ok or steps > 8000 then break end
+    end
+    fs_log.set_level(prev_level)
+    csr.cholesky_decomposition = orig_chol
+    lp.cholesky_memo = prev_memo
+
+    -- Current pass cost ~ outer-x iterations = h(h-1)/2; produced off-diagonals =
+    -- nnzL - h. waste = the empty-x fraction a structure-aware replay would skip.
+    local h = max_h
+    local outer = h * (h - 1) / 2
+    local offdiag = max_nnzL - h
+    local dense = h * (h + 1) / 2
+    -- Recurrence of the most-repeated pattern, and the perfect-cache warm fraction.
+    local pat_max = 0
+    for _, c in pairs(pat_count) do if c > pat_max then pat_max = c end end
+    return string.format(
+        "CENSUS seed=%d built=%d calls=%d | MAXH h=%d nnzP=%d nnzL=%d fill_density=%.3f waste=%.1f%% | PATTERNS distinct=%d warm_frac=%.1f%% top_recur=%d | TOT nnzP=%d nnzL=%d avgL=%d",
+        ctx.seed, ctx.built, calls, h, max_nnzP, max_nnzL,
+        (dense > 0) and (max_nnzL / dense) or 0,
+        (outer > 0) and (100 * (1 - offdiag / outer)) or 0,
+        distinct, (calls > 0) and (100 * (1 - distinct / calls)) or 0, pat_max,
+        sum_nnzP, sum_nnzL, (calls > 0) and math.floor(sum_nnzL / calls) or 0)
+end
+
+---Controlled in-engine A/B: solve the SAME chain twice back-to-back -- memoized
+---cholesky then fused -- in ONE process, timing each whole solve with a single
+---profiler. Cross-boot wall clock is too noisy to compare (machine load drifts
+---~30% between boots); running both passes in the same boot, adjacent in time,
+---cancels that. Reports ticks + tape rebuilds + total wall for each. Order is
+---on,off,on,off so first-pass warm-up bias averages out.
+---@param args_str string?
+---@return string
+function M.profile_ab(args_str)
+    local lp = package.loaded["__factory_solver__/solver/linear_programming.lua"]
+    local csr0 = package.loaded["__factory_solver__/solver/csr_matrix.lua"]
+    local fd = storage.forces[FORCE_INDEX]
+
+    local function run(memo_on)
+        csr0.reset_cholesky_memo()
+        lp.cholesky_memo = memo_on
+        local r = build_problem(args_str)
+        if not r.ok then return nil end
+        local solution = assert(r.solution)
+        local prev = fs_log.get_level()
+        fs_log.set_level("warn")
+        local rb0 = csr0.cholesky_rebuild_count
+        solution.solver_state = "ready"
+        local p = game.create_profiler()
+        local steps = 0
+        while solution.solver_state == "ready" or solution.solver_state == "calculating" do
+            pcall(pre_solve.forwerd_solve, fd, solution)
+            steps = steps + 1
+            if steps > 8000 then break end
+        end
+        p.stop()
+        fs_log.set_level(prev)
+        return p, steps, csr0.cholesky_rebuild_count - rb0
+    end
+
+    local prev_memo = lp.cholesky_memo
+    local passes = { { "on1", true }, { "off1", false }, { "on2", true }, { "off2", false } }
+    for _, pass in ipairs(passes) do
+        local p, steps, rb = run(pass[2])
+        if p then rcon.print({ "", "AB_" .. pass[1] .. " ticks=" .. steps .. " rebuilds=" .. rb .. " ", p }) end
+    end
+    lp.cholesky_memo = prev_memo
+    return "AB done"
 end
 
 ---Register the RCON interface (flat namespace -> factory_solver_ prefix). Not
@@ -1813,6 +1968,8 @@ function M.register()
         detail = M.detail,
         solve_explicit = M.solve_explicit,
         profile_solve = M.profile_solve,
+        cholesky_census = M.cholesky_census,
+        profile_ab = M.profile_ab,
     })
 end
 
