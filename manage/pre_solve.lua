@@ -464,23 +464,31 @@ end
 
 ---Re-arm the per-tick pump for the next cascade build: flip solver_state back
 ---to "ready" with cc_restart so the rebuild keeps the in-flight cascade state.
----A classification-determining build (cascade.is_cold -- fix-test verdict or
----support-probe universe growth) is solved COLD: drop the warm seed
----(solution.raw_variables) so the IPM restarts from the cold Mehrotra central
----path the reference solves on. Warming these reads a different degenerate
----vertex and corrupts the classification (the verdict drift); the heavy stage /
----final / polish builds read only optimal values and keep the warm seed for the
----incremental-solve speedup. solution.raw_variables is only the warm SEED here
----(the cascade's adopted answer lives in cc.adopted_raw), so dropping it is
----safe; unfold(nil) / filter_result(nil) both no-op until the cold solve fills
----it back in.
+---EVERY cascade stage is solved COLD -- the warm seed (solution.raw_variables)
+---is dropped unconditionally so the IPM restarts from the cold Mehrotra central
+---path the reference solves on. Two findings drove this (project_cascade_warmstart):
+---  1. The classification builds (cascade.is_cold -- fix-test verdict /
+---     support-probe universe growth) MUST be cold: warming reads a different
+---     degenerate vertex and corrupts the verdict (the warm verdict drift), and
+---     does so non-deterministically.
+---  2. Warming the heavy stage / final / polish builds buys nothing: each
+---     cascade build carries a DIFFERENT objective (a new stage cost / budget
+---     row), so the previous stage's optimum is not near this build's optimum,
+---     and the boundary warm seed mismatches the IPM's interior preference --
+---     measured zero cascade-internal speedup. The only warm that pays off is
+---     the baseline's cross-EDIT re-solve, which never routes through here
+---     (raw_variables is preserved across re-prepares above, not by this fn).
+---With no upside and a real drift risk, the compromise is to cold-start them all.
+---solution.raw_variables is only the warm SEED here (the cascade's adopted answer
+---lives in cc.adopted_raw), so dropping it is safe; unfold(nil) /
+---filter_result(nil) both no-op until the cold solve fills it back in.
 ---@param solution Solution
 ---@param build CascadeBuild
 function M.arm_cascade_build(solution, build)
     solution.cc_restart = true
     solution.solver_state = "ready"
     solution.solver_iteration = nil
-    if cascade.is_cold(build) then solution.raw_variables = nil end
+    solution.raw_variables = nil -- cold-start every stage; see the note above
 end
 
 ---Advance the observe-price fixed point one step after a baseline / observe /
