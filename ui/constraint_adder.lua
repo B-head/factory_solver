@@ -169,6 +169,41 @@ function handlers.on_make_constraint_picker(event)
         subgroups = fs_util.sort_prototypes(group.subgroups)
     end
 
+    -- The virtual / external tabs draw from storage.virtuals, which (unlike
+    -- prototypes.get_*_filtered) is not indexed by subgroup. Bucket the relevant
+    -- virtuals by subgroup ONCE here; the per-subgroup loop below previously
+    -- re-scanned all of storage.virtuals for every subgroup, i.e.
+    -- O(subgroups x total_virtuals) -- at pyanodon scale (e.g. py-alienlife: 89
+    -- subgroups x ~11,654 virtuals ~= 1M iterations) that was ~350ms of pure prep
+    -- for a single group, dwarfing the actual button build.
+    local virtuals_by_subgroup
+    if filter_type == "virtual_recipe" then
+        virtuals_by_subgroup = {}
+        for _, value in pairs(storage.virtuals.material) do
+            local bucket = virtuals_by_subgroup[value.subgroup_name]
+            if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
+            bucket[#bucket + 1] = value
+        end
+        for _, value in pairs(storage.virtuals.recipe) do
+            -- Source/sink belong to the External tab; keep them out of the Virtual
+            -- tab so the genuine virtual recipes are not buried.
+            if not (value.is_source or value.is_sink) then
+                local bucket = virtuals_by_subgroup[value.subgroup_name]
+                if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
+                bucket[#bucket + 1] = value
+            end
+        end
+    elseif filter_type == "external" then
+        virtuals_by_subgroup = {}
+        for _, value in pairs(storage.virtuals.recipe) do
+            if value.is_source or value.is_sink then
+                local bucket = virtuals_by_subgroup[value.subgroup_name]
+                if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
+                bucket[#bucket + 1] = value
+            end
+        end
+    end
+
     elem.clear()
     for _, subgroup in ipairs(subgroups) do
         if filter_type == "item" then
@@ -214,22 +249,7 @@ function handlers.on_make_constraint_picker(event)
                 end
             end
         elseif filter_type == "virtual_recipe" then
-            ---@type (VirtualMaterial|VirtualRecipe)[]
-            local virtuals = {}
-            for _, value in pairs(storage.virtuals.material) do
-                if value.subgroup_name == subgroup.name then
-                    flib_table.insert(virtuals, value)
-                end
-            end
-            for _, value in pairs(storage.virtuals.recipe) do
-                -- Source/sink belong to the External tab; keep them out of the
-                -- Virtual tab so the genuine virtual recipes are not buried.
-                if value.subgroup_name == subgroup.name
-                    and not (value.is_source or value.is_sink) then
-                    flib_table.insert(virtuals, value)
-                end
-            end
-            local sorted = fs_util.sort_prototypes(virtuals)
+            local sorted = fs_util.sort_prototypes(virtuals_by_subgroup[subgroup.name] or {})
 
             for _, value in ipairs(sorted) do
                 local is_hidden = acc.is_hidden(value)
@@ -238,15 +258,7 @@ function handlers.on_make_constraint_picker(event)
                 add(typed_name, is_hidden, is_unresearched, value.name)
             end
         elseif filter_type == "external" then
-            ---@type VirtualRecipe[]
-            local externals = {}
-            for _, value in pairs(storage.virtuals.recipe) do
-                if value.subgroup_name == subgroup.name
-                    and (value.is_source or value.is_sink) then
-                    flib_table.insert(externals, value)
-                end
-            end
-            local sorted = fs_util.sort_prototypes(externals)
+            local sorted = fs_util.sort_prototypes(virtuals_by_subgroup[subgroup.name] or {})
 
             for _, value in ipairs(sorted) do
                 local is_hidden = acc.is_hidden(value)
