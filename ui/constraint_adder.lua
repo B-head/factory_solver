@@ -5,6 +5,7 @@ local acc = require "manage/accessor"
 local save = require "manage/save"
 local tn = require "manage/typed_name"
 local common = require "ui/common"
+local picker_build = require "ui/picker_build"
 local production_line_adder = require "ui/production_line_adder"
 
 local handlers = {}
@@ -109,179 +110,33 @@ function handlers.on_make_filter_group(event)
     end
 end
 
+---Light handler: clear the picker and arm a tick-split build. The actual
+---candidate enumeration + button construction (which for a large item-group is
+---thousands of elements -- e.g. py-alienlife recipe = 3,650) runs across ticks via
+---ui/picker_build (control.lua's on_tick -> picker_build.advance_all), so opening a
+---tab / switching a group / typing in the filter never freezes the whole server
+---under multiplayer lockstep. The selected type + group are captured into the
+---request so a later rebuild that changes them just re-arms (cancel + restart).
 ---@param event EventDataTrait
 function handlers.on_make_constraint_picker(event)
-    local elem = event.element
+    local elem = event.element -- the constraint_picker table
     local player_data = save.get_player_data(event.player_index)
-    local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
-
     local filter_type = player_data.selected_filter_type
+    local group_name = player_data.selected_filter_group[filter_type]
 
-    -- Name filter (title-bar textfield). Matches against both the internal name
-    -- and the locale-resolved display name. helpers.multilingual_to_lower folds
-    -- case for non-Latin scripts too (string.lower is ASCII-only). The display
-    -- name comes from the flib dictionary keyed by filter type; it returns nil
-    -- until the player's language finishes translating, so we degrade to
-    -- name-only filtering meanwhile. The filter string is dialog-local (not
-    -- persisted): it lives in the root frame's tags and resets on every open.
-    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_constraint_adder"))
+    -- The name filter lives in the root frame's tags (dialog-local, resets on open).
+    local dialog = assert(fs_util.find_upper(elem, "factory_solver_constraint_adder"))
     local raw_filter = dialog.tags.filter_text --[[@as string?]] or ""
     local needle = (raw_filter ~= "") and helpers.multilingual_to_lower(raw_filter) or ""
-    local dict_name = (filter_type == "item" and "item")
-        or (filter_type == "fluid" and "fluid")
-        or (filter_type == "recipe" and "recipe")
-        or "virtual" -- virtual_recipe / external both draw from storage.virtuals
-    local locale_dict = (needle ~= "") and flib_dictionary.get(event.player_index, dict_name) or nil
-
-    ---comment
-    ---@param typed_name TypedName
-    ---@param is_hidden boolean
-    ---@param is_unresearched boolean
-    ---@param filter_name string Name of the enumerated craft itself (the picker
-    --- entry), used for the name filter. This is the dictionary key and differs
-    --- from typed_name.name for fluid-temperature virtual materials, whose
-    --- typed_name resolves to the underlying fluid.
-    function add(typed_name, is_hidden, is_unresearched, filter_name)
-        if not common.craft_visible(is_hidden, is_unresearched, player_data) then
-            return
-        end
-        if not common.name_filter_matches(needle, filter_name, locale_dict and locale_dict[filter_name] or nil) then
-            return
-        end
-
-        local def = common.create_decorated_sprite_button {
-            typed_name = typed_name,
-            is_hidden = is_hidden,
-            is_unresearched = is_unresearched,
-            tags = {
-                typed_name = typed_name,
-            },
-            handler = {
-                [defines.events.on_gui_click] = handlers.on_constraint_picker_button_click,
-            },
-        }
-        fs_util.add_gui(elem, def)
-    end
-
-    local group = prototypes.item_group[player_data.selected_filter_group[filter_type]]
-    local subgroups = {}
-    if group then
-        subgroups = fs_util.sort_prototypes(group.subgroups)
-    end
-
-    -- The virtual / external tabs draw from storage.virtuals, which (unlike
-    -- prototypes.get_*_filtered) is not indexed by subgroup. Bucket the relevant
-    -- virtuals by subgroup ONCE here; the per-subgroup loop below previously
-    -- re-scanned all of storage.virtuals for every subgroup, i.e.
-    -- O(subgroups x total_virtuals) -- at pyanodon scale (e.g. py-alienlife: 89
-    -- subgroups x ~11,654 virtuals ~= 1M iterations) that was ~350ms of pure prep
-    -- for a single group, dwarfing the actual button build.
-    local virtuals_by_subgroup
-    if filter_type == "virtual_recipe" then
-        virtuals_by_subgroup = {}
-        for _, value in pairs(storage.virtuals.material) do
-            local bucket = virtuals_by_subgroup[value.subgroup_name]
-            if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
-            bucket[#bucket + 1] = value
-        end
-        for _, value in pairs(storage.virtuals.recipe) do
-            -- Source/sink belong to the External tab; keep them out of the Virtual
-            -- tab so the genuine virtual recipes are not buried.
-            if not (value.is_source or value.is_sink) then
-                local bucket = virtuals_by_subgroup[value.subgroup_name]
-                if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
-                bucket[#bucket + 1] = value
-            end
-        end
-    elseif filter_type == "external" then
-        virtuals_by_subgroup = {}
-        for _, value in pairs(storage.virtuals.recipe) do
-            if value.is_source or value.is_sink then
-                local bucket = virtuals_by_subgroup[value.subgroup_name]
-                if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
-                bucket[#bucket + 1] = value
-            end
-        end
-    end
 
     elem.clear()
-    for _, subgroup in ipairs(subgroups) do
-        if filter_type == "item" then
-            local items = prototypes.get_item_filtered {
-                { filter = "subgroup", subgroup = subgroup.name },
-            }
-            local sorted = fs_util.sort_prototypes(fs_util.to_list(items))
-
-            for _, value in ipairs(sorted) do
-                if not value.parameter then
-                    local is_hidden = acc.is_hidden(value)
-                    local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
-                    local typed_name = tn.craft_to_typed_name(value)
-                    add(typed_name, is_hidden, is_unresearched, value.name)
-                end
-            end
-        elseif filter_type == "fluid" then
-            local fluids = prototypes.get_fluid_filtered {
-                { filter = "subgroup", subgroup = subgroup.name },
-            }
-            local sorted = fs_util.sort_prototypes(fs_util.to_list(fluids))
-
-            for _, value in ipairs(sorted) do
-                if not value.parameter then
-                    local is_hidden = acc.is_hidden(value)
-                    local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
-                    local typed_name = tn.craft_to_typed_name(value)
-                    add(typed_name, is_hidden, is_unresearched, value.name)
-                end
-            end
-        elseif filter_type == "recipe" then
-            local recipe_prototypes = prototypes.get_recipe_filtered {
-                { filter = "subgroup", subgroup = subgroup.name },
-            }
-            local sorted = fs_util.sort_prototypes(fs_util.to_list(recipe_prototypes))
-
-            for _, value in ipairs(sorted) do
-                if not prototypes.recipe[value.name].parameter then
-                    local is_hidden = acc.is_hidden(value)
-                    local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
-                    local typed_name = tn.craft_to_typed_name(value)
-                    add(typed_name, is_hidden, is_unresearched, value.name)
-                end
-            end
-        elseif filter_type == "virtual_recipe" then
-            local sorted = fs_util.sort_prototypes(virtuals_by_subgroup[subgroup.name] or {})
-
-            for _, value in ipairs(sorted) do
-                local is_hidden = acc.is_hidden(value)
-                local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
-                local typed_name = tn.craft_to_typed_name(value)
-                add(typed_name, is_hidden, is_unresearched, value.name)
-            end
-        elseif filter_type == "external" then
-            local sorted = fs_util.sort_prototypes(virtuals_by_subgroup[subgroup.name] or {})
-
-            for _, value in ipairs(sorted) do
-                local is_hidden = acc.is_hidden(value)
-                local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
-                local typed_name = tn.craft_to_typed_name(value)
-                add(typed_name, is_hidden, is_unresearched, value.name)
-            end
-        else
-            assert()
-        end
-
-        local column_count = elem.column_count
-        local rest = #elem.children % column_count
-        if 0 < rest then
-            for _ = rest, column_count - 1, 1 do
-                local def = {
-                    type = "empty-widget",
-                    style = "factory_solver_fake_slot",
-                }
-                fs_util.add_gui(elem, def)
-            end
-        end
-    end
+    picker_build.request(event.player_index, "constraint_picker", {
+        spec_id = "constraint_adder",
+        filter_type = filter_type,
+        group_name = group_name,
+        needle = needle,
+        dialog_name = "factory_solver_constraint_adder",
+    })
 end
 
 ---@param event EventDataTrait
@@ -350,6 +205,179 @@ function handlers.on_constraint_filter_textfield_changed(event)
 
     fs_util.dispatch_to_subtree(root, "on_filter_text_changed")
 end
+
+-- Tick-split spec for the single constraint_picker table. Unlike production_line_adder
+-- (per-group sub-tables with sprite headers), this builds ONE flat filter_slot_table
+-- whose subgroups are separated by padding to a row boundary; open_group / current_slot
+-- therefore return the same table and close_group emits the per-subgroup padding (the
+-- former inline padding loop). plan emits every candidate name in display order with its
+-- subgroup as the grouping key; make_button applies the per-entry hidden / unresearched /
+-- name-filter checks (so they spread across ticks too) and returns nil to skip.
+picker_build.register_spec {
+    id = "constraint_adder",
+
+    find_table = function(player_index, req)
+        local dialog = common.find_root_element(player_index, req.dialog_name)
+        if not dialog then return nil end
+        -- constraint_picker is found before its (built) buttons are descended into,
+        -- so this never DFS-walks the thousands of slots already placed.
+        return fs_util.find_lower(dialog, "constraint_picker")
+    end,
+
+    -- Single table: every group's buttons go into the same constraint_picker.
+    open_group = function(player_index, req, constraint_picker, group_name)
+        return constraint_picker
+    end,
+
+    current_slot = function(player_index, req, constraint_picker)
+        return constraint_picker
+    end,
+
+    -- Pad the just-finished subgroup to a row boundary so the next subgroup starts on
+    -- a fresh row (the former inline `#elem.children % column_count` fake-slot loop).
+    close_group = function(player_index, req, constraint_picker)
+        local column_count = constraint_picker.column_count
+        local rest = #constraint_picker.children % column_count
+        if 0 < rest then
+            for _ = rest, column_count - 1, 1 do
+                fs_util.add_gui(constraint_picker, {
+                    type = "empty-widget",
+                    style = "factory_solver_fake_slot",
+                })
+            end
+        end
+    end,
+
+    plan = function(player_index, req)
+        local filter_type = req.filter_type
+        local group = prototypes.item_group[req.group_name]
+        local subgroups = group and fs_util.sort_prototypes(group.subgroups) or {}
+
+        -- Bucket storage.virtuals by subgroup once (virtual_recipe / external tabs),
+        -- not per subgroup -- the same O(virtuals) fix as the synchronous path.
+        local virtuals_by_subgroup
+        if filter_type == "virtual_recipe" then
+            virtuals_by_subgroup = {}
+            for _, value in pairs(storage.virtuals.material) do
+                local bucket = virtuals_by_subgroup[value.subgroup_name]
+                if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
+                bucket[#bucket + 1] = value
+            end
+            for _, value in pairs(storage.virtuals.recipe) do
+                if not (value.is_source or value.is_sink) then
+                    local bucket = virtuals_by_subgroup[value.subgroup_name]
+                    if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
+                    bucket[#bucket + 1] = value
+                end
+            end
+        elseif filter_type == "external" then
+            virtuals_by_subgroup = {}
+            for _, value in pairs(storage.virtuals.recipe) do
+                if value.is_source or value.is_sink then
+                    local bucket = virtuals_by_subgroup[value.subgroup_name]
+                    if not bucket then bucket = {}; virtuals_by_subgroup[value.subgroup_name] = bucket end
+                    bucket[#bucket + 1] = value
+                end
+            end
+        end
+
+        local entries, group_of, is_material = {}, {}, {}
+        for _, subgroup in ipairs(subgroups) do
+            local sorted
+            if filter_type == "item" then
+                sorted = fs_util.sort_prototypes(fs_util.to_list(prototypes.get_item_filtered {
+                    { filter = "subgroup", subgroup = subgroup.name },
+                }))
+            elseif filter_type == "fluid" then
+                sorted = fs_util.sort_prototypes(fs_util.to_list(prototypes.get_fluid_filtered {
+                    { filter = "subgroup", subgroup = subgroup.name },
+                }))
+            elseif filter_type == "recipe" then
+                sorted = fs_util.sort_prototypes(fs_util.to_list(prototypes.get_recipe_filtered {
+                    { filter = "subgroup", subgroup = subgroup.name },
+                }))
+            else -- virtual_recipe / external
+                sorted = fs_util.sort_prototypes(virtuals_by_subgroup[subgroup.name] or {})
+            end
+
+            for _, value in ipairs(sorted) do
+                -- Blueprint-parameter placeholders must never be pickable (item / fluid
+                -- / recipe carry .parameter; virtuals never do).
+                local is_parameter = false
+                if filter_type == "item" or filter_type == "fluid" then
+                    is_parameter = value.parameter
+                elseif filter_type == "recipe" then
+                    is_parameter = prototypes.recipe[value.name].parameter
+                end
+                if not is_parameter then
+                    entries[#entries + 1] = value.name
+                    group_of[#group_of + 1] = subgroup.name
+                    if filter_type == "virtual_recipe" then
+                        -- material / recipe names share one namespace; identity against
+                        -- storage.virtuals.material is collision-proof (value is the very
+                        -- object bucketed from one of the two stores).
+                        is_material[#is_material + 1] = storage.virtuals.material[value.name] == value
+                    end
+                end
+            end
+        end
+        ---@type PickerBuildPlan
+        return { entries = entries, group_of = group_of, is_material = is_material }
+    end,
+
+    make_button = function(player_index, req, plan, i)
+        local name = plan.entries[i]
+        local filter_type = req.filter_type
+
+        local value
+        if filter_type == "item" then
+            value = prototypes.item[name]
+        elseif filter_type == "fluid" then
+            value = prototypes.fluid[name]
+        elseif filter_type == "recipe" then
+            value = prototypes.recipe[name]
+        elseif filter_type == "virtual_recipe" then
+            value = plan.is_material[i] and storage.virtuals.material[name] or storage.virtuals.recipe[name]
+        elseif filter_type == "external" then
+            value = storage.virtuals.recipe[name]
+        end
+        if not value then return nil end
+
+        local relation_to_recipes = save.get_relation_to_recipes(player_index)
+        local player_data = save.get_player_data(player_index)
+        local is_hidden = acc.is_hidden(value)
+        local is_unresearched = acc.is_unresearched(value, relation_to_recipes)
+        if not common.craft_visible(is_hidden, is_unresearched, player_data) then
+            return nil
+        end
+        local needle = req.needle or ""
+        if needle ~= "" then
+            local dict_name = (filter_type == "item" and "item")
+                or (filter_type == "fluid" and "fluid")
+                or (filter_type == "recipe" and "recipe")
+                or "virtual" -- virtual_recipe / external both draw from storage.virtuals
+            local dict = flib_dictionary.get(player_index, dict_name)
+            -- name is the enumerated craft / entry name (the dictionary key), which
+            -- differs from typed_name.name for fluid-temperature virtual materials.
+            if not common.name_filter_matches(needle, name, dict and dict[name] or nil) then
+                return nil
+            end
+        end
+
+        local typed_name = tn.craft_to_typed_name(value)
+        return common.create_decorated_sprite_button {
+            typed_name = typed_name,
+            is_hidden = is_hidden,
+            is_unresearched = is_unresearched,
+            tags = {
+                typed_name = typed_name,
+            },
+            handler = {
+                [defines.events.on_gui_click] = handlers.on_constraint_picker_button_click,
+            },
+        }
+    end,
+}
 
 fs_util.add_handlers(handlers)
 

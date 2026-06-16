@@ -18,6 +18,12 @@
 --   open_group(pi, req, table, group)  -> appends the group's slot table, returns it
 --   current_slot(pi, req, table)       -> the current (last) slot table to append to
 --   make_button(pi, req, plan, i)      -> a GuiElemDef for entry i, or nil to skip it
+--   close_group(pi, req, table)        -> OPTIONAL; called when the current group ends
+--                                         (group change or build completion). Used by
+--                                         single-table pickers (constraint_adder) to pad
+--                                         the just-finished group to a row boundary;
+--                                         per-group-table pickers (production_line_adder)
+--                                         omit it.
 local fs_util = require "fs_util"
 local save = require "manage/save"
 
@@ -84,6 +90,12 @@ local function advance_one(player_index, state, budget)
             if def then
                 local g = plan.group_of[i]
                 if g ~= state.current_group then
+                    -- Close the previous group before opening the next. Only fires on
+                    -- a real group change (never mid-budget within a group), so a
+                    -- single-table picker's padding lands exactly at group boundaries.
+                    if state.current_group ~= nil and spec.close_group then
+                        spec.close_group(player_index, state.req, t)
+                    end
                     slot = spec.open_group(player_index, state.req, t, g)
                     state.current_group = g
                 elseif not slot then
@@ -94,7 +106,14 @@ local function advance_one(player_index, state, budget)
             state.cursor = i + 1
             processed = processed + 1
         end
-        if state.cursor > n then state.phase = "done" end
+        if state.cursor > n then
+            -- Build complete: close the final group (the last one never sees a group
+            -- change to trigger its close).
+            if state.current_group ~= nil and spec.close_group then
+                spec.close_group(player_index, state.req, t)
+            end
+            state.phase = "done"
+        end
         return state.phase == "done"
     end
 

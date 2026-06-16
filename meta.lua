@@ -52,24 +52,30 @@ __factory_solver__storage = {}
 ---@field machine_clipboard MachineClipboard?
 ---@field module_clipboard TypedName?
 ---@field build_assistant_mode BuildAssistantMode
----@field picker_builds table<string, PickerBuildState>? In-flight tick-split picker builds (ui/picker_build.lua), keyed by section frame name (recipe_for_*); up to 4 concurrent for one open dialog. nil when none. Plain string/number tables only (no LuaObject, no live iterator), so it is storage / on_load safe and resumable after save/load.
+---@field picker_builds table<string, PickerBuildState>? In-flight tick-split picker builds (ui/picker_build.lua), keyed by a per-build string (production_line_adder: the section frame name recipe_for_*, up to 4 concurrent; constraint_adder: "constraint_picker", one at a time). nil when none. Plain string/number tables only (no LuaObject, no live iterator), so it is storage / on_load safe and resumable after save/load.
 
 ---Captured, storage-safe context for a tick-split picker build (ui/picker_build.lua).
+---Common fields are spec_id / needle / dialog_name; the rest are read only by the
+---spec that produced the request (production_line_adder uses kind / reference /
+---section_name, constraint_adder uses filter_type / group_name).
 ---@class PickerBuildRequest
 ---@field spec_id string Registry key for the picker's callback spec.
----@field kind string product | spent | ingredient | fuel.
----@field reference TypedName The clicked material (plain table).
 ---@field needle string Folded name-filter ("" = none).
 ---@field dialog_name string Root element name to re-find the dialog.
----@field section_name string Section frame name to re-find the target table.
+---@field kind string? production_line_adder: product | spent | ingredient | fuel.
+---@field reference TypedName? production_line_adder: the clicked material (plain table).
+---@field section_name string? production_line_adder: section frame name to re-find the target table.
+---@field filter_type string? constraint_adder: item | fluid | recipe | virtual_recipe | external.
+---@field group_name string? constraint_adder: selected item-group whose subgroups are built.
 
----Deterministic, storage-safe build plan: recipe names in final display order plus
----the item-group each belongs to (group change = new slot table). is_hidden /
----is_unresearched are recomputed in the build phase (the relation cache is stable
----mid-build -- a cache rebuild closes all GUIs), so they are not stored here.
+---Deterministic, storage-safe build plan: entry names in final display order plus
+---the grouping key each belongs to (group change drives open_group / close_group).
+---is_hidden / is_unresearched are recomputed in the build phase (the relation cache
+---is stable mid-build -- a cache rebuild closes all GUIs), so they are not stored here.
 ---@class PickerBuildPlan
----@field entries string[] Recipe names in display order.
----@field group_of string[] Parallel: item-group name per entry.
+---@field entries string[] Entry names (recipe / item / fluid / virtual) in display order.
+---@field group_of string[] Parallel: grouping key per entry (item-group for production_line_adder, subgroup for constraint_adder).
+---@field is_material boolean[]? Parallel: constraint_adder virtual_recipe tab only -- true if the entry resolves from storage.virtuals.material (else .recipe), since material / recipe names share one namespace.
 
 ---Progress state for one section's tick-split build.
 ---@class PickerBuildState
@@ -77,7 +83,7 @@ __factory_solver__storage = {}
 ---@field plan PickerBuildPlan? nil during the plan phase.
 ---@field phase string "plan" | "build" | "done".
 ---@field cursor integer 1-based next entry to build (dense array we own, O(1) resume).
----@field current_group string? Item-group of the currently open slot table (re-acquired by structure, not stored handle).
+---@field current_group string? Grouping key of the currently open slot (re-acquired by structure, not a stored handle); drives open_group / close_group on change.
 
 ---Which interaction style the docked Build assistant uses. "blueprint" hands
 ---the player a temporary blueprint for construction-robot placement; "manual"
