@@ -24,6 +24,13 @@
 --                                         the just-finished group to a row boundary;
 --                                         per-group-table pickers (production_line_adder)
 --                                         omit it.
+--   sort_run(pi, req, plan, lo, hi)    -> OPTIONAL; sort plan.entries[lo..hi] (one
+--                                         subgroup) in place, co-permuting any parallel
+--                                         arrays the spec owns. Called once per sort-run
+--                                         when its first entry is reached, so the per-
+--                                         subgroup sort is spread across build ticks
+--                                         instead of paid up front in the plan tick.
+--                                         Required iff plan.sort_of is set.
 local fs_util = require "fs_util"
 local save = require "manage/save"
 
@@ -83,6 +90,17 @@ local function advance_one(player_index, state, budget)
         local processed = 0
         while processed < budget and state.cursor <= n do
             local i = state.cursor
+            -- Sort this entry's run (one subgroup) once, when first reached, before its
+            -- buttons are built. Folding the per-subgroup sort here keeps it off the
+            -- one-shot plan tick (which would otherwise pay the whole display sort up
+            -- front). The run is contiguous (the plan bucketed entries by subgroup), so
+            -- its extent is the maximal i..hi sharing this sort_of.
+            if plan.sort_of and plan.sort_of[i] ~= state.current_sort then
+                local hi = i
+                while hi < n and plan.sort_of[hi + 1] == plan.sort_of[i] do hi = hi + 1 end
+                spec.sort_run(player_index, state.req, plan, i, hi)
+                state.current_sort = plan.sort_of[i]
+            end
             -- make_button returns nil for entries filtered out (hidden / unresearched
             -- not shown, or name-filtered): skip without opening their group, so a
             -- fully-filtered group never gets an empty sprite + table.

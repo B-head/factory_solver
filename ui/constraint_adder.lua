@@ -213,6 +213,24 @@ end
 -- former inline padding loop). plan emits every candidate name in display order with its
 -- subgroup as the grouping key; make_button applies the per-entry hidden / unresearched /
 -- name-filter checks (so they spread across ticks too) and returns nil to skip.
+
+-- Resolve an entry name to its prototype / virtual by tab. For the virtual_recipe
+-- tab, material and recipe names share one namespace, so the caller passes which
+-- store the entry came from (is_material). Shared by make_button and sort_run.
+local function resolve_constraint_value(filter_type, name, is_material)
+    if filter_type == "item" then
+        return prototypes.item[name]
+    elseif filter_type == "fluid" then
+        return prototypes.fluid[name]
+    elseif filter_type == "recipe" then
+        return prototypes.recipe[name]
+    elseif filter_type == "virtual_recipe" then
+        return is_material and storage.virtuals.material[name] or storage.virtuals.recipe[name]
+    elseif filter_type == "external" then
+        return storage.virtuals.recipe[name]
+    end
+end
+
 picker_build.register_spec {
     id = "constraint_adder",
 
@@ -281,26 +299,28 @@ picker_build.register_spec {
             end
         end
 
-        local entries, group_of, is_material = {}, {}, {}
+        local entries, group_of, sort_of, is_material = {}, {}, {}, {}
         for _, subgroup in ipairs(subgroups) do
-            local sorted
+            local candidates
             if filter_type == "item" then
-                sorted = fs_util.sort_prototypes(fs_util.to_list(prototypes.get_item_filtered {
+                candidates = fs_util.to_list(prototypes.get_item_filtered {
                     { filter = "subgroup", subgroup = subgroup.name },
-                }))
+                })
             elseif filter_type == "fluid" then
-                sorted = fs_util.sort_prototypes(fs_util.to_list(prototypes.get_fluid_filtered {
+                candidates = fs_util.to_list(prototypes.get_fluid_filtered {
                     { filter = "subgroup", subgroup = subgroup.name },
-                }))
+                })
             elseif filter_type == "recipe" then
-                sorted = fs_util.sort_prototypes(fs_util.to_list(prototypes.get_recipe_filtered {
+                candidates = fs_util.to_list(prototypes.get_recipe_filtered {
                     { filter = "subgroup", subgroup = subgroup.name },
-                }))
+                })
             else -- virtual_recipe / external
-                sorted = fs_util.sort_prototypes(virtuals_by_subgroup[subgroup.name] or {})
+                candidates = virtuals_by_subgroup[subgroup.name] or {}
             end
 
-            for _, value in ipairs(sorted) do
+            -- Emit this subgroup's candidates UNSORTED; sort_run sorts the run in the
+            -- build phase so the display sort doesn't land on the one-shot plan tick.
+            for _, value in ipairs(candidates) do
                 -- Blueprint-parameter placeholders must never be pickable (item / fluid
                 -- / recipe carry .parameter; virtuals never do).
                 local is_parameter = false
@@ -312,6 +332,7 @@ picker_build.register_spec {
                 if not is_parameter then
                     entries[#entries + 1] = value.name
                     group_of[#group_of + 1] = subgroup.name
+                    sort_of[#sort_of + 1] = subgroup.name
                     if filter_type == "virtual_recipe" then
                         -- material / recipe names share one namespace; identity against
                         -- storage.virtuals.material is collision-proof (value is the very
@@ -322,25 +343,37 @@ picker_build.register_spec {
             end
         end
         ---@type PickerBuildPlan
-        return { entries = entries, group_of = group_of, is_material = is_material }
+        return { entries = entries, group_of = group_of, sort_of = sort_of, is_material = is_material }
+    end,
+
+    -- Sort one subgroup's slice into display order (the former per-subgroup
+    -- sort_prototypes), precomputing (order, name) keys so the comparator does not
+    -- re-read the prototype API per comparison. group_of is constant within a run;
+    -- the virtual_recipe is_material flag travels with its entry through the sort.
+    sort_run = function(player_index, req, plan, lo, hi)
+        local filter_type = req.filter_type
+        local is_virtual = filter_type == "virtual_recipe"
+        local keyed = {}
+        for i = lo, hi do
+            local name = plan.entries[i]
+            local m = plan.is_material and plan.is_material[i]
+            local value = resolve_constraint_value(filter_type, name, m)
+            keyed[#keyed + 1] = { order = value.order, name = name, m = m }
+        end
+        flib_table.sort(keyed, function(a, b)
+            if a.order ~= b.order then return a.order < b.order else return a.name < b.name end
+        end)
+        for k = 1, #keyed do
+            plan.entries[lo + k - 1] = keyed[k].name
+            if is_virtual then plan.is_material[lo + k - 1] = keyed[k].m end
+        end
     end,
 
     make_button = function(player_index, req, plan, i)
         local name = plan.entries[i]
         local filter_type = req.filter_type
 
-        local value
-        if filter_type == "item" then
-            value = prototypes.item[name]
-        elseif filter_type == "fluid" then
-            value = prototypes.fluid[name]
-        elseif filter_type == "recipe" then
-            value = prototypes.recipe[name]
-        elseif filter_type == "virtual_recipe" then
-            value = plan.is_material[i] and storage.virtuals.material[name] or storage.virtuals.recipe[name]
-        elseif filter_type == "external" then
-            value = storage.virtuals.recipe[name]
-        end
+        local value = resolve_constraint_value(filter_type, name, plan.is_material and plan.is_material[i])
         if not value then return nil end
 
         local relation_to_recipes = save.get_relation_to_recipes(player_index)

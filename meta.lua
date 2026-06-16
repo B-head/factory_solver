@@ -73,8 +73,9 @@ __factory_solver__storage = {}
 ---is_hidden / is_unresearched are recomputed in the build phase (the relation cache
 ---is stable mid-build -- a cache rebuild closes all GUIs), so they are not stored here.
 ---@class PickerBuildPlan
----@field entries string[] Entry names (recipe / item / fluid / virtual) in display order.
----@field group_of string[] Parallel: grouping key per entry (item-group for production_line_adder, subgroup for constraint_adder).
+---@field entries string[] Entry names, bucketed into contiguous sort-runs (subgroups) in group/subgroup order but UNSORTED within a run (the run is sorted lazily in the build phase by spec.sort_run, so the one-shot plan tick doesn't pay the whole sort).
+---@field group_of string[] Parallel: grouping key per entry (item-group for production_line_adder, subgroup for constraint_adder); drives open_group / close_group.
+---@field sort_of string[]? Parallel: sort-run key per entry (subgroup name). A change marks a new run that spec.sort_run sorts in place. nil = entries are already sorted (no in-build sort).
 ---@field is_material boolean[]? Parallel: constraint_adder virtual_recipe tab only -- true if the entry resolves from storage.virtuals.material (else .recipe), since material / recipe names share one namespace.
 
 ---Progress state for one section's tick-split build.
@@ -84,6 +85,7 @@ __factory_solver__storage = {}
 ---@field phase string "plan" | "build" | "done".
 ---@field cursor integer 1-based next entry to build (dense array we own, O(1) resume).
 ---@field current_group string? Grouping key of the currently open slot (re-acquired by structure, not a stored handle); drives open_group / close_group on change.
+---@field current_sort string? Sort-run key already sorted (drives spec.sort_run on change). Persists so a save/load mid-run does not re-sort.
 
 ---Which interaction style the docked Build assistant uses. "blueprint" hands
 ---the player a temporary blueprint for construction-robot placement; "manual"

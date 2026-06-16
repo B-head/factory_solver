@@ -364,7 +364,7 @@ picker_build.register_spec {
 
         local groups = fs_util.sort_prototypes(fs_util.to_list(prototypes.item_group))
 
-        local entries, group_of = {}, {}
+        local entries, group_of, sort_of = {}, {}, {}
         for _, group in ipairs(groups) do
             local group_recipes = grouped[group.name] or {}
             local subgrouped = fs_util.group_by(group_recipes, function(value)
@@ -373,19 +373,38 @@ picker_build.register_spec {
             local subgroups = fs_util.sort_prototypes(fs_util.to_list(group.subgroups))
             for _, subgroup in ipairs(subgroups) do
                 local subgroup_recipes = subgrouped[subgroup.name] or {}
-                local sorted = fs_util.sort_prototypes(fs_util.to_list(subgroup_recipes))
-                -- Emit every pickable recipe in display order; the hidden /
-                -- unresearched / name-filter checks run per-entry in make_button so
-                -- they are spread across ticks too (an all-filtered group then never
-                -- opens an empty slot table -- make_button returns nil there).
-                for _, recipe in ipairs(sorted) do
+                -- Emit every pickable recipe of this subgroup UNSORTED; sort_run sorts
+                -- the run in the build phase. The hidden / unresearched / name-filter
+                -- checks run per-entry in make_button so they spread across ticks too
+                -- (an all-filtered group then never opens an empty slot table).
+                for _, recipe in ipairs(subgroup_recipes) do
                     entries[#entries + 1] = recipe.name
                     group_of[#group_of + 1] = group.name
+                    sort_of[#sort_of + 1] = subgroup.name
                 end
             end
         end
         ---@type PickerBuildPlan
-        return { entries = entries, group_of = group_of }
+        return { entries = entries, group_of = group_of, sort_of = sort_of }
+    end,
+
+    -- Sort one subgroup's slice into display order (the former per-subgroup
+    -- sort_prototypes), precomputing (order, name) keys so the comparator does not
+    -- re-read the prototype API per comparison. group_of is constant within a
+    -- subgroup run, so only entries needs reordering.
+    sort_run = function(player_index, req, plan, lo, hi)
+        local keyed = {}
+        for i = lo, hi do
+            local name = plan.entries[i]
+            local recipe = storage.virtuals.recipe[name] or prototypes.recipe[name]
+            keyed[#keyed + 1] = { order = recipe.order, name = name }
+        end
+        flib_table.sort(keyed, function(a, b)
+            if a.order ~= b.order then return a.order < b.order else return a.name < b.name end
+        end)
+        for k = 1, #keyed do
+            plan.entries[lo + k - 1] = keyed[k].name
+        end
     end,
 
     -- Build one decorated button, or return nil to skip this entry. The hidden /
