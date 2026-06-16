@@ -755,6 +755,7 @@ end
 ---@field target_budget number?  Target-rescue lock (manage/pre_solve.lua M.target_rescue_step): add one upper-limit row capping the summed target elastics at this value, so the solve keeps the stage-1 target optimum no matter how expensive the violations the chain forces. This fixes the all-zero target collapse: a single weighted LP trades the target against violations at the finite exchange rate target_cost / elastic_cost = 2^10, so any problem needing > 1024 violation units per target unit was rationally abandoned (T relaxed in full -- the trade is linear, hence all-or-nothing). 30/1678 corpus problems before the rescue, 0 after. nil adds no row.
 ---@field recipe_epsilon number?  Override the flat recipe/bridge cost tier (the futile-loop tie-break; shipped default 2^-6). Used by the cascade stages indirectly (they overwrite recipe costs anyway) and by the machine-polish-vs-plain-epsilon research comparison. The per-key jitter scales as a fraction of this. nil keeps the shipped tier.
 ---@field hatch_exclude table<string, true>?  Cascade deletion final (solver/cascade.lua, also probe_vp_rescue): materials whose import hatches (intermediate |initial_source| / |shortage_source|) are omitted from the build entirely. Only sound once a stage solve has PROVEN the material's import can be ~zero (that solution witnesses feasibility, so elastic necessity is not violated) -- the deletion encodes the ~zero face structurally, where a ~zero budget row over live hatch variables is numerically hostile to the IPM interior. Deficit seeds still count for reachability; only the hatch variables disappear. nil omits nothing.
+---@field import_quad number?  Research probe (project_import_fabricate_convex, the QP route): a diagonal convex quadratic coefficient placed on every |shortage_source| import column via problem:set_quad, so the material's marginal import cost becomes (linear shortage cost) + import_quad * x -- it RISES with import quantity. The crossover where crafting beats importing self-selects per material as the marginal import cost climbs to meet the marginal craft cost. Combine with shortage_cost_fn to set a cheap linear floor (cheap top-up) under the rising curve. nil / 0 = pure linear (LP) import. Flips problem.has_quad, switching linear_programming to the QP Newton path. (Measured negative for import-vs-fabricate -- the lever is the cost level, not its shape -- but the set_quad/has_quad machinery is a general IPM-native QP capability.)
 
 ---Create linear programming problems.
 ---@param solution_name string
@@ -799,6 +800,10 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- numerically hostile to the IPM's interior point. Deficit seeds still
     -- count for reachability; only the hatch variables disappear.
     local opt_hatch_exclude = options.hatch_exclude
+    -- Research probe (project_import_fabricate_convex, QP route): a convex
+    -- quadratic on every |shortage_source| import column, so its marginal cost
+    -- rises with quantity. Set via problem:set_quad; nil/0 = pure linear (LP).
+    local opt_import_quad = options.import_quad
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -1098,6 +1103,14 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             local bare_limit = bare_fluid_limit_of(value)
             if bare_limit then
                 problem:add_subject_term(elastic_name, bare_limit, 1)
+            end
+
+            -- Research probe (import_quad, QP route): convex curvature on this
+            -- import column so its marginal cost rises with import quantity (the
+            -- artifact-free "curve"; no cap row, so no IPM-convergence tax). The
+            -- crossover where crafting beats importing self-selects per material.
+            if opt_import_quad and opt_import_quad ~= 0 then
+                problem:set_quad(elastic_name, opt_import_quad)
             end
         end
         ::continue::

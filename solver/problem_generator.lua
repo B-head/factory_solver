@@ -8,6 +8,7 @@ local vk = require "solver/var_key"
 ---@field duals table<string, Dual>
 ---@field dual_length integer
 ---@field subject_terms number[][]
+---@field has_quad boolean? True once set_quad puts a nonzero diagonal quadratic objective coefficient on any primal; gates the QP Newton path in linear_programming. nil/false = pure LP (the shipped/headless default).
 ---@field bridges NormalizedProductionLine[] Temperature bridges injected by create_problem; populated externally after construction.
 ---@field inactive_recipe_variables table<string, true>? Recipe variables omitted from the LP because they are not connected to any user Constraint; populated by create_problem.
 ---@field reduced Problem? Proportional row reduction (solver\substitution.lua): the smaller problem the IPM actually solves, built once per "ready" rebuild in manage\pre_solve.lua. nil when substitution is disabled.
@@ -23,6 +24,7 @@ local M = {}
 ---@field is_result boolean
 ---@field kind PrimalKind? Variable class; builders set it so solution readers classify without parsing the key.
 ---@field material string? For an escape variable, the base material variable key it stands in for.
+---@field quad number? Diagonal quadratic objective coefficient (the ½·quad·x² convex curvature; QP support). nil/0 = linear only.
 
 ---@class Dual
 ---@field key string
@@ -49,6 +51,7 @@ function M.new(name)
         duals = {},
         dual_length = 0,
         subject_terms = {},
+        has_quad = false,
         bridges = {},
     }
     return M.setup_metatable(self)
@@ -82,6 +85,21 @@ end
 function M:update_objective_cost(primal_variable, cost)
     local t = self.primals[primal_variable].cost
     self.primals[primal_variable].cost = t + cost
+end
+
+---Set the diagonal quadratic objective coefficient on a primal -- the ½·quad·x²
+---convex curvature (QP support; create_problem's import_quad uses it to make a
+---material's marginal import cost rise with import quantity). quad must be >= 0 so
+---the objective stays convex; 0 leaves the variable purely linear. The first
+---nonzero quad flips problem.has_quad, which switches linear_programming to the QP
+---Newton path (D² = (S/X + Q)⁻¹). No-op if the variable does not exist.
+---@param primal_variable string
+---@param quad number
+function M:set_quad(primal_variable, quad)
+    local p = self.primals[primal_variable]
+    if not p then return end
+    p.quad = quad
+    if quad ~= 0 then self.has_quad = true end
 end
 
 ---Is there an objective term that corresponds to the key?
@@ -227,6 +245,18 @@ function M:generate_cost_vector()
         for _, v in pairs(self.primals) do
             ret[v.index] = v.cost
         end
+    end
+    return csr_matrix.with_vector(ret, self.primal_length)
+end
+
+---Diagonal of the quadratic objective term Q (½·xᵀ·Q·x). Mirrors
+---generate_cost_vector; every primal without a set_quad contributes 0. Only built
+---when problem.has_quad (the QP path), so the pure-LP solve never pays for it.
+---@return CsrMatrix
+function M:generate_quad_vector()
+    local ret = {}
+    for _, v in pairs(self.primals) do
+        ret[v.index] = v.quad or 0
     end
     return csr_matrix.with_vector(ret, self.primal_length)
 end

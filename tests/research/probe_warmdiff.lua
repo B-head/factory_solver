@@ -62,6 +62,40 @@ do local s = os.getenv("FS_TIE_KINDS")
 end
 problem_generator.set_tie_kinds(TIE_KINDS)
 
+-- FS_QPREG=ε: the QP tie-break alternative (project_import_pwl_probe spin-off).
+-- Instead of the LINEAR per-variable cost, place a convex quadratic ½·ε·x² on the
+-- recipe/bridge columns (problem:set_quad), making the objective STRONGLY CONVEX
+-- so its minimizer is unique -- start-, pairs-order-, and tolerance-independent --
+-- at ANY ε>0. The linear tie-break needs ε big enough to break a tie past IPM
+-- tolerance (which then perturbs near-tie tier margins, the C-2 dead end); strong
+-- convexity buys uniqueness from curvature, not magnitude, so ε can sit far below
+-- every tier. Applied to the SAME heavy builds as the linear tie-break; the
+-- target-only measurement build stays clean (ε would swamp target_rescue_epsilon
+-- 2^-20). Quality risk to measure: min-2-norm spreads flow (like the analytic
+-- centre), which may cost machine count.
+local QPREG = tonumber(os.getenv("FS_QPREG") or "") or 0
+local QP_KINDS = TIE_KINDS or { recipe = true, bridge = true }
+-- FS_QPSCALE=struct: the magnitude-normalized quadratic (the QP analogue of the
+-- linear "struct" tie-break). Per-variable q_k = ε / max(|mag_k|, floor)² with
+-- mag = lp.least_norm_magnitude, so the objective perturbation ½·q_k·x_k² ≈ ½·ε
+-- is uniform across the 1e-2..1e5 magnitude spread instead of scaling as x².
+local QPSCALE = (os.getenv("FS_QPSCALE") or "off"):lower()
+local QPFLOOR = tonumber(os.getenv("FS_QPFLOOR") or "") or 1e-3
+local function apply_qpreg(p)
+    if QPREG <= 0 or not p then return end
+    local mag = (QPSCALE == "struct") and lp.least_norm_magnitude(p) or nil
+    for k, pr in pairs(p.primals) do
+        if QP_KINDS[pr.kind] then
+            local q = QPREG
+            if mag then
+                local m = mag[k]
+                if m then local a = math.abs(m); if a < QPFLOOR then a = QPFLOOR end; q = QPREG / (a * a) end
+            end
+            p:set_quad(k, q)
+        end
+    end
+end
+
 local function solve(p, warm) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }, warm) end
 local function budget(opt) return opt * (1 + BUDGET_REL) + BUDGET_ABS end
 
@@ -110,6 +144,7 @@ local function run_cascade(constraints, lines, warm)
     problem_generator.set_tie_scale(nil) -- baseline/rescue flat: they ARE the scale source
     local prob = build_ship(constraints, lines, nil)
     if not prob then return nil end
+    apply_qpreg(prob) -- QP tie-break on the baseline heavy build (cold in both runs)
     local s, v = solve(prob)
     if s ~= "finished" then return nil end
     -- C-2: per-variable magnitude estimate from the baseline solution. Cold in
@@ -142,6 +177,7 @@ local function run_cascade(constraints, lines, warm)
             if heavy and TIESCALE == "struct" then smap = lp.least_norm_magnitude(bp)
             elseif heavy and TIESCALE == "on" then smap = scale_map end
             problem_generator.set_tie_scale(smap, TIEFLOOR)
+            if heavy then apply_qpreg(bp) end -- QP tie-break on heavy builds only
             local seed = (warm and not cold_this) and prev_any or nil
             local bs, bv = solve_cascade(bp, seed)
             if warm and bs == "finished" and bv then prev_any = bv end

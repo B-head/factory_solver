@@ -67,6 +67,30 @@ do local s = os.getenv("FS_TIE_KINDS")
 end
 problem_generator.set_tie_kinds(TIE_KINDS)
 
+-- FS_QPREG=ε / FS_QPSCALE=struct: the QP tie-break alternative (see probe_warmdiff
+-- for the rationale). A convex quadratic ½·q_k·x² on the recipe/bridge heavy-build
+-- columns; struct normalizes q_k = ε / max(|mag_k|, floor)² by lp.least_norm_magnitude
+-- so the perturbation is magnitude-uniform. This driver GRADES the result against
+-- the reference 5-tier optimum -- the quality half of the invariance/quality trade.
+local QPREG = tonumber(os.getenv("FS_QPREG") or "") or 0
+local QPSCALE = (os.getenv("FS_QPSCALE") or "off"):lower()
+local QPFLOOR = tonumber(os.getenv("FS_QPFLOOR") or "") or 1e-3
+local QP_KINDS = TIE_KINDS or { recipe = true, bridge = true }
+local function apply_qpreg(p)
+    if QPREG <= 0 or not p then return end
+    local mag = (QPSCALE == "struct") and lp.least_norm_magnitude(p) or nil
+    for k, pr in pairs(p.primals) do
+        if QP_KINDS[pr.kind] then
+            local q = QPREG
+            if mag then
+                local m = mag[k]
+                if m then local a = math.abs(m); if a < QPFLOOR then a = QPFLOOR end; q = QPREG / (a * a) end
+            end
+            p:set_quad(k, q)
+        end
+    end
+end
+
 -- FS_SUBST=on folds the cascade STAGE / lock / fix-test / final builds through
 -- proportional row reduction before the IPM solves them (off = the shipped
 -- behaviour, which skips the fold for cascade builds). The baseline / target-
@@ -260,6 +284,7 @@ local function solve_via_cascade(constraints, lines)
             if heavy and TIESCALE == "struct" then smap = lp.least_norm_magnitude(bp)
             elseif heavy and TIESCALE == "on" then smap = scale_map end
             problem_generator.set_tie_scale(smap, TIEFLOOR)
+            if heavy then apply_qpreg(bp) end -- QP tie-break on heavy builds only
             if WARM_ALL then is_cold_build = false end
             if WARM_SUPPORT and b.cold and not b.fix then is_cold_build = false end
             if WARM_INDIV and b.fix and #b.fix.priced == 1 then is_cold_build = false end

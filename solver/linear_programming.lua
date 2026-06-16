@@ -503,7 +503,16 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     end
 
     local primal = A * x - b
+    -- QP support: a separable convex quadratic objective term ½·xᵀ·Q·x (Q diagonal
+    -- and >= 0, set only on import columns via problem:set_quad) shifts the dual-
+    -- feasibility residual to AᵀY + s − c − Qx and the Newton normal-equation
+    -- diagonal to (S/X + Q)⁻¹. Gated on has_quad so the pure-LP path (every shipped
+    -- and headless solve today) stays byte-identical -- no quad vector is built and
+    -- no extra elementwise op runs when Q is absent.
+    local has_quad = problem.has_quad == true
+    local q = has_quad and problem:generate_quad_vector() or nil
     local dual = AT * y + s - c
+    if has_quad then dual = dual - hmul(q, x) end
     local duality_gap = hmul(s, x)
 
     -- Relative residual norms keep the convergence test independent of the
@@ -557,14 +566,12 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     --   S·Δx + X·Δs = -XSe + σμ·e
     -- with σ = centering_sigma. Block-eliminating Δx and Δs gives the
     -- reduced normal-equation form
-    --   A·D²·Aᵀ · Δy = aug
-    -- (with D² = X·S⁻¹). sic = (XSe - σμe)/s packages the complementarity
-    -- RHS so the existing aug = A·(SX·-r_d + sic) - r_p shape applies.
-    local SX = hpow(hmul(hpow(s, -0.5), hpow(x, 0.5)), 2):diag()
+    --   A·D²·Aᵀ · Δy = aug,   D² = (S/X + Q)⁻¹
+    -- where Q is the (diagonal) quadratic objective curvature. For a pure LP Q = 0
+    -- so D² = X·S⁻¹ and the step collapses to the original primal-dual form; the
+    -- has_quad branch below reproduces it byte-for-byte. The Cholesky retry that
+    -- follows is unaffected by Q.
     local mu = vector_sum(duality_gap) / p_degree
-    local barrier = csr_matrix.with_vector(centering_sigma * mu, p_degree)
-    local sic = hmul(hpow(s, -1), duality_gap - barrier)
-    local aug = A * (SX * -dual + sic) - primal
 
     -- Cholesky stability is handled in two COMPLEMENTARY layers, because the
     -- near-singular A·D²·Aᵀ has two distinct round-off failure modes (as the IPM
@@ -585,19 +592,54 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     -- with zero residual failures below 1e-10. The two-tier shape keeps the
     -- well-conditioned majority bias-free: try unregularised first, fall back to
     -- the fat ε·I only on detected NaN.
+    -- Memoized-or-fused factorization selector (M.cholesky_memo, from main's
+    -- gated LDLᵀ memo). Shared by both Newton branches below.
     local cholesky = M.cholesky_memo and csr_matrix.cholesky_decomposition_memo
         or csr_matrix.cholesky_decomposition
-    local function solve_step(reg_epsilon)
-        local P = A * SX * AT
-        if reg_epsilon > 0 then
-            P = P + csr_matrix.with_diagonal(reg_epsilon, d_degree)
+    local solve_step
+    if has_quad then
+        -- QP path. D² = (S/X + Q)⁻¹ stays diagonal, so the A·D²·Aᵀ Cholesky shape
+        -- is unchanged. The step is recovered Δx-first: the dual-feasibility row
+        -- Aᵀ·Δy + Δs − Q·Δx = −r_d couples Δs to Q·Δx, so Δs cannot be formed
+        -- before Δx the way the LP path does.
+        --   Δx = D²·(Aᵀ·Δy + w),   w = r_d − Se + σμ·X⁻¹e
+        --   Δs = −Aᵀ·Δy − r_d + Q·Δx
+        local sigma_mu = centering_sigma * mu
+        local d2 = hpow(hdiv(s, x) + q, -1)
+        local d2_diag = d2:diag()
+        local w = dual - s + sigma_mu * hpow(x, -1)
+        local aug = -primal - A * hmul(d2, w)
+        solve_step = function(reg_epsilon)
+            local P = A * d2_diag * AT
+            if reg_epsilon > 0 then
+                P = P + csr_matrix.with_diagonal(reg_epsilon, d_degree)
+            end
+            local L, D = cholesky(P)
+            local y_step_ = csr_matrix.backward_substitution(L:T(),
+                csr_matrix.forward_substitution(L * D, aug))
+            local x_step_ = hmul(d2, AT * y_step_ + w)
+            local s_step_ = AT * -y_step_ - dual + hmul(q, x_step_)
+            return y_step_, s_step_, x_step_
         end
-        local L, D = cholesky(P)
-        local y_step_ = csr_matrix.backward_substitution(L:T(),
-            csr_matrix.forward_substitution(L * D, aug))
-        local s_step_ = AT * -y_step_ - dual
-        local x_step_ = SX * -s_step_ - sic
-        return y_step_, s_step_, x_step_
+    else
+        -- Pure-LP path (D² = X·S⁻¹). sic = (XSe - σμe)/s packages the
+        -- complementarity RHS so the aug = A·(SX·-r_d + sic) - r_p shape applies.
+        local SX = hpow(hmul(hpow(s, -0.5), hpow(x, 0.5)), 2):diag()
+        local barrier = csr_matrix.with_vector(centering_sigma * mu, p_degree)
+        local sic = hmul(hpow(s, -1), duality_gap - barrier)
+        local aug = A * (SX * -dual + sic) - primal
+        solve_step = function(reg_epsilon)
+            local P = A * SX * AT
+            if reg_epsilon > 0 then
+                P = P + csr_matrix.with_diagonal(reg_epsilon, d_degree)
+            end
+            local L, D = cholesky(P)
+            local y_step_ = csr_matrix.backward_substitution(L:T(),
+                csr_matrix.forward_substitution(L * D, aug))
+            local s_step_ = AT * -y_step_ - dual
+            local x_step_ = SX * -s_step_ - sic
+            return y_step_, s_step_, x_step_
+        end
     end
 
     local y_step, s_step, x_step = solve_step(0)
