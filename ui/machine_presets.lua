@@ -25,6 +25,17 @@ function handlers.on_make_preset_tables(event)
     local player_data = save.get_player_data(event.player_index)
     local relation_to_recipes = save.get_relation_to_recipes(event.player_index)
 
+    -- Read the dialog's presets ONCE here and set each button's toggled state at
+    -- build time, rather than building untoggled buttons and re-syncing them with a
+    -- post-build dispatch_to_subtree(on_preset_changed). LuaGuiElement.tags returns
+    -- a fresh snapshot of the whole presets table on every read, so the old toggle
+    -- handler -- fired per button by a dialog-wide dispatch run once per preset
+    -- table (5x) -- copied presets thousands of times: ~1.3s of the dialog open at
+    -- pyanodon scale. Build-time toggle reads it once per table instead. The click
+    -- path keeps the on_preset_changed handler for the narrow per-row re-sync.
+    local dialog = assert(fs_util.find_upper(elem, "factory_solver_machine_presets"))
+    local presets = dialog.tags.presets --[[@as Presets]]
+
     -- This runs both on_added (initial build) and on_craft_visible_changed (filter
     -- toggle), so it must clear prior rows first; otherwise every toggle appends a
     -- fresh, unfiltered copy on top of the old one — the filter appears inert and
@@ -108,6 +119,24 @@ function handlers.on_make_preset_tables(event)
                 goto continue_row
             end
 
+            -- The currently-selected preset for this row, used to set toggled at
+            -- build time. fluid_fuel is a single global pick; the rest are dicts
+            -- keyed by the row's preset key. Mirrors on_preset_change_toggle's
+            -- lookup (explicit per type, not dynamic, to keep the Presets type
+            -- checkable).
+            local selected
+            if preset_type == "fuel" then
+                selected = presets.fuel[row.key]
+            elseif preset_type == "fluid_fuel" then
+                selected = presets.fluid_fuel
+            elseif preset_type == "resource" then
+                selected = presets.resource[row.key]
+            elseif preset_type == "machine" then
+                selected = presets.machine[row.key]
+            elseif preset_type == "fixed_recipe" then
+                selected = presets.fixed_recipe[row.key]
+            end
+
             -- Build the buttons first so a row whose every choice is filtered out
             -- by the visibility switches contributes nothing: no label and no empty
             -- slot frame are emitted, and it does not count toward rows_emitted.
@@ -134,6 +163,11 @@ function handlers.on_make_preset_tables(event)
                         [defines.events.on_gui_click] = handlers.on_preset_button_click,
                         on_preset_changed = handlers.on_preset_change_toggle,
                     },
+                }
+                -- toggled is a LuaGuiElement property (set post-creation), so it
+                -- rides in elem_mods on the returned def rather than the add_param.
+                def.elem_mods = {
+                    toggled = selected ~= nil and tn.equals_typed_name(selected, typed_name, true) or false,
                 }
                 flib_table.insert(def_buttons, def)
                 ::continue_button::
@@ -185,9 +219,6 @@ function handlers.on_make_preset_tables(event)
     if preset_type == "fixed_recipe" then
         elem.parent.visible = rows_emitted > 0
     end
-
-    local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_presets"))
-    fs_util.dispatch_to_subtree(dialog, "on_preset_changed")
 end
 
 ---@param event EventData.on_gui_click
@@ -215,7 +246,12 @@ function handlers.on_preset_button_click(event)
     end
 
     dialog.tags = dialog_tags
-    fs_util.dispatch_to_subtree(dialog, "on_preset_changed")
+    -- Only the clicked row's buttons change toggled state (its category's selection
+    -- moved); re-sync just that slot table, not the whole dialog. elem.parent is the
+    -- filter_slot_table holding this category's buttons. A dialog-wide dispatch here
+    -- would re-toggle every preset button -- each snapshotting dialog.tags -- for no
+    -- reason, the same cost the build path used to pay.
+    fs_util.dispatch_to_subtree(elem.parent, "on_preset_changed")
 end
 
 ---@param event EventDataTrait
