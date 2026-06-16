@@ -702,6 +702,23 @@ function M.rename_solution(solutions, solution_name, new_solution_name)
     return new_solution_name
 end
 
+---Default base value (per-second) for the "set default" button, by constraint
+---type. <heat> (a virtual_material) is in heat-energy units, so it uses the
+---conversion lifted from create_problem rather than a plain per-second rate.
+---@param type_ FilterType
+---@param name string
+---@return number
+function M.default_base(type_, name)
+    if type_ == "recipe" or type_ == "virtual_recipe" then
+        return 1
+    elseif type_ == "fluid" then
+        return 5
+    elseif type_ == "virtual_material" and name == "<heat>" then
+        return 0.5 / (100 / 10e6)
+    end
+    return 0.5 -- item, virtual_material (non-heat)
+end
+
 ---comment
 ---@param solution Solution
 ---@param typed_name TypedName
@@ -715,12 +732,7 @@ function M.new_constraint(solution, typed_name)
         return
     end
 
-    local amount
-    if typed_name.type == "recipe" or typed_name.type == "virtual_recipe" then
-        amount = 1
-    else
-        amount = 0.5
-    end
+    local amount = M.default_base(typed_name.type, typed_name.name)
 
     ---@type Constraint
     local add_data = {

@@ -384,5 +384,45 @@ commands.add_command(
     end
 )
 
+-- The amount quick-set popup (ui/solution_settings.lua) is an inline element, so
+-- it can't use a modal backdrop to detect outside clicks (the backdrop would
+-- cover the popup itself). Register on_gui_click *before* flib_gui.handle_events()
+-- -- which skips ids that already have a handler -- and forward to
+-- flib_gui.dispatch ourselves, then close the popup when the click lands outside
+-- it. This only sees GuiElement clicks (not world / empty-GUI clicks), an
+-- accepted limitation.
+script.on_event(defines.events.on_gui_click, function(event)
+    flib_gui.dispatch(event)
+
+    local player_data = storage.players[event.player_index]
+    if not (player_data and player_data.expanded_constraint_index) then return end
+    local element = event.element
+    if not (element and element.valid) then return end
+    -- The amount field (any row) and anything inside the popup keep it open: the
+    -- field stays editable; the slider / throughput / close button handle
+    -- themselves.
+    if element.name == "amount_field" then return end
+    if fs_util.find_upper(element, "popup") then return end
+    -- Outside click: clear the marker and hide the popups in place. We must NOT
+    -- rebuild the table here -- the click may be on the limit dropdown (or another
+    -- in-table control), and a rebuild would destroy that element mid-interaction
+    -- (closing the dropdown the user just opened). The slider / throughput
+    -- handlers already mirror their value into the row textfield, so nothing
+    -- needs refreshing on close.
+    player_data.expanded_constraint_index = nil
+    local root = common.find_root_element(event.player_index, "factory_solver_main_window")
+    if root then
+        local list = fs_util.find_lower(root, "constraint_list")
+        if list then
+            for _, row in pairs(list.children) do
+                local popup = row["popup"]
+                if popup then
+                    popup.visible = false
+                end
+            end
+        end
+    end
+end)
+
 flib_dictionary.handle_events()
 flib_gui.handle_events()

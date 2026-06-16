@@ -52,6 +52,7 @@ __factory_solver__storage = {}
 ---@field machine_clipboard MachineClipboard?
 ---@field module_clipboard TypedName?
 ---@field build_assistant_mode BuildAssistantMode
+---@field expanded_constraint_index integer?  Transient: which constraints row currently has its amount quick-set popup (slider + belt/pump throughput buttons) open. nil = none. Not migrated; nil is the valid "closed" state.
 ---@field picker_builds table<string, PickerBuildState>? In-flight tick-split picker builds (ui/picker_build.lua), keyed by a per-build string (production_line_adder: the section frame name recipe_for_*, up to 4 concurrent; constraint_adder: "constraint_picker", one at a time). nil when none. Plain string/number tables only (no LuaObject, no live iterator), so it is storage / on_load safe and resumable after save/load.
 
 ---Captured, storage-safe context for a tick-split picker build (ui/picker_build.lua).

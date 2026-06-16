@@ -13,6 +13,10 @@ Date: ????
       format is detected automatically; export adds a YAFC option to the export
       dialog. Real recipes round-trip faithfully; special "Mechanics" recipes are
       mapped best-effort and anything unmapped is reported.
+    - Clicking a constraint amount field now opens a quick-set popup below it: a
+      slider for fine per-second adjustment, plus one-click buttons that set the
+      amount to a belt's throughput (for item constraints) or a pump's throughput
+      (for fluid constraints).
   Changes:
     - The solver now produces more practical solutions on recipe loops and
       byproduct chains. Rather than outsourcing a material the placed recipes can

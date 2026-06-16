@@ -468,13 +468,6 @@ styles.factory_solver_right_panel_result_scroll_pane = {
 
 -- solution_settings
 
-styles.factory_solver_constraints_table = {
-    type = "table_style",
-    bottom_margin = 4,
-    horizontal_spacing = 8,
-    vertical_spacing = 10,
-}
-
 styles.factory_solver_limit_amount_textfield = {
     type = "textbox_style",
     width = 80,
