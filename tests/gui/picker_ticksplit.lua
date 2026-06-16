@@ -42,6 +42,19 @@ local function same(a, b)
     return true
 end
 
+-- First sprite-button anywhere under root (DFS), or nil.
+local function first_button(root)
+    local stack = { root }
+    while #stack > 0 do
+        local cur = table.remove(stack)
+        for _, c in ipairs(cur.children) do
+            if c.type == "sprite-button" then return c end
+            stack[#stack + 1] = c
+        end
+    end
+    return nil
+end
+
 local function finish_all(pix)
     local pd = save.get_player_data(pix)
     if not pd.picker_builds then return end
@@ -101,6 +114,10 @@ local ok, err = pcall(function()
         local sig_finish = signature(flow)
         flow = open_pla(); advance_all_to_done(pix)
         local sig_advance = signature(flow)
+        -- Pickers opt out of the per-hover full-grid refresh_highlight -- capture the
+        -- flag BEFORE destroying the dialog (the element is invalid afterwards).
+        local pla_btn = first_button(flow)
+        local pla_raises = (pla_btn and pla_btn.raise_hover_events) or false
         screen.factory_solver_production_line_adder.destroy()
 
         local eq, why = same(sig_finish, sig_advance)
@@ -108,6 +125,9 @@ local ok, err = pcall(function()
             fails[#fails + 1] = "production_line_adder(" .. ref_name .. ") built an empty tree"
         elseif not eq then
             fails[#fails + 1] = "production_line_adder(" .. ref_name .. ") finish!=advance @ " .. why
+        end
+        if pla_raises then
+            fails[#fails + 1] = "production_line_adder button still has raise_hover_events"
         end
     end
 
@@ -142,6 +162,8 @@ local ok, err = pcall(function()
         local sig_finish = signature(picker)
         fs_util.dispatch_to_subtree(dialog, "on_filter_group_changed"); advance_all_to_done(pix)
         local sig_advance = signature(picker)
+        local ca_btn = first_button(picker)
+        local ca_raises = (ca_btn and ca_btn.raise_hover_events) or false
         dialog.destroy()
 
         local eq, why = same(sig_finish, sig_advance)
@@ -149,6 +171,9 @@ local ok, err = pcall(function()
             fails[#fails + 1] = "constraint_adder(item/" .. group_name .. ") built an empty tree"
         elseif not eq then
             fails[#fails + 1] = "constraint_adder(item/" .. group_name .. ") finish!=advance @ " .. why
+        end
+        if ca_raises then
+            fails[#fails + 1] = "constraint_adder button still has raise_hover_events"
         end
     end
 

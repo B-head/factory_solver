@@ -50,6 +50,9 @@ function handlers.on_make_beacon_grid(event)
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
+                    -- Picker opts out of the hover-highlight (refresh_highlight repaints
+                    -- the whole grid per hover; beacon entries are unique anyway).
+                    no_hover_highlight = true,
                     tags = {
                         beacon_name = beacon.name,
                     },

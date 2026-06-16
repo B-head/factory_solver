@@ -436,6 +436,9 @@ picker_build.register_spec {
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
+            -- Pickers opt out of the hover-highlight: refresh_highlight repaints the
+            -- whole (up to thousands-slot) picker per hover, and entries are unique.
+            no_hover_highlight = true,
             tags = {
                 recipe_typed_name = typed_name,
                 kind = req.kind,

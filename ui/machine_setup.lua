@@ -10,6 +10,15 @@ local beacon_picker = require "ui/beacon_picker"
 
 local handlers = {}
 
+-- machine_setup is a dialog, not part of the main-window cross-panel hover
+-- highlight, and its slots are few-and-unique, so none of them want the per-hover
+-- full-refresh refresh_highlight pays. Route every decorated slot in this file
+-- through here to opt out (raise_hover_events=false, no hover handlers).
+local function decorated_slot(data)
+    data.no_hover_highlight = true
+    return common.create_decorated_sprite_button(data)
+end
+
 ---@param event EventDataTrait
 function handlers.on_make_machine_table(event)
     local elem = event.element
@@ -31,7 +40,7 @@ function handlers.on_make_machine_table(event)
             goto continue
         end
 
-        local def = common.create_decorated_sprite_button {
+        local def = decorated_slot {
             typed_name = typed_name,
             is_hidden = is_hidden,
             is_unresearched = is_unresearched,
@@ -209,7 +218,7 @@ end
 ---Substrate is pure metadata (no LP / normalization effect), so this is built
 ---once on_added — no need to react to other dialog changes. Tile names are
 ---not in the TypedName vocabulary, so we render plain sprite-buttons rather
----than going through common.create_decorated_sprite_button.
+---than going through decorated_slot.
 ---@param event EventDataTrait
 function handlers.on_make_substrate_table(event)
     local elem = event.element
@@ -310,7 +319,7 @@ local function add_module_slot_button(parent, slot_index, beacon_index, typed_na
 
     local def
     if display_typed_name then
-        def = common.create_decorated_sprite_button {
+        def = decorated_slot {
             typed_name = display_typed_name,
             top_right_sprite = is_ineffective and "utility/warning_icon" or nil,
             tags = {
@@ -522,7 +531,7 @@ function handlers.on_make_beacons_table(event)
             end
             local def
             if display_typed_name then
-                def = common.create_decorated_sprite_button {
+                def = decorated_slot {
                     typed_name = display_typed_name,
                     tags = {
                         beacon_index = beacon_index,
@@ -719,13 +728,13 @@ function handlers.on_make_total_effectivity(event)
             -- "good ones, then problematic ones"; a partially-masked entry
             -- becomes two side-by-side slots instead of one ambiguous total.
             if counts.effective > 0 then
-                fs_util.add_gui(elem, common.create_decorated_sprite_button {
+                fs_util.add_gui(elem, decorated_slot {
                     typed_name = module_typed_name,
                     number = counts.effective,
                 })
             end
             if counts.ineffective > 0 then
-                local def = common.create_decorated_sprite_button {
+                local def = decorated_slot {
                     typed_name = module_typed_name,
                     number = counts.ineffective,
                     top_right_sprite = "utility/warning_icon",
@@ -812,7 +821,7 @@ function handlers.on_make_fuel_table(event)
                 return
             end
 
-            local def = common.create_decorated_sprite_button {
+            local def = decorated_slot {
                 typed_name = typed_name,
                 is_hidden = is_hidden,
                 is_unresearched = is_unresearched,

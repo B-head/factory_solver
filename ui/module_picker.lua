@@ -83,6 +83,9 @@ function handlers.on_make_module_grid(event)
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
                     top_right_sprite = (not is_effective) and "utility/warning_icon" or nil,
+                    -- Picker opts out of the hover-highlight (refresh_highlight repaints
+                    -- the whole grid per hover; module entries are unique anyway).
+                    no_hover_highlight = true,
                     tags = {
                         module_name = module.name,
                     },

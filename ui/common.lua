@@ -250,13 +250,22 @@ function M.create_decorated_sprite_button(data)
     -- raise_hover_events can be set directly in the def. Hover/leave handlers are
     -- merged in for every decorated slot, including read-only ones that pass no
     -- handler of their own.
+    --
+    -- data.no_hover_highlight opts a slot OUT of all of this. The pickers set it:
+    -- on_slot_hover repaints the WHOLE root via refresh_highlight, so every hover
+    -- over a thousands-slot picker is O(buttons) (a tags snapshot + style write per
+    -- button) -- and a picker's entries are ~unique, so the highlight would only
+    -- light the hovered slot itself anyway. The main-window solution panels, where
+    -- the cross-panel highlight is the actual feature, leave it on.
     local style = M.get_style(is_hidden, is_unresearched, typed_name.type)
     local tags = data.tags and flib_table.shallow_copy(data.tags) or {}
-    tags.highlight_typed_name = typed_name
-    tags.base_style = style
     local handler = data.handler or {}
-    handler[defines.events.on_gui_hover] = M.on_slot_hover
-    handler[defines.events.on_gui_leave] = M.on_slot_leave
+    if not data.no_hover_highlight then
+        tags.highlight_typed_name = typed_name
+        tags.base_style = style
+        handler[defines.events.on_gui_hover] = M.on_slot_hover
+        handler[defines.events.on_gui_leave] = M.on_slot_leave
+    end
 
     return {
         type = "sprite-button",
@@ -266,7 +275,7 @@ function M.create_decorated_sprite_button(data)
         tooltip = tn.typed_name_to_tooltip(typed_name),
         elem_tooltip = tn.typed_name_to_elem_id(typed_name),
         number = data.number,
-        raise_hover_events = true,
+        raise_hover_events = not data.no_hover_highlight,
         tags = tags,
         handler = handler,
         children = children

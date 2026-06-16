@@ -154,6 +154,8 @@ function handlers.on_make_preset_tables(event)
                     typed_name = typed_name,
                     is_hidden = is_hidden,
                     is_unresearched = is_unresearched,
+                    -- Dialog slots opt out of the per-hover full-grid refresh_highlight.
+                    no_hover_highlight = true,
                     tags = {
                         typed_name = typed_name,
                         category_name = row.key,
