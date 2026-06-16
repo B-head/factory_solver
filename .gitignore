@@ -1,4 +1,8 @@
 *.zip
+# ...except the GUI-test fixture: a minimal base+flib+factory_solver player-bearing
+# save (tests/gui_rcon.ps1 needs an offline player; one cannot be script-created
+# headless). It is the one .zip we deliberately track.
+!tests/fixtures/gui_player.zip
 .vscode/
 .claude/
 tests/research/.refcache/
