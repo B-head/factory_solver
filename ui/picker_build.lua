@@ -138,14 +138,19 @@ local function advance_one(player_index, state, budget)
     return true
 end
 
----on_tick entry: advance ONE section globally this tick (parity with the
----one-force-per-tick relation build), so the worst tick is one plan or one build
----step. Deterministic order: sorted player indices, then sorted section keys.
+---on_tick entry: advance ONE section globally this tick, so the worst tick is one
+---plan or one build step (parity with the one-force-per-tick relation build). Which
+---section is advanced ROTATES by game.tick (round-robin), so the several sections of
+---one open dialog -- production_line_adder's ingredient / fuel / product / spent --
+---fill in balance instead of one completing before the next starts. game.tick is
+---lockstep-identical across clients, so the choice is deterministic; the flat list is
+---built in sorted (player, key) order for the same reason.
 ---@return boolean advanced
 function M.advance_all()
     local players = storage.players
     if not players then return false end
 
+    -- Flatten every in-flight section into a deterministic (player, key) list.
     local pids = {}
     for pid, pd in pairs(players) do
         if pd.picker_builds and next(pd.picker_builds) then
@@ -155,21 +160,27 @@ function M.advance_all()
     if #pids == 0 then return false end
     table.sort(pids)
 
+    local flat = {}
     for _, pid in ipairs(pids) do
-        local pd = players[pid]
-        local builds = pd.picker_builds
         local keys = {}
-        for k in pairs(builds) do keys[#keys + 1] = k end
+        for k in pairs(players[pid].picker_builds) do keys[#keys + 1] = k end
         table.sort(keys)
         for _, key in ipairs(keys) do
-            if advance_one(pid, builds[key], BUTTON_BUDGET) then
-                builds[key] = nil
-            end
-            if not next(builds) then pd.picker_builds = nil end
-            return true
+            flat[#flat + 1] = { pid = pid, key = key }
         end
     end
-    return false
+
+    -- Rotate which section advances this tick. One section per tick keeps the
+    -- per-tick cost bounded (BUTTON_BUDGET); rotating spreads progress across the
+    -- open dialog's sections instead of draining them one at a time.
+    local pick = flat[(game.tick % #flat) + 1]
+    local pd = players[pick.pid]
+    local builds = pd.picker_builds
+    if advance_one(pick.pid, builds[pick.key], BUTTON_BUDGET) then
+        builds[pick.key] = nil
+        if not next(builds) then pd.picker_builds = nil end
+    end
+    return true
 end
 
 ---Synchronous completion of one section (verification / fallback symmetry; not on
