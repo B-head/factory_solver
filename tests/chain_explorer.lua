@@ -1695,6 +1695,110 @@ function M.solve_explicit(spec)
     return headline .. "\n" .. M.detail()
 end
 
+---RCON entry point: build a chain like M.explore, then PROFILE the in-engine
+---solve TICK BY TICK. pre_solve.forwerd_solve advances one IPM iteration per
+---call -- the exact per-tick work control.lua's on_tick pump does -- so each
+---call's wall clock is one tick's solver cost (a cascade transition tick, where
+---forwerd_solve rebuilds/shapes the next build instead of iterating, is timed the
+---same way and surfaces as its own outlier). To split each tick into
+---factorization vs the rest, csr_matrix.cholesky_decomposition and the csr
+---multiply metamethod are wrapped with accumulator profilers: a LuaProfiler's
+---duration cannot be read as a number in Lua (only rcon.print resolves it to
+---"Duration: Xms"), but LuaProfiler.add sums one profiler into another, so the
+---per-call costs accumulate without ever leaving Lua as numbers. The wrappers are
+---pure pass-throughs (identical math) and are restored before returning, so this
+---changes nothing the solver computes -- it only times it.
+---
+---Emits over RCON (each LuaProfiler resolved by rcon.print):
+---   PROF_TICK <i> <profiler>   per-tick wall time (suppressed past `ticks=off`)
+---   PROF_TOTAL <profiler>      whole-solve wall time (sum of every tick)
+---   PROF_CHOL <profiler>       summed cholesky_decomposition time
+---   PROF_MATMUL <profiler>     summed csr multiply time (the A*SX*AT build etc.)
+---and returns a PROF_META headline (seed / built / ticks / state / call counts).
+---Args extend M.explore's: ticks=off suppresses the per-tick lines (keep only the
+---summed buckets); cap=N overrides the tick safety cap (default 8000, high enough
+---to let the whole cascade settle rather than truncating like explore's 600).
+---@param args_str string?
+---@return string
+function M.profile_solve(args_str)
+    local r = build_problem(args_str)
+    if not r.ok then return assert(r.message) end
+    local solution = assert(r.solution)
+    local ctx = assert(r.ctx)
+
+    local extra = {}
+    for k, v in string.gmatch(args_str or "", "(%w+)=([%w%.%-]+)") do extra[k] = v end
+    local print_ticks = extra.ticks ~= "off"
+    local cap = math.floor(tonumber(extra.cap) or 8000)
+
+    local csr = package.loaded["__factory_solver__/solver/csr_matrix.lua"]
+    -- A throwaway matrix exposes the shared metatable every solve_step multiply
+    -- (A * SX * AT, AT * -y, ...) dispatches through. Wrapping __mul here catches
+    -- them all; restored below.
+    local mt = getmetatable(csr.with_diagonal({ 1 }, 1))
+    assert(mt and mt.__mul, "csr_matrix metatable / __mul not found")
+
+    -- Accumulators start stopped (zero); .add sums each wrapped call's duration.
+    local chol_acc = game.create_profiler(true)
+    local mul_acc = game.create_profiler(true)
+    local chol_calls, mul_calls = 0, 0
+
+    local orig_chol = csr.cholesky_decomposition
+    csr.cholesky_decomposition = function(...)
+        local p = game.create_profiler()
+        local a, b = orig_chol(...)
+        p.stop()
+        chol_acc.add(p)
+        chol_calls = chol_calls + 1
+        return a, b
+    end
+    local orig_mul = mt.__mul
+    mt.__mul = function(a, b)
+        local p = game.create_profiler()
+        local out = orig_mul(a, b)
+        p.stop()
+        mul_acc.add(p)
+        mul_calls = mul_calls + 1
+        return out
+    end
+
+    -- Silence debug/info logging for the duration: the smoke scenario runs at
+    -- debug, and create_problem's per-build problem dump (guarded by is_enabled
+    -- "debug") would otherwise run a heavy serialization every cascade build and
+    -- pollute the per-tick timing with work no real game does.
+    local prev_level = fs_log.get_level()
+    fs_log.set_level("warn")
+
+    solution.solver_state = "ready"
+    local force_data = storage.forces[FORCE_INDEX]
+    local total_acc = game.create_profiler(true)
+    local steps, solve_err = 0, nil
+    while solution.solver_state == "ready" or solution.solver_state == "calculating" do
+        local tp = game.create_profiler()
+        local ok, err = pcall(pre_solve.forwerd_solve, force_data, solution)
+        tp.stop()
+        total_acc.add(tp)
+        steps = steps + 1
+        -- Printed AFTER tp.stop(), so the rcon round-trip never inflates the tick.
+        if print_ticks then rcon.print({ "", "PROF_TICK ", tostring(steps), " ", tp }) end
+        if not ok then solve_err = err; break end
+        if steps > cap then break end
+    end
+
+    -- Restore the real functions / log level before any return path.
+    fs_log.set_level(prev_level)
+    csr.cholesky_decomposition = orig_chol
+    mt.__mul = orig_mul
+
+    rcon.print({ "", "PROF_TOTAL ", total_acc })
+    rcon.print({ "", "PROF_CHOL ", chol_acc })
+    rcon.print({ "", "PROF_MATMUL ", mul_acc })
+    return string.format(
+        "PROF_META seed=%d built=%d ticks=%d state=%s chol_calls=%d mul_calls=%d%s",
+        ctx.seed, ctx.built, steps, tostring(solution.solver_state),
+        chol_calls, mul_calls, solve_err and (" ERR=" .. tostring(solve_err)) or "")
+end
+
 ---Register the RCON interface (flat namespace -> factory_solver_ prefix). Not
 ---persisted across save/load, so control.lua calls it on every load in the
 ---smoke_rcon scenario.
@@ -1708,6 +1812,7 @@ function M.register()
         diag = M.diag,
         detail = M.detail,
         solve_explicit = M.solve_explicit,
+        profile_solve = M.profile_solve,
     })
 end
 
