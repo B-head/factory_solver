@@ -2,7 +2,9 @@
 -- Reference solver for the problem DEFINITION (user, 2026-06-11): the exact
 -- 3-tier lexicographic optimum, solved as three staged LPs.
 --
---   tier 1  minimize target violation        (kind == "elastic")
+--   tier 1  minimize target violation        (kind elastic or headroom: the
+--           elastic relaxes a lower/equal demand, the headroom is an upper cap's
+--           pull-slack -- both measure how far production falls below its target)
 --   tier 2  minimize intermediate violation  (configurable kinds; see below)
 --   tier 3  minimize machine count           (sum of recipe variables; x IS the
 --           machine count -- manage/report.lua reads it as
@@ -76,7 +78,20 @@ local M = {}
 M.OPTS = { deficit_seeding = false, catalyst_closure = false, reachability_gating = false }
 M.TOL, M.ITER = 1e-7, 800
 local EPS_RECIPE = 2 ^ -20  -- face regularizer (stages 1-2) / bridge tie-break (stage 3)
-local BUDGET_REL, BUDGET_ABS = 1e-3, 1e-6
+-- Per-stage budget-lock slack: stage N+1 caps tier N's sum at opt*(1+REL)+ABS.
+-- Research-overridable (M.BUDGET_REL / M.BUDGET_ABS). ABS is the floor when a tier
+-- optimum is ~0: at 1e-6 the budget row Sum <= 1e-6 is a near-zero-slack
+-- constraint whose IPM barrier ill-conditions the KKT on a near-degenerate face,
+-- and the staged solve stalls below TOL 1e-7 (Fusion's fluoroketone catalyst loop
+-- was the headline case -- bare problem converges in ~10 iters, the budgeted
+-- staging did not). 1e-5 widens that slack 10x and clears it: graded over the
+-- full explorer corpus (tests/research/probe_ref_converge.lua), finished 1663 ->
+-- 1671 (+8 -- the newly-converged are all near-degenerate cycle problems with
+-- sane machine counts), no answer corruption (the only >1% M shifts on
+-- commonly-finished problems are dust-level, on M~=0 solutions; cf. dropping TOL
+-- to 1e-5 which converges a touch more but corrupts answers up to 692x). Stays
+-- far below one violation unit so the lexicographic order is intact.
+M.BUDGET_REL, M.BUDGET_ABS = 1e-3, 1e-5
 
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = M.TOL, iterate_limit = M.ITER }) end
 
@@ -346,6 +361,7 @@ function M.violation_count(problem, x, intermediates)
     for key, p in pairs(problem.primals) do
         local counts = p.kind == "shortage_source" or p.kind == "surplus_sink"
             or (p.kind == "initial_source" and p.material and intermediates[p.material])
+            or (p.kind == "final_sink" and p.material and intermediates[p.material])
         if counts and math.abs(x[key] or 0) > 1e-4 then n = n + 1 end
     end
     return n
@@ -370,7 +386,10 @@ function M.violation_split(problem, x, intermediates, producible, consumable)
         if is_import then
             local v = math.abs(x[key] or 0)
             if producible[p.material] then vp = vp + v else vf = vf + v end
-        elseif p.kind == "surplus_sink" and consumable[p.material] then
+        elseif (p.kind == "surplus_sink" or p.kind == "final_sink")
+            and p.material and consumable[p.material] then
+            -- A consumable material trashed through its free pinned |final_sink| is
+            -- the same tier-2c defeat as one dumped through |surplus_sink|.
             vc = vc + math.abs(x[key] or 0)
         end
     end
@@ -402,7 +421,7 @@ local function build_stage(constraints, lines, unit_fn, budgets)
     return problem
 end
 
-local function budget(opt) return opt * (1 + BUDGET_REL) + BUDGET_ABS end
+local function budget(opt) return opt * (1 + M.BUDGET_REL) + M.BUDGET_ABS end
 
 local function sum_if(problem, x, fn)
     local s = 0
@@ -428,10 +447,31 @@ function M.solve_reference(constraints, lines)
     local producible, np_mats, steps_p = M.producible_set(constraints, lines)
     local consumable, _, steps_c = M.consumable_set(constraints, lines)
 
-    local is_target = function(p) return p.kind == "elastic" end
-    local is_prod_short = function(p) return p.kind == "shortage_source" and producible[p.material] end
-    local is_cons_surplus = function(p) return p.kind == "surplus_sink" and consumable[p.material] end
-    local is_free_short = function(p) return p.kind == "shortage_source" and not producible[p.material] end
+    -- Classify escapes by the INPUT structure of the material they stand for, not
+    -- by which escape variable create_problem happened to hand it. A pinned
+    -- material that is also consumed in-set gets a FREE |final_sink| (the requested-
+    -- output hatch), and deficit promotion gives an intermediate a free
+    -- |initial_source| -- both let a violation leave through a zero-cost escape that
+    -- a kind-only test (surplus_sink / shortage_source) never sees. So an import is
+    -- shortage_source OR initial_source-into-an-intermediate, and a dump is
+    -- surplus_sink OR final_sink-of-a-consumable: a consumable material trashed out
+    -- its pinned final_sink is the tier-2c defeat just the same (and a raw drawn
+    -- through initial_source, or a terminal byproduct dropped through final_sink, is
+    -- correctly NOT a violation -- neither is an intermediate / consumable).
+    local intermediates = M.intermediates(lines)
+    local is_import = function(p)
+        return p.kind == "shortage_source"
+            or (p.kind == "initial_source" and p.material and intermediates[p.material])
+    end
+    local is_dump = function(p)
+        return (p.kind == "surplus_sink" or p.kind == "final_sink")
+            and p.material and consumable[p.material]
+    end
+
+    local is_target = function(p) return p.kind == "elastic" or p.kind == "headroom" end
+    local is_prod_short = function(p) return is_import(p) and producible[p.material] end
+    local is_cons_surplus = function(p) return is_dump(p) end
+    local is_free_short = function(p) return is_import(p) and not producible[p.material] end
     local is_machine = function(p) return p.kind == "recipe" end
 
     local r = { state = "finished", T = -1, Vp = -1, Vc = -1, Vf = -1, M = -1, S = -1,
