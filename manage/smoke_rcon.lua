@@ -56,7 +56,27 @@ local relation = require "manage/relation"
 local report = require "manage/report"
 local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
+local pre_solve = require "manage/pre_solve"
 local tn = require "manage/typed_name"
+-- The 16-Solution codec/reference bundle (a real factory_solver native share
+-- string). require runs at LOAD time only -- never inside an RCON handler -- so
+-- the data module is pulled in here, not in check_bundle16_codecs. Lives under
+-- tests/ (info.json package.ignore), present whenever the smoke scenario runs.
+local bundle16_shared = require "tests/fixtures/bundle16_shared"
+-- The EXACT, CONFIRMED (not guessed) per-codec drop sets for that bundle,
+-- captured from M.bundle16_drop_report. check_bundle16_codecs asserts each
+-- codec's real round-trip drops EQUAL these sets -- so it catches both a kept
+-- line going missing (lost data) and an expected drop becoming representable
+-- (the codec gained a mapping -> update the fixture). See the file header.
+local bundle16_expected_drops = require "tests/fixtures/bundle16_expected_drops"
+-- The 0.6.0 solver's solution for each bundle Solution (the GOOD baseline:
+-- 0.6.0's always-on hard gate built real chains where the current un-gated
+-- machine-minimizing solver collapses upper-constrained factories to all-zero).
+-- check_bundle16_v060 drives the REAL shipping pump (pre_solve.forwerd_solve) on
+-- each IN SMOKE and compares against this 0.6.0 optimum -- the degraded
+-- lexicographic reference is NOT used as the oracle (it shares the collapse). See
+-- tests/fixtures/bundle16_v060.lua for how it was generated from a 0.6.0 worktree.
+local bundle16_v060 = require "tests/fixtures/bundle16_v060"
 -- ui/common is reached for the picker-prep profiler's faithful replica of
 -- on_make_choose_table (create_decorated_sprite_button et al.). require runs at
 -- load time only, so it cannot live inside the profiler function.
@@ -916,6 +936,91 @@ fixtures.catalyst_reclassify = {
     end,
 }
 
+---Cascade Vp stage end-to-end through the incremental solver (manage/pre_solve.lua
+---M.cascade_step + solver/cascade.lua). Plant the data_test producible-import loop
+----- make: 2000 stone -> 1 electronic-circuit; use: 1 electronic-circuit -> 1
+---iron-gear-wheel -- and demand iron-gear-wheel. electronic-circuit is an
+---intermediate the un-gated baseline imports through the cheaper |shortage_source|
+---(running `make` costs 2000 stone > the 1024 penalty), but it is unambiguously
+---producible (a single non-cyclic producer from a seedable raw), so the cascade's
+---Vp stage fires, drives the import to zero, and runs the chain on stone makeup.
+---The launcher polls state() until "finished" (now spanning baseline + cascade
+---stage solves), then calls check_cascade_vp -- a bare "finished" also passes for
+---the importing baseline, so the check asserts Vp fired and the import is gone.
+---Needs the data_test.lua synthetic recipes (always present in a dev checkout);
+---build() asserts them so a missing one surfaces as ERROR, not a degraded solve.
+fixtures.cascade_vp = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        assert(prototypes.recipe["fs-test-vp-make"] and prototypes.recipe["fs-test-vp-use"],
+            "fs-test-vp-make/-use recipes missing -- data_test.lua not loaded?")
+
+        for _, recipe in ipairs({ "fs-test-vp-make", "fs-test-vp-use" }) do
+            ---@type ProductionLine
+            local line = {
+                recipe_typed_name = tn.create_typed_name("recipe", recipe),
+                machine_typed_name = tn.create_typed_name("machine", "fs-test-vp-machine"),
+                module_typed_names = {},
+                affected_by_beacons = {},
+            }
+            flib_table.insert(solution.production_lines, line)
+        end
+
+        ---@type Constraint
+        local constraint = {
+            type = "item",
+            name = "iron-gear-wheel",
+            quality = "normal",
+            limit_type = "equal",
+            limit_amount_per_second = 1,
+        }
+        flib_table.insert(solution.constraints, constraint)
+    end,
+}
+
+---Cascade Vc stage end-to-end through the incremental solver (manage/pre_solve.lua
+---M.cascade_step + solver/cascade.lua). Plant the data_test consumable-overflow
+---loop -- make: 1 stone -> 1 iron-gear-wheel + 1 copper-cable; useB: 1 copper-cable
+----> 1 wood -- and demand iron-gear-wheel. copper-cable is a forced byproduct the
+---un-gated baseline dumps through |surplus_sink| (running useB costs an extra
+---recipe tie-break), but it is CONSUMABLE (useB absorbs it), so the cascade's Vc
+---stage prices its dump and re-solves -- useB runs and the copper-cable dump is
+---gone. The launcher polls state() until "finished" (now spanning baseline +
+---cascade stage solves), then calls check_cascade_vc -- a bare "finished" also
+---passes for the dumping baseline, so the check asserts Vc fired and the dump is
+---gone. Needs the data_test.lua synthetic recipes (always present in a dev
+---checkout); build() asserts them so a missing one surfaces as ERROR.
+fixtures.cascade_vc = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        assert(prototypes.recipe["fs-test-vc-make"] and prototypes.recipe["fs-test-vc-useb"],
+            "fs-test-vc-make/-useb recipes missing -- data_test.lua not loaded?")
+
+        for _, recipe in ipairs({ "fs-test-vc-make", "fs-test-vc-useb" }) do
+            ---@type ProductionLine
+            local line = {
+                recipe_typed_name = tn.create_typed_name("recipe", recipe),
+                machine_typed_name = tn.create_typed_name("machine", "fs-test-vc-machine"),
+                module_typed_names = {},
+                affected_by_beacons = {},
+            }
+            flib_table.insert(solution.production_lines, line)
+        end
+
+        ---@type Constraint
+        local constraint = {
+            type = "item",
+            name = "iron-gear-wheel",
+            quality = "normal",
+            limit_type = "equal",
+            limit_amount_per_second = 1,
+        }
+        flib_table.insert(solution.constraints, constraint)
+    end,
+}
+
 ---Target rescue end-to-end through the incremental solver (manage/pre_solve.lua
 ---M.target_rescue_step + create_problem's target_only_objective/target_budget).
 ---Plant the data_test collapse loop -- boot: nothing -> copper, a: copper ->
@@ -1084,6 +1189,18 @@ function M.check_catalyst_reclassify()
         return "ERROR: cascade phase is " .. tostring(cc.phase) .. ", not done (cascade did not settle)"
     end
 
+    -- A rescue stage must have ACTUALLY FIRED. The cycle import is a producible /
+    -- makeup import, so the Vp or Vf tier drives it to zero (which member of the
+    -- copper<->gear 2-cycle becomes the makeup decides Vp vs Vf -- see
+    -- solver/cascade.lua and tests/cases/lp_cascade.lua -- so accept either). A
+    -- bare "done" with no fired stage would mean the baseline never cheated and
+    -- the whole rescue was a no-op -- the opposite of what this fixture pins.
+    if cc.vp_rescued ~= 1 and cc.vf_rescued ~= 1 then
+        return "ERROR: no rescue stage fired (vp_rescued=" .. tostring(cc.vp_rescued) ..
+            ", vf_rescued=" .. tostring(cc.vf_rescued) ..
+            ") -- the staged rescue did not fabricate the cycle import"
+    end
+
     -- No residual cheat: the producible cycle material is fabricated, not
     -- outsourced. (The iron it is made from leaves as |initial_source| makeup,
     -- which is legitimate and not counted here.)
@@ -1109,6 +1226,140 @@ function M.check_catalyst_reclassify()
     if a <= 1e-3 or b <= 1e-3 then
         return "ERROR: loop idle (a=" .. string.format("%.4f", a) ..
             ", b=" .. string.format("%.4f", b) .. ") -- the cascade did not fabricate the cycle"
+    end
+
+    return "OK"
+end
+
+---RCON entry point: report the settled cascade's per-tier outcome flags for the
+---current solution as a flat string (informational, not a verdict). The launcher
+---appends it to the cascade fixtures' detail line so a run shows which stages
+---fired without re-deriving it from raw_variables. -1 = the tier ran but was
+---rejected/no-op, 1 = fired, nil = the tier was never reached.
+---@return string
+function M.cascade_summary()
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data and force_data.solutions
+    local _, solution = next(solutions or {})
+    if not solution then
+        return "ERROR: no solution"
+    end
+    local cc = solution.cascade
+    if not cc then
+        return "cascade=nil"
+    end
+    return string.format("phase=%s vp=%s vf=%s vc=%s polish=%s relay=%s solves=%s",
+        tostring(cc.phase), tostring(cc.vp_rescued), tostring(cc.vf_rescued),
+        tostring(cc.vc_rescued), tostring(cc.polish), tostring(cc.relay), tostring(cc.solves))
+end
+
+---RCON entry point: assert the cascade's Vp stage fabricated the producible
+---import. The launcher calls this after the cascade_vp fixture converges -- a bare
+---"finished" can't tell the Vp-rescued answer from the importing baseline.
+---Asserts (a) "finished", (b) the cascade settled (cascade.phase == "done") with
+---the Vp tier fired (cascade.vp_rescued == 1 -- this is the discriminator: the
+---catalyst 2-cycle lands in Vf, this non-cyclic producer lands in Vp), (c) no
+---residual import cheat (|shortage_source| / |elastic| ~0 -- electronic-circuit is
+---made, not outsourced; the stone it is made from is |initial_source| makeup and
+---not counted), and (d) both placed recipes actually run. Returns "OK" or
+---"ERROR: <detail>".
+---@return string
+function M.check_cascade_vp()
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data and force_data.solutions
+    local _, solution = next(solutions or {})
+    if not solution then
+        return "ERROR: no solution"
+    end
+    if solution.solver_state ~= "finished" then
+        return "ERROR: solver_state is " .. tostring(solution.solver_state) .. ", not finished"
+    end
+
+    local cc = solution.cascade
+    if not cc then
+        return "ERROR: cascade state nil -- the cascade machine never started"
+    end
+    if cc.phase ~= "done" then
+        return "ERROR: cascade phase is " .. tostring(cc.phase) .. ", not done (cascade did not settle)"
+    end
+    if cc.vp_rescued ~= 1 then
+        return "ERROR: Vp stage did not fire (vp_rescued=" .. tostring(cc.vp_rescued) ..
+            ", vf_rescued=" .. tostring(cc.vf_rescued) ..
+            ") -- the producible import was not fabricated by the Vp tier"
+    end
+
+    -- No residual cheat: electronic-circuit is fabricated, not outsourced. (The
+    -- stone it is made from leaves as |initial_source| makeup, not counted here.)
+    local x = solution.raw_variables and solution.raw_variables.x or {}
+    local primals = solution.problem and solution.problem.primals or {}
+    local cheat = 0
+    for k, v in pairs(x) do
+        local p = primals[k]
+        if math.abs(v) > 1e-6 and p and (p.kind == "shortage_source" or p.kind == "elastic") then
+            cheat = cheat + math.abs(v)
+        end
+    end
+    if cheat > 1e-3 then
+        return "ERROR: residual cheat " .. string.format("%.4f", cheat) ..
+            " -- the producible import was outsourced, not fabricated"
+    end
+
+    -- Both placed recipes must actually RUN (fabrication), not resolve to import.
+    local make = x["recipe/fs-test-vp-make/normal"] or 0
+    local use = x["recipe/fs-test-vp-use/normal"] or 0
+    if make <= 1e-3 or use <= 1e-3 then
+        return "ERROR: chain idle (make=" .. string.format("%.4f", make) ..
+            ", use=" .. string.format("%.4f", use) .. ") -- the Vp stage did not run the chain"
+    end
+
+    return "OK"
+end
+
+---RCON entry point: assert the cascade's Vc stage consumed the consumable
+---overflow. The launcher calls this after the cascade_vc fixture converges -- a
+---bare "finished" can't tell the Vc-rescued answer from the dumping baseline.
+---Asserts (a) "finished", (b) the cascade settled (cascade.phase == "done") with
+---the Vc tier fired (cascade.vc_rescued == 1 -- the discriminator: cascade only
+---sets it when the priced consumable dump drops past the trigger, i.e. the
+---copper-cable dump was actually driven down), and (c) BOTH placed recipes run --
+---make (the forced byproduct source) and useB (the consumer the Vc stage forced
+---on). Returns "OK" or "ERROR: <detail>".
+---@return string
+function M.check_cascade_vc()
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data and force_data.solutions
+    local _, solution = next(solutions or {})
+    if not solution then
+        return "ERROR: no solution"
+    end
+    if solution.solver_state ~= "finished" then
+        return "ERROR: solver_state is " .. tostring(solution.solver_state) .. ", not finished"
+    end
+
+    local cc = solution.cascade
+    if not cc then
+        return "ERROR: cascade state nil -- the cascade machine never started"
+    end
+    if cc.phase ~= "done" then
+        return "ERROR: cascade phase is " .. tostring(cc.phase) .. ", not done (cascade did not settle)"
+    end
+    if cc.vc_rescued ~= 1 then
+        return "ERROR: Vc stage did not fire (vc_rescued=" .. tostring(cc.vc_rescued) ..
+            ") -- the consumable overflow was dumped, not consumed"
+    end
+
+    -- Both placed recipes must run: make forces the byproduct, useB consumes it.
+    -- useB running is the proof the Vc stage actually shifted the dump into
+    -- consumption rather than merely re-pricing it.
+    local x = solution.raw_variables and solution.raw_variables.x or {}
+    local make = x["recipe/fs-test-vc-make/normal"] or 0
+    local useb = x["recipe/fs-test-vc-useb/normal"] or 0
+    if make <= 1e-3 then
+        return "ERROR: make idle (" .. string.format("%.4f", make) .. ") -- no byproduct produced"
+    end
+    if useb <= 1e-3 then
+        return "ERROR: useB idle (" .. string.format("%.4f", useb) ..
+            ") -- the consumable overflow was not consumed by the Vc stage"
     end
 
     return "OK"
@@ -2286,6 +2537,414 @@ function M.profile_picker_prep(kind, reps)
     return result
 end
 
+---RCON entry point: codec round-trip fidelity over the embedded 16-Solution
+---bundle (tests/fixtures/bundle16_shared.lua -- a real factory_solver native
+---share string spanning base / Space Age / Gleba / quality / virtual-recipe
+---runs). For every solution and every codec it asserts that export -> import
+---restores the data, MODULO each codec's documented losses:
+---  * native (solution_codec): LOSSLESS. Exact structural round-trip -- name,
+---    constraint count, and every production line's recipe identity (type / name
+---    / quality) must come back unchanged.
+---  * Factory Planner / Helmod: lossy. They have no representation for virtual
+---    recipes (<run>/<pump>/<launch>) or non-normal quality, so a line lost in
+---    the round-trip is tolerated ONLY when it is one of those droppable kinds;
+---    losing an ordinary normal-quality real recipe is a failure.
+---  * YAFC: lossy on virtual recipes only (it carries quality), so a lost line
+---    is tolerated only when it is a virtual recipe.
+---Solution-independent (reads the embedded bundle, not storage.solutions), so the
+---launcher calls it once up front. SKIPs when Space Age is absent, because most
+---of the bundle's recipes (asteroid / Fulgora / Gleba / fusion) don't exist on a
+---vanilla set -- run with -Mods ...,space-age,quality,elevated-rails to exercise
+---it. Returns "OK", "SKIP: <detail>", or "ERROR: <detail>".
+---@return string
+function M.check_bundle16_codecs()
+    if not script.active_mods["space-age"] then
+        return "SKIP: bundle16 needs Space Age (most recipes are SA-only)"
+    end
+    local ok, result = pcall(M.check_bundle16_codecs_impl)
+    if not ok then
+        return "ERROR: bundle16 raised: " .. tostring(result)
+    end
+    return result
+end
+
+---Implementation of M.check_bundle16_codecs, split out so the wrapper can pcall
+---it and surface a raised error as an ERROR string (RCON interface errors are
+---otherwise opaque -- "Error when running interface function" with no detail).
+---@return string
+function M.check_bundle16_codecs_impl()
+    save.init_player_data(PLAYER_INDEX)
+
+    local payloads, derr = solution_codec.decode(bundle16_shared)
+    if not payloads then
+        return "ERROR: native decode of the bundle failed: " .. tostring(derr and derr[1])
+    end
+    if #payloads ~= 16 then
+        return "ERROR: expected 16 solutions in the bundle, got " .. #payloads
+    end
+
+    -- A line's identity: kind (recipe / virtual_recipe) + name + quality. The
+    -- machine choice is part of user input too but the interop codecs remap it,
+    -- so identity here is the recipe, which is what "data restored" means.
+    local function line_key(ln)
+        local r = ln.recipe_typed_name
+        return r.type .. "|" .. r.name .. "|" .. r.quality
+    end
+    local function survivor_set(payload)
+        local s = {}
+        for _, ln in ipairs(payload and payload.production_lines or {}) do
+            s[line_key(ln)] = true
+        end
+        return s
+    end
+    -- The set of original lines that did NOT survive the round-trip must EQUAL
+    -- the codec's CONFIRMED expected drop set (tests/fixtures/bundle16_expected_drops
+    -- -- observed, never guessed). Set equality catches both directions: a kept
+    -- line going missing (data loss) AND an expected drop unexpectedly surviving
+    -- (the codec gained a mapping -> the fixture is now stale and must be
+    -- regenerated). Everything not in the expected set is therefore asserted
+    -- restored. A solution missing from the table, or a codec missing from it,
+    -- is itself a failure (the fixture must cover all 16 x 3).
+    local function check_lossy(codec_name, sol, survivors)
+        local expected = bundle16_expected_drops[sol.name]
+        if not expected or not expected[codec_name] then
+            return "ERROR: [" .. sol.name .. "] " .. codec_name ..
+                " has no entry in bundle16_expected_drops (regenerate the fixture)"
+        end
+        local want = {}
+        for _, k in ipairs(expected[codec_name]) do want[k] = true end
+        -- (a) every confirmed drop must actually be dropped (not restored).
+        for k in pairs(want) do
+            if survivors[k] then
+                return "ERROR: [" .. sol.name .. "] " .. codec_name ..
+                    " unexpectedly RESTORED a line listed as dropped (" .. k ..
+                    ") -- codec gained a mapping? regenerate bundle16_expected_drops"
+            end
+        end
+        -- (b) every original line not in the confirmed drop set must be restored.
+        for _, ln in ipairs(sol.production_lines) do
+            local k = line_key(ln)
+            if not survivors[k] and not want[k] then
+                return "ERROR: [" .. sol.name .. "] " .. codec_name ..
+                    " dropped a line NOT in its confirmed drop set (" .. k ..
+                    ") -- data lost, or regenerate bundle16_expected_drops"
+            end
+        end
+        return nil
+    end
+
+    for _, p in ipairs(payloads) do
+        local sol = { name = p.name, constraints = p.constraints, production_lines = p.production_lines }
+
+        -- NATIVE: lossless, exact.
+        local nenc = solution_codec.encode({ sol })
+        local nback, nerr = solution_codec.decode(nenc)
+        if not nback or not nback[1] then
+            return "ERROR: [" .. p.name .. "] native re-decode failed: " .. tostring(nerr and nerr[1])
+        end
+        local np = nback[1]
+        if np.name ~= p.name then
+            return "ERROR: [" .. p.name .. "] native lost the name"
+        end
+        if #(np.constraints or {}) ~= #p.constraints then
+            return "ERROR: [" .. p.name .. "] native constraint count " ..
+                #(np.constraints or {}) .. " vs " .. #p.constraints
+        end
+        if #(np.production_lines or {}) ~= #p.production_lines then
+            return "ERROR: [" .. p.name .. "] native line count " ..
+                #(np.production_lines or {}) .. " vs " .. #p.production_lines
+        end
+        for i, ln in ipairs(p.production_lines) do
+            local b = np.production_lines[i]
+            if not b or line_key(b) ~= line_key(ln) then
+                return "ERROR: [" .. p.name .. "] native line " .. i .. " mismatch: " ..
+                    line_key(ln) .. " -> " .. (b and line_key(b) or "nil")
+            end
+        end
+
+        -- FACTORY PLANNER: lossy (no virtual recipes, no quality).
+        local fok, ferr = pcall(function()
+            local enc = fp_codec.encode({ sol })
+            local decoded, e = fp_codec.decode(enc)
+            assert(decoded and decoded.factories and decoded.factories[1], "FP decode: " .. tostring(e and e[1]))
+            local payload = fp_codec.factory_to_payload(decoded.factories[1], PLAYER_INDEX)
+            return check_lossy("FP", sol, survivor_set(payload))
+        end)
+        if not fok then return "ERROR: [" .. p.name .. "] FP round-trip raised: " .. tostring(ferr) end
+        if ferr then return ferr end
+
+        -- HELMOD: lossy (no virtual recipes, no quality).
+        local hok, herr = pcall(function()
+            local enc = helmod_codec.encode({ sol })
+            local model, e = helmod_codec.decode(enc)
+            assert(model, "Helmod decode: " .. tostring(e and e[1]))
+            local payload = helmod_codec.model_to_payload(model, PLAYER_INDEX)
+            return check_lossy("Helmod", sol, survivor_set(payload))
+        end)
+        if not hok then return "ERROR: [" .. p.name .. "] Helmod round-trip raised: " .. tostring(herr) end
+        if herr then return herr end
+
+        -- YAFC: lossy on virtual recipes only (quality is carried).
+        local yok, yerr = pcall(function()
+            local enc = yafc_codec.encode({ sol })
+            local page, e = yafc_codec.decode(enc)
+            assert(page, "YAFC decode: " .. tostring(e and e[1]))
+            local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
+            return check_lossy("YAFC", sol, survivor_set(payload))
+        end)
+        if not yok then return "ERROR: [" .. p.name .. "] YAFC round-trip raised: " .. tostring(yerr) end
+        if yerr then return yerr end
+    end
+
+    return "OK"
+end
+
+---RCON entry point: report, per solution and per interop codec, the EXACT set of
+---production-line recipe identities that did NOT survive the encode->decode
+---round-trip (original minus survivors). Informational, used to CONFIRM (not
+---guess) each codec's real drop behaviour before pinning it in
+---check_bundle16_codecs. Returns a multi-line string; "(none)" means a fully
+---lossless round-trip for that codec.
+---@return string
+function M.bundle16_drop_report()
+    if not script.active_mods["space-age"] then return "SKIP: needs Space Age" end
+    save.init_player_data(PLAYER_INDEX)
+    local payloads = assert(solution_codec.decode(bundle16_shared), "decode failed")
+
+    local function line_key(ln)
+        local r = ln.recipe_typed_name
+        return r.type .. "|" .. r.name .. "|" .. r.quality
+    end
+    local function survivors(payload)
+        local s = {}
+        for _, ln in ipairs(payload and payload.production_lines or {}) do s[line_key(ln)] = true end
+        return s
+    end
+    local function dropped(sol, surv)
+        local out = {}
+        for _, ln in ipairs(sol.production_lines) do
+            local k = line_key(ln)
+            if not surv[k] then out[#out + 1] = k end
+        end
+        table.sort(out)
+        return out
+    end
+
+    local lines = {}
+    for _, p in ipairs(payloads) do
+        local sol = { name = p.name, constraints = p.constraints, production_lines = p.production_lines }
+        local function report(codec_name, surv_payload)
+            local d = dropped(sol, survivors(surv_payload))
+            lines[#lines + 1] = string.format("[%s] %s drops (%d/%d): %s",
+                sol.name, codec_name, #d, #sol.production_lines,
+                #d > 0 and table.concat(d, " ; ") or "(none)")
+        end
+        local fd = fp_codec.decode(fp_codec.encode({ sol }))
+        report("FP", fp_codec.factory_to_payload(fd.factories[1], PLAYER_INDEX))
+        local hm = helmod_codec.decode(helmod_codec.encode({ sol }))
+        report("Helmod", helmod_codec.model_to_payload(hm, PLAYER_INDEX))
+        local pg = yafc_codec.decode(yafc_codec.encode({ sol }))
+        report("YAFC", yafc_codec.yafc_to_payload(pg, PLAYER_INDEX))
+    end
+    local text = table.concat(lines, "\n")
+    -- RCON truncates long single lines, so also write the full report to
+    -- script-output for offline reading (run with -KeepRun to retain it).
+    helpers.write_file("bundle16_drops.txt", text, false)
+    return text
+end
+
+---RCON entry point: capture, for every Solution in the embedded bundle, its
+---constraints plus the NORMALIZED production lines (exactly what
+---pre_solve.forwerd_solve feeds the solver -- machine speed / module / quality
+---folding applied). Serializes { [name] = { constraints, lines } } to
+---script-output/bundle16_normalized.lua as a re-loadable Lua module. The offline
+---tests/bundle16_make_v060.lua reads it inside a 0.6.0 git worktree and freezes
+---the per-tier optima into tests/fixtures/bundle16_v060.lua (the baseline the
+---smoke check_bundle16_v060 guards the live shipping solve against). Run with
+---tests/smoke_rcon.ps1 -Mods ...,space-age,quality,elevated-rails -KeepRun.
+---Returns "OK", "SKIP", or "ERROR".
+---@return string
+---ResearchBonuses with EVERY non-hidden quality unlocked. The smoke force has no
+---research, so default_research_bonuses unlocks only `normal` -- which makes
+---pre_solve.quality_decomposition a no-op and collapses the bundle's quality
+---loops (Asteroid upcycle, Quality loop) to a degenerate non-quality problem.
+---The bundle's Solutions were authored in a save WITH quality researched, so the
+---capture and the live solve must both unlock quality to reproduce them. Set
+---directly (not via force.is_quality_unlocked) so the global force is untouched.
+---@return ResearchBonuses
+function M.bundle16_research_bonuses()
+    local bonuses = save.default_research_bonuses()
+    for _, quality in pairs(prototypes.quality) do
+        if not quality.hidden then bonuses.unlocked_qualities[quality.name] = true end
+    end
+    return bonuses
+end
+
+function M.dump_bundle16_normalized()
+    if not script.active_mods["space-age"] then return "SKIP: needs Space Age" end
+    save.init_force_data(FORCE_INDEX)
+    local bonuses = M.bundle16_research_bonuses()
+    local payloads = assert(solution_codec.decode(bundle16_shared), "decode failed")
+
+    local out = {}
+    for _, p in ipairs(payloads) do
+        out[p.name] = {
+            constraints = p.constraints,
+            lines = pre_solve.to_normalized_production_lines(p.production_lines, bonuses),
+        }
+    end
+    helpers.write_file("bundle16_normalized.lua", "return " .. serpent.block(out, { comment = false }))
+    return "OK: wrote bundle16_normalized.lua (" .. #payloads .. " solutions)"
+end
+
+-- Solutions where the CURRENT shipping solver is KNOWN to diverge from the 0.6.0
+-- baseline -- the regression this test documents. 0.6.0 (always-on hard
+-- reachability gate + single solve) builds a real factory; the current un-gated
+-- machine-minimizing cascade collapses these to ~0 machines (pure import / no
+-- production) for upper-only / importable-target problems, EXCEPT "Rocket" where
+-- current uses fewer machines than 0.6.0 (a benign divergence, kept here because
+-- it still differs). Confirmed in the real game (0.6.0 from the portal vs the
+-- dev build). When the solver regression is fixed, these start matching 0.6.0
+-- again -> the check reports them as XPASS and fails, prompting their removal
+-- from this set. See project_open_work_index / the regression hunt notes.
+local BUNDLE16_KNOWN_REGRESSIONS = {
+    ["Asteroid up cycleing"] = true,
+    ["Begining"] = true,
+    ["Fulgora top down"] = true,
+    ["Gleba circuit"] = true,
+    ["Gleba loop"] = true,
+    ["Module and beacon"] = true,
+    ["Oil Processing 1"] = true,
+    ["Quality loop"] = true,
+    ["Rocket"] = true,
+    ["Simple"] = true,
+}
+-- Fusion's 0.6.0 reference converges nondeterministically (headless pairs-order),
+-- so its frozen baseline is untrustworthy -- never compared.
+local BUNDLE16_SKIP = { ["Fusion"] = true }
+
+---RCON entry point: REGRESSION GUARD comparing the DEFAULT SHIPPING solver (the
+---real pre_solve.forwerd_solve pump, driven synchronously to terminal) against
+---the 0.6.0 solver's solution (tests/fixtures/bundle16_v060.lua) for every bundle
+---Solution. Both run with quality unlocked (M.bundle16_research_bonuses) so the
+---quality loops are not degenerate. Compared as aggregate tier sums -- T (target
+---violation), import (shortage_source + initial_source), surplus (surplus_sink),
+---machines (recipe) -- with a relative tolerance + absolute floor (robust to the
+---degenerate-face vertex wobble and ~1e-6 tier noise). Verdict logic:
+---  * a Solution NOT in BUNDLE16_KNOWN_REGRESSIONS must MATCH 0.6.0 -- a new
+---    divergence is a fresh regression -> FAIL;
+---  * a Solution IN BUNDLE16_KNOWN_REGRESSIONS must still DIVERGE -- if it now
+---    matches, the solver was fixed -> XPASS -> FAIL (remove it from the set);
+---  * Fusion is skipped.
+---So the run is GREEN while the documented regression stands, and goes RED on
+---either a new regression or a fix (which is the signal to update the baseline).
+---A full per-problem report goes to script-output/bundle16_v060_report.txt
+---(-KeepRun). Solution-independent of storage. SKIPs without Space Age.
+---@return string
+function M.check_bundle16_v060()
+    if not script.active_mods["space-age"] then
+        return "SKIP: bundle16 needs Space Age (most recipes are SA-only)"
+    end
+    local ok, result = pcall(M.check_bundle16_v060_impl)
+    if not ok then
+        return "ERROR: bundle16 v060 raised: " .. tostring(result)
+    end
+    return result
+end
+
+---@return string
+function M.check_bundle16_v060_impl()
+    save.init_force_data(FORCE_INDEX)
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data.solutions
+    local payloads = assert(solution_codec.decode(bundle16_shared), "decode failed")
+
+    -- Both sides need quality unlocked. Set the force's research bonuses for the
+    -- duration of the solves, then restore (later fixtures expect the default).
+    local saved_bonuses = force_data.research_bonuses
+    force_data.research_bonuses = M.bundle16_research_bonuses()
+
+    local function tiers(solution)
+        local out = { T = 0, import = 0, surplus = 0, machines = 0 }
+        local primals = solution.problem and solution.problem.primals or {}
+        local x = solution.raw_variables and solution.raw_variables.x or {}
+        for key, p in pairs(primals) do
+            local v = math.abs(x[key] or 0)
+            if p.kind == "elastic" then out.T = out.T + v
+            elseif p.kind == "shortage_source" or p.kind == "initial_source" then out.import = out.import + v
+            elseif p.kind == "surplus_sink" then out.surplus = out.surplus + v
+            elseif p.kind == "recipe" then out.machines = out.machines + v end
+        end
+        return out
+    end
+
+    -- REL is generous (2%): this compares TWO different solvers (current vs 0.6.0)
+    -- whose "build" answers sit on slightly different degenerate vertices; the
+    -- regressions it must catch are order-of-magnitude collapses, not 2% drift.
+    local ABS, REL = 1e-3, 2e-2
+    local function near(a, b)
+        return math.abs(a - b) <= math.max(ABS, REL * math.max(math.abs(a), math.abs(b)))
+    end
+
+    local report, fails, matched_n, diverged_n, skipped = {}, {}, 0, 0, 0
+    for _, p in ipairs(payloads) do
+        local v060 = bundle16_v060[p.name]
+
+        for n in pairs(solutions) do solutions[n] = nil end
+        local name = save.import_solution(solutions, p)
+        local solution = assert(solutions[name])
+        solution.solver_state = "ready"
+        local steps = 0
+        while solution.solver_state == "ready" or solution.solver_state == "calculating" do
+            pre_solve.forwerd_solve(force_data, solution)
+            steps = steps + 1
+            if steps > 5000 then break end
+        end
+
+        local cur = tiers(solution)
+        if BUNDLE16_SKIP[p.name] or not v060 or v060.state ~= "finished" then
+            skipped = skipped + 1
+            report[#report + 1] = string.format("[%s] SKIP (cur M=%.6g state=%s; 0.6.0 %s)",
+                p.name, cur.machines, tostring(solution.solver_state), v060 and v060.state or "missing")
+            goto continue
+        end
+
+        local diff = {}
+        for _, f in ipairs({ "T", "import", "surplus", "machines" }) do
+            if not near(cur[f], v060[f]) then diff[#diff + 1] = f end
+        end
+        local matched = (solution.solver_state == "finished" and #diff == 0)
+        local expect_regression = BUNDLE16_KNOWN_REGRESSIONS[p.name]
+        local verdict
+        if matched and not expect_regression then
+            verdict = "MATCH"; matched_n = matched_n + 1
+        elseif (not matched) and expect_regression then
+            verdict = "REGRESSED(known)"; diverged_n = diverged_n + 1
+        elseif matched and expect_regression then
+            verdict = "XPASS(fixed -> remove from KNOWN_REGRESSIONS)"
+            fails[#fails + 1] = p.name .. " XPASS (now matches 0.6.0)"
+        else -- not matched and not expect_regression
+            verdict = "NEW-REGRESSION"
+            fails[#fails + 1] = string.format("%s diverges on %s", p.name, table.concat(diff, ","))
+        end
+        report[#report + 1] = string.format(
+            "[%s] %s  cur{M=%.6g imp=%.6g sur=%.6g state=%s} 0.6.0{M=%.6g imp=%.6g sur=%.6g} diff=%s",
+            p.name, verdict, cur.machines, cur.import, cur.surplus, tostring(solution.solver_state),
+            v060.machines, v060.import, v060.surplus, #diff > 0 and table.concat(diff, ",") or "-")
+        ::continue::
+    end
+
+    for n in pairs(solutions) do solutions[n] = nil end
+    force_data.research_bonuses = saved_bonuses
+
+    helpers.write_file("bundle16_v060_report.txt", table.concat(report, "\n"))
+    if #fails > 0 then
+        return "ERROR: " .. #fails .. " unexpected vs 0.6.0: " .. table.concat(fails, " | ")
+    end
+    return string.format("OK: %d match, %d known-regression, %d skip vs 0.6.0",
+        matched_n, diverged_n, skipped)
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -2297,6 +2956,13 @@ function M.register()
         state = M.state,
         check_read_side = M.check_read_side,
         check_catalyst_reclassify = M.check_catalyst_reclassify,
+        check_cascade_vp = M.check_cascade_vp,
+        check_cascade_vc = M.check_cascade_vc,
+        cascade_summary = M.cascade_summary,
+        check_bundle16_codecs = M.check_bundle16_codecs,
+        bundle16_drop_report = M.bundle16_drop_report,
+        dump_bundle16_normalized = M.dump_bundle16_normalized,
+        check_bundle16_v060 = M.check_bundle16_v060,
         check_target_rescue = M.check_target_rescue,
         check_force_caches = M.check_force_caches,
         check_relation_split = M.check_relation_split,

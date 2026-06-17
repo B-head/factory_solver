@@ -70,6 +70,19 @@ local function extend_test(protos)
             p.subgroup = "fs-test"
             p.hidden = true
         end
+        -- Exclude every fs-test recipe from the quality mod's recycling auto-
+        -- generation. Many fs-test recipes use vanilla items as cheap stand-ins
+        -- (e.g. `2000 stone -> electronic-circuit`), and the generator
+        -- (quality/prototypes/recycling.lua) turns EACH recipe into its product's
+        -- `<product>-recycling` by inverting it -- so a stray fs-test producer
+        -- clobbers the real recycling (electronic-circuit-recycling -> stone,
+        -- copper-cable-recycling -> wood, ...), silently breaking every
+        -- quality-recycling scenario in any dev/smoke build that loads this file.
+        -- recycling.lua:162 skips recipes with auto_recycle == false, so this one
+        -- stamp makes all fs-test recipes inert to recycling generation.
+        if p.type == "recipe" then
+            p.auto_recycle = false
+        end
     end
     data:extend(protos)
 end
@@ -908,6 +921,123 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
             energy_required = 1,
             ingredients = { { type = "item", name = "stone", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 1 } },
+        },
+    })
+end
+
+-- 8e4. Producible-import loop -- the cascade's Vp stage (the producible-import
+--      tier; manage/pre_solve.lua M.cascade_step -> solver/cascade.lua). Shape:
+--        make:  2000 stone        -> 1 electronic-circuit   (M, the intermediate)
+--        use:   1 electronic-circuit -> 1 iron-gear-wheel   (T, the target)
+--      electronic-circuit is produced (make) AND consumed (use), so it is an
+--      intermediate that the un-gated baseline imports through the cheaper
+--      |shortage_source| (penalty 2^10 = 1024) rather than running `make` at 2000
+--      stone/unit. But it is UNAMBIGUOUSLY producible -- `make` yields it from a
+--      seedable raw (stone, a deficit |initial_source|) with no whack-a-mole
+--      partner (single producer, single consumer, NOT a cycle, unlike the
+--      catalyst 2-cycle whose makeup lands in Vf). So the cascade's Vp stage
+--      classifies it producible, prices its import as the only objective, drives
+--      it to zero, and re-solves: the chain runs on stone makeup and the import
+--      is gone. Mirrors tests/cases/lp_cascade.lua's Vp case; asserted by smoke
+--      check_cascade_vp (fixture cascade_vp). A dedicated category on a non-fixed
+--      assembling-machine-2 copy keeps both recipes off every vanilla machine
+--      list and crafts fuel-free.
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"]
+    and raw.item and raw.item["stone"] and raw.item["electronic-circuit"]
+    and raw.item["iron-gear-wheel"] then
+    local vp_machine = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+    vp_machine.name = "fs-test-vp-machine"
+    vp_machine.localised_name = "fs-test-vp-machine"
+    vp_machine.minable = nil
+    vp_machine.next_upgrade = nil
+    vp_machine.placeable_by = nil
+    vp_machine.crafting_categories = { "fs-test-vp-cat" }
+    extend_test({
+        { type = "recipe-category", name = "fs-test-vp-cat" },
+        vp_machine,
+        {
+            type = "recipe",
+            name = "fs-test-vp-make",
+            category = "fs-test-vp-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "stone", amount = 2000 } },
+            results = { { type = "item", name = "electronic-circuit", amount = 1 } },
+        },
+        {
+            type = "recipe",
+            name = "fs-test-vp-use",
+            category = "fs-test-vp-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "electronic-circuit", amount = 1 } },
+            results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
+        },
+    })
+end
+
+-- 8e5. Consumable-overflow loop -- the cascade's Vc stage (the consumable-dump
+--      tier; manage/pre_solve.lua M.cascade_step -> solver/cascade.lua). Shape:
+--        make:  1 stone            -> 1 iron-gear-wheel (T) + 1 wood (B)
+--        useB:  1 wood + 2000 stone -> 1 copper-cable   (D)
+--      wood is a FORCED joint byproduct of the only target producer, so meeting
+--      1 gear/s emits 1 wood/s. CONSUMING the wood is made deliberately costly --
+--      useB draws 2000 stone (|initial_source|, source_cost_item = 1, so ~2000 per
+--      wood) which EXCEEDS wood's flat |surplus_sink| dump cost (elastic_cost =
+--      2^10 = 1024). So the un-gated COST baseline rationally DUMPS the wood rather
+--      than run useB: a cheaper consumer (< 1024) is consumed away by the baseline
+--      itself -- its pure output (copper-cable, produced-not-consumed) drains free
+--      through a |final_sink|, so consuming undercuts the penalised dump and leaves
+--      nothing for Vc. Above 1024 the dump wins and the wood surplus survives the
+--      baseline. But wood is CONSUMABLE: the Vc fix-test injects one unit, runs
+--      useB (importing the stone), and wood's own surplus residual drops to zero,
+--      so the Vc stage classifies it a member, prices its dump, and re-solves --
+--      useB now runs and the wood dump is gone. This is the crux of the Vc tier:
+--      it minimizes the CONSUMABLE dump (paying the 2000 stone to do so) BEFORE the
+--      cost/polish tier would ever spend it, the lexicographic ordering the un-gated
+--      cost baseline cannot express. Contrast the breeding
+--      overflow in lp_cascade.lua's Vc case, where the consumer makes MORE of the
+--      byproduct (non-consumable) and Vc correctly leaves it. Asserted by smoke
+--      check_cascade_vc (fixture cascade_vc). A dedicated category on a non-fixed
+--      assembling-machine-2 copy keeps both recipes off every vanilla machine list
+--      and crafts fuel-free.
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"]
+    and raw.item and raw.item["stone"] and raw.item["iron-gear-wheel"]
+    and raw.item["copper-cable"] and raw.item["wood"] then
+    local vc_machine = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+    vc_machine.name = "fs-test-vc-machine"
+    vc_machine.localised_name = "fs-test-vc-machine"
+    vc_machine.minable = nil
+    vc_machine.next_upgrade = nil
+    vc_machine.placeable_by = nil
+    vc_machine.crafting_categories = { "fs-test-vc-cat" }
+    extend_test({
+        { type = "recipe-category", name = "fs-test-vc-cat" },
+        vc_machine,
+        {
+            type = "recipe",
+            name = "fs-test-vc-make",
+            category = "fs-test-vc-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "stone", amount = 1 } },
+            results = {
+                { type = "item", name = "iron-gear-wheel", amount = 1 },
+                { type = "item", name = "wood", amount = 1 },
+            },
+            main_product = "iron-gear-wheel",
+        },
+        {
+            type = "recipe",
+            name = "fs-test-vc-useb",
+            category = "fs-test-vc-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = {
+                { type = "item", name = "wood", amount = 1 },
+                { type = "item", name = "stone", amount = 2000 },
+            },
+            results = { { type = "item", name = "copper-cable", amount = 1 } },
         },
     })
 end

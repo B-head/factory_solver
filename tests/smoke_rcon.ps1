@@ -44,7 +44,7 @@ param(
     # Seconds to wait for the server to open its RCON port after launch.
     [int] $RconStartupSeconds = 90,
     [string[]] $Fixtures = @("iron_plate", "missing_prototype", "boiler_steam", "reactor_burnt_fuel",
-        "catalyst_reclassify", "target_rescue",
+        "catalyst_reclassify", "cascade_vp", "cascade_vc", "target_rescue",
         "migration_legacy_shape", "codec_solution_roundtrip", "codec_frozen_import",
         "codec_fp_roundtrip", "codec_helmod_roundtrip", "codec_helmod_import_order",
         "codec_yafc_roundtrip", "yafc_real_sample", "codec_yafc_virtual", "yafc_string_form",
@@ -264,6 +264,53 @@ try {
         Write-Host "SMOKE FAIL: [offshore_pump_filter] $pumpFilter"
         $allPass = $false
     }
+    # Codec round-trip fidelity over the embedded 16-Solution bundle (native
+    # exact; FP/Helmod/YAFC lossy modulo documented drops). Solution-independent,
+    # so it runs once up front. SKIPs without Space Age (most recipes are SA-only).
+    $bundleCodecs = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_bundle16_codecs'))"
+    if ($bundleCodecs -eq "OK") {
+        Write-Host "SMOKE PASS: [bundle16_codecs] native exact + FP/Helmod/YAFC lossy round-trip"
+    } elseif ($bundleCodecs -match '^SKIP:') {
+        Write-Host "SMOKE SKIP: [bundle16_codecs] $($bundleCodecs -replace '^SKIP:\s*', '')"
+        $skipCount++
+    } else {
+        Write-Host "SMOKE FAIL: [bundle16_codecs] $bundleCodecs"
+        $allPass = $false
+    }
+
+    # Default shipping solver vs the 0.6.0 solver's solution over the same
+    # 16-Solution bundle (both with quality unlocked): drives the real
+    # pre_solve.forwerd_solve pump on each and compares tier sums. DIAGNOSTIC for
+    # now -- characterising the 0.6.0->current regression -- so it reports the
+    # match/differ tally without failing the run. Full per-problem report in
+    # write/script-output/bundle16_v060_report.txt (-KeepRun). SKIPs without SA.
+    $bundleV060 = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_bundle16_v060'))"
+    if ($bundleV060 -match '^OK') {
+        Write-Host "SMOKE PASS: [bundle16_v060] $bundleV060"
+    } elseif ($bundleV060 -match '^SKIP:') {
+        Write-Host "SMOKE SKIP: [bundle16_v060] $($bundleV060 -replace '^SKIP:\s*', '')"
+        $skipCount++
+    } else {
+        Write-Host "SMOKE FAIL: [bundle16_v060] $bundleV060"
+        $allPass = $false
+    }
+
+    # Refresh the confirmed drop report on disk (write/script-output/bundle16_drops.txt)
+    # so a -KeepRun run leaves an up-to-date copy to regenerate
+    # tests/fixtures/bundle16_expected_drops.lua from. Quiet -- the file, not the
+    # console, is the artifact; the verdict above already gates correctness.
+    if ($bundleCodecs -ne "" -and $bundleCodecs -notmatch '^SKIP:') {
+        [void] (Invoke-RconCommand -Stream $stream `
+            -Command "/silent-command remote.call('$iface','bundle16_drop_report')")
+        # Also refresh the normalized-line capture used to regenerate the 0.6.0
+        # baseline (tests/fixtures/bundle16_v060.lua) via tests/bundle16_make_v060.lua
+        # run in a 0.6.0 worktree. Quiet; the file is the artifact.
+        [void] (Invoke-RconCommand -Stream $stream `
+            -Command "/silent-command remote.call('$iface','dump_bundle16_normalized')")
+    }
+
     foreach ($fixture in $Fixtures) {
         $setup = Invoke-RconCommand -Stream $stream `
             -Command "/silent-command rcon.print(remote.call('$iface','setup','$fixture'))"
@@ -319,6 +366,27 @@ try {
             if ($reclassify -ne "OK") { $verdict = "FAIL" }
         }
 
+        # The cascade_vp fixture additionally proves the cascade's Vp stage
+        # fabricated the producible import (vp_rescued, residual cheat ~0, chain
+        # running), not merely that the solve converged -- the importing baseline
+        # also reaches "finished".
+        $cascadeVp = $null
+        if ($verdict -eq "PASS" -and $fixture -eq "cascade_vp") {
+            $cascadeVp = Invoke-RconCommand -Stream $stream `
+                -Command "/silent-command rcon.print(remote.call('$iface','check_cascade_vp'))"
+            if ($cascadeVp -ne "OK") { $verdict = "FAIL" }
+        }
+
+        # The cascade_vc fixture additionally proves the cascade's Vc stage consumed
+        # the consumable overflow (vc_rescued, make + useB both running), not merely
+        # that the solve converged -- the dumping baseline also reaches "finished".
+        $cascadeVc = $null
+        if ($verdict -eq "PASS" -and $fixture -eq "cascade_vc") {
+            $cascadeVc = Invoke-RconCommand -Stream $stream `
+                -Command "/silent-command rcon.print(remote.call('$iface','check_cascade_vc'))"
+            if ($cascadeVc -ne "OK") { $verdict = "FAIL" }
+        }
+
         # The target_rescue fixture additionally proves the lexicographic target
         # rescue resolved the tier-1 collapse (budget locked, target met, loop
         # running) -- the collapsed all-zero answer also reaches "finished".
@@ -329,10 +397,22 @@ try {
             if ($rescue -ne "OK") { $verdict = "FAIL" }
         }
 
+        # Informational: surface which cascade tiers fired for the cascade fixtures
+        # (does not affect the verdict). Lets a run show e.g. whether the polish
+        # tier fired atop an upper-tier rescue without re-deriving it.
+        $cascadeSummary = $null
+        if ($verdict -eq "PASS" -and ($fixture -eq "catalyst_reclassify" -or $fixture -eq "cascade_vp" -or $fixture -eq "cascade_vc")) {
+            $cascadeSummary = Invoke-RconCommand -Stream $stream `
+                -Command "/silent-command rcon.print(remote.call('$iface','cascade_summary'))"
+        }
+
         $detail = "solver_state=$state"
         if ($readSide) { $detail += "; read_side=$readSide" }
         if ($reclassify) { $detail += "; reclassify=$reclassify" }
+        if ($cascadeVp) { $detail += "; cascade_vp=$cascadeVp" }
+        if ($cascadeVc) { $detail += "; cascade_vc=$cascadeVc" }
         if ($rescue) { $detail += "; rescue=$rescue" }
+        if ($cascadeSummary) { $detail += "; [$cascadeSummary]" }
         Write-Host "SMOKE $verdict`: [$fixture] $detail"
         if ($verdict -ne "PASS") { $allPass = $false }
     }
