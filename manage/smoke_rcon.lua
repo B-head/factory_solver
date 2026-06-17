@@ -2874,16 +2874,21 @@ function M.dump_bundle16_normalized()
     return "OK: wrote bundle16_normalized.lua (" .. #payloads .. " solutions)"
 end
 
--- Solutions where the CURRENT shipping solver is KNOWN to diverge from the 0.6.0
--- baseline -- the regression this test documents. 0.6.0 (always-on hard
--- reachability gate + single solve) builds a real factory; the current un-gated
--- machine-minimizing cascade collapses these to ~0 machines (pure import / no
--- production) for upper-only / importable-target problems, EXCEPT "Rocket" where
--- current uses fewer machines than 0.6.0 (a benign divergence, kept here because
--- it still differs). Confirmed in the real game (0.6.0 from the portal vs the
--- dev build). When the solver regression is fixed, these start matching 0.6.0
--- again -> the check reports them as XPASS and fails, prompting their removal
--- from this set. See project_open_work_index / the regression hunt notes.
+-- Solutions where the CURRENT shipping solver is KNOWN to diverge from the
+-- baseline -- the regression this test documents. The baseline is the well-posed
+-- target: each problem solved with its constraints forced to EXACT (equal), where
+-- 0.6.0 (hardgate) and the reference solver independently converge to the SAME
+-- machine counts (the agreement is the trust anchor -- no single solver is gold;
+-- see tests/gen_v060_exact.lua). The TEST itself still solves each problem's
+-- ORIGINAL constraints (upper/lower/equal as the user authored them) -- it is NOT
+-- re-posed. A correct solver answers an upper cap by producing up to it and a
+-- lower floor by the minimum, both equal to the exact solution; the current
+-- un-gated machine-minimizing cascade instead collapses these to ~0 machines
+-- (pure import / no production) on upper-only / importable-target problems (and
+-- dumps consumables it should consume), so it diverges from the well-posed target.
+-- Confirmed in the real game (0.6.0 from the portal vs the dev build). When the
+-- solver is fixed these start matching -> XPASS -> fail, prompting removal from
+-- this set. See project_open_work_index / the regression hunt notes.
 local BUNDLE16_KNOWN_REGRESSIONS = {
     ["Asteroid up cycleing"] = true,
     ["Begining"] = true,
@@ -2901,9 +2906,11 @@ local BUNDLE16_KNOWN_REGRESSIONS = {
 local BUNDLE16_SKIP = { ["Fusion"] = true }
 
 ---RCON entry point: REGRESSION GUARD comparing the DEFAULT SHIPPING solver (the
----real pre_solve.forwerd_solve pump, driven synchronously to terminal) against
----the 0.6.0 solver's solution (tests/fixtures/bundle16_v060.lua) for every bundle
----Solution. Both run with quality unlocked (M.bundle16_research_bonuses) so the
+---real pre_solve.forwerd_solve pump, driven synchronously to terminal, on each
+---Solution's ORIGINAL constraints) against the well-posed exact-constraint
+---baseline (tests/fixtures/bundle16_v060.lua: each problem solved with constraints
+---forced to equal, where 0.6.0 and the reference agree -- see BUNDLE16_KNOWN_
+---REGRESSIONS). Both run with quality unlocked (M.bundle16_research_bonuses) so the
 ---quality loops are not degenerate. Compared as aggregate tier sums -- T (target
 ---violation), import (shortage_source + initial_source), surplus (surplus_sink),
 ---machines (recipe) -- with a relative tolerance + absolute floor (robust to the
