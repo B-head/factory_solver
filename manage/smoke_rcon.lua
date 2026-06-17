@@ -2889,17 +2889,20 @@ end
 -- Confirmed in the real game (0.6.0 from the portal vs the dev build). When the
 -- solver is fixed these start matching -> XPASS -> fail, prompting removal from
 -- this set. See project_open_work_index / the regression hunt notes.
+-- The headroom PrimalKind fix (the cascade now counts an upper cap's pull-slack
+-- as a tier-1 target, so it FILLS the cap instead of collapsing production to
+-- M~0) cleared 7 of the original 10: Gleba circuit, Gleba loop, Module and
+-- beacon, Oil Processing 1, Quality loop, Rocket, Simple all match 0.6.0(exact)
+-- now. The 3 that remain are not upper-cap collapses -- the fix UN-collapsed
+-- Asteroid (M 1.6e-5 -> 258, now overshoots 0.6.0's 221) and Fulgora top down
+-- (M 2.1e-5 -> 34, still under 0.6.0's 49 on the <research> recipe difference),
+-- and Begining stays at M=0.2 (a separate import-vs-fabricate collapse the
+-- headroom fix does not touch). These are the cascade-vs-hardgate machine-count
+-- deltas, tracked separately.
 local BUNDLE16_KNOWN_REGRESSIONS = {
     ["Asteroid up cycleing"] = true,
     ["Begining"] = true,
     ["Fulgora top down"] = true,
-    ["Gleba circuit"] = true,
-    ["Gleba loop"] = true,
-    ["Module and beacon"] = true,
-    ["Oil Processing 1"] = true,
-    ["Quality loop"] = true,
-    ["Rocket"] = true,
-    ["Simple"] = true,
 }
 -- Fusion's 0.6.0 reference converges nondeterministically (headless pairs-order),
 -- so its frozen baseline is untrustworthy -- never compared.
@@ -2954,7 +2957,11 @@ function M.check_bundle16_v060_impl()
         local x = solution.raw_variables and solution.raw_variables.x or {}
         for key, p in pairs(primals) do
             local v = math.abs(x[key] or 0)
-            if p.kind == "elastic" then out.T = out.T + v
+            -- headroom (an upper cap's pull-slack) is a target variable alongside
+            -- elastic: an under-filled cap is a tier-1 violation, so it must show
+            -- in T. (No-op on the current fixtures -- the cascade fills every cap
+            -- now -- but it guards a future under-fill regression.)
+            if p.kind == "elastic" or p.kind == "headroom" then out.T = out.T + v
             elseif p.kind == "shortage_source" or p.kind == "initial_source" then out.import = out.import + v
             elseif p.kind == "surplus_sink" then out.surplus = out.surplus + v
             elseif p.kind == "recipe" then out.machines = out.machines + v end

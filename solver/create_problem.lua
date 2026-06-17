@@ -1188,14 +1188,18 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         local budget_name = vk.target_budget()
         problem:add_upper_limit_constraint(budget_name, options.target_budget)
         for key, primal in pairs(problem.primals) do
-            if primal.kind == "elastic" then
+            -- headroom (an upper cap's pull-slack) is a target variable too --
+            -- the reference's stage-1 is_target counts elastic OR headroom -- so
+            -- the row that locks the target tier must cap both, or a lower stage
+            -- could shed an upper cap's fill to save machines / imports.
+            if primal.kind == "elastic" or primal.kind == "headroom" then
                 problem:add_subject_term(key, budget_name, 1)
             end
         end
     end
     if options.target_only_objective then
         for _, primal in pairs(problem.primals) do
-            if primal.kind == "elastic" then
+            if primal.kind == "elastic" or primal.kind == "headroom" then
                 primal.cost = 1
             elseif primal.kind == "recipe" or primal.kind == "bridge" then
                 primal.cost = target_rescue_epsilon

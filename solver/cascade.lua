@@ -657,7 +657,12 @@ function M.begin(problem, raw, lines, rescue_budget)
     -- otherwise reintroduce the tier-1 collapse through this pipeline.
     local T = 0
     for key, p in pairs(problem.primals) do
-        if p.kind == "elastic" then T = T + math.abs(raw.x[key] or 0) end
+        -- elastic OR headroom: an upper cap's pull-slack is a target variable
+        -- (the reference's is_target), so the t_limit must account for it or the
+        -- target_budget row (which now caps both) would be tighter than the
+        -- baseline's own target tier and pin it for nothing -- or, when no
+        -- rescue fires, leave the cap free to shed below tier 1.
+        if p.kind == "elastic" or p.kind == "headroom" then T = T + math.abs(raw.x[key] or 0) end
     end
     state.t_limit = rescue_budget or M.budget(T)
 

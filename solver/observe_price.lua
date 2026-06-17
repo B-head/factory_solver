@@ -77,15 +77,19 @@ function M.cheat_mass(primals, x)
     return s
 end
 
--- Sum |x| over every elastic (target-relaxation) variable -- how far the solve
--- gave up on the requested output.
+-- Sum |x| over every target variable -- how far the solve gave up on the
+-- requested output. An elastic relaxes a lower/equal demand; a headroom is an
+-- upper cap's pull-slack (limit - production), priced at target_cost so the cap
+-- reads as a target to FILL, not a passive bound. Both are tier-1 (the
+-- reference's is_target), so the target rescue that this feeds must minimize
+-- both.
 ---@param primals table<string, Primal>
 ---@param x table<string, number>
 ---@return number
 function M.target_relax(primals, x)
     local s = 0
     for key, p in pairs(primals) do
-        if p.kind == "elastic" then s = s + math.abs(x[key] or 0) end
+        if p.kind == "elastic" or p.kind == "headroom" then s = s + math.abs(x[key] or 0) end
     end
     return s
 end
