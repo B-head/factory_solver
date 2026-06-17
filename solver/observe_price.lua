@@ -1,22 +1,23 @@
--- observe-price: the import-vs-fabricate fixed point for unreachable, self-
--- sustaining catalyst cycles.
+-- observe-price: per-material repricing of the import-vs-fabricate escape, for
+-- every shortage the baseline would rather penalty-import than run the chain for.
 --
--- The soft gate (create_problem's reachability_soft_gate_k) handles every
--- REACHABLE material: its shortage is priced high so the chain runs. What it
--- leaves at the flat elastic_cost are the UNREACHABLE produced+consumed cycles --
--- closed catalyst loops (the antimony purex sb-oxide, the tuuphra biological
--- loop) the user placed but that the LP would rather penalty-import than run.
--- For those the right shortage cost is not a fixed gate value but a per-material
--- one that only the solve can reveal, so this module measures it:
+-- The soft gate (create_problem's reachability_soft_gate_k) prices REACHABLE
+-- materials' shortages high so the chain runs. Whatever still imports at the
+-- baseline -- a placed loop the LP declines to run, a chain it would rather buy --
+-- carries an active |shortage_source|, and the right cost for it is not a fixed
+-- gate value but a per-material one only the solve can reveal, so this module
+-- measures it:
 --
---   1. BASELINE solve (flat 1024) -> collect the avoidable-cheat shortage keys:
---      a material with an active shortage whose cyclic SCC is self-sustaining,
---      export-feasible, and currently idle (the placed cycle is not running).
---   2. OBSERVE (one solve per SCC at the ceiling) -> read the escape-cost delta
+--   1. BASELINE solve -> collect EVERY active-shortage material as a reprice
+--      target (SCC membership does NOT gate this -- see M.collect_plan); group
+--      them so the observe step can measure a coupled escape-cost delta:
+--      materials sharing one cyclic SCC observe together, every other material on
+--      its own.
+--   2. OBSERVE (one solve per group at the ceiling) -> read the escape-cost delta
 --      dCost the forced fabrication drags in (objective cost of the collateral
 --      surplus/shortage/initial_source, in elastic_cost units -- see M.escape_cost
---      for why cost, not mass), and price the key at
---      clamp(K_PRED * dCost/qty, 2, ceiling). An SCC whose shortage does not
+--      for why cost, not mass), and price each key at
+--      clamp(K_PRED * dCost/qty, 2, ceiling). A group whose shortage does not
 --      clear without relaxing the target is cone-over-promise: FREEZE it (import
 --      is correct) rather than chase it.
 --   3. VERIFY + CORRECT -> re-solve at the predicted prices; a key still
@@ -32,7 +33,6 @@
 
 local material_cycles = require "solver/material_cycles"
 local create_problem = require "solver/create_problem"
-local tn = require "manage/typed_name"
 
 local M = {}
 
@@ -59,11 +59,11 @@ function M.park_threshold(x, primals)
 end
 
 -- Penalty-escape mass: sum |x| over shortage_source + elastic (the import /
--- target-relaxation cheat). pre_solve compares this before and after the loop:
--- observe-price is a best-effort improvement, so a result whose cheat exceeds the
--- baseline is reverted to the baseline (the placed cycle stays a neutral import
--- rather than a worse fabrication). Surplus is excluded: byproduct dump is
--- accepted, only import/relaxation counts as the thing observe-price should cut.
+-- target-relaxation cheat). A measurement utility for the research drivers
+-- (tests/research/drive_observe_e2e etc.) that compare a priced result against
+-- the baseline; pre_solve no longer reads it (the keep-best revert was removed).
+-- Surplus is excluded: byproduct dump is accepted, only import/relaxation counts
+-- as the thing observe-price reprices.
 ---@param primals table<string, Primal>
 ---@param x table<string, number>
 ---@return number
@@ -125,61 +125,20 @@ function M.escape_cost(primals, x, exclude)
     return s / ELASTIC_COST
 end
 
--- Is the SCC's internal recipe flow idle? Internal = >= 1 ingredient AND >= 1
--- product in the SCC. Two tests, ORed, because their blind spots are disjoint:
---
---   * |flow| sum < IDLE_FLOW_EPS. Parked recipes read exactly 0 at normal
---     solution scale (purify_zeros snaps them), so any flow at all means the
---     cycle runs. But interior-point dust that escapes purification sits at an
---     ABSOLUTE floor coupled to the solve tolerance (~1e-7..3e-6 measured),
---     independent of solution scale: on a very small-scale plan (cycle flows
---     below ~1e-6/s -- items-per-hour pins through deep chains) that dust
---     crosses the epsilon and a truly idle cycle would read "running",
---     silently dropping it from the plan.
---   * Dual certificate: every internal recipe is exactly 0 or dual-dominated
---     (reduced cost s > x, the same nonbasic test certify_zeros uses). The
---     certificate is what purification itself failed to apply to that dust, so
---     re-reading it here rescues the small-scale case; a genuinely basic
---     (running) recipe has s -> 0 < x and never certifies.
---
--- The OR can only widen "idle", so it eliminates the unguarded failure (idle
--- cycle missed -> cheat never repriced) at the cost of occasionally collecting
--- a sub-tolerance running cycle -- that direction is bounded by the verify
--- loop and the keep-best revert in pre_solve.
-local IDLE_FLOW_EPS = 1e-6
-local function cycle_idle(lines, scc_set, x, s)
-    local flow, certified = 0, true
-    for _, line in ipairs(lines) do
-        local hi = false
-        for _, ing in ipairs(line.ingredients) do
-            if scc_set[tn.typed_name_to_variable_name(ing)] then hi = true; break end
-        end
-        if not hi and line.fuel_ingredient and scc_set[tn.typed_name_to_variable_name(line.fuel_ingredient)] then hi = true end
-        if hi then
-            local hp = false
-            for _, prod in ipairs(line.products) do
-                if scc_set[tn.typed_name_to_variable_name(prod)] then hp = true; break end
-            end
-            if not hp and line.fuel_burnt_result and scc_set[tn.typed_name_to_variable_name(line.fuel_burnt_result)] then hp = true end
-            if hp then
-                local key = tn.typed_name_to_variable_name(line.recipe_typed_name)
-                local v = math.abs(x[key] or 0)
-                flow = flow + v
-                if v > 0 and (s[key] or 0) <= v then certified = false end
-            end
-        end
-    end
-    return flow < IDLE_FLOW_EPS or certified
-end
-
 local function ceiling_for(qty)
     return math.max(2, TARGET_COST / (ELASTIC_COST * qty))
 end
 
--- Collect the avoidable-cheat plan from a finished baseline solve. Returns a
--- plain-table plan (storage-safe) or nil when nothing qualifies. The plan keys
--- are sorted, and SCC groups are keyed by a stable id, so two clients build the
--- identical plan.
+-- Collect the reprice plan from a finished baseline solve. Returns a plain-table
+-- plan (storage-safe) or nil when nothing qualifies.
+--
+-- A material qualifies as a reprice target by its OWN active shortage alone --
+-- independent of SCC membership: any |shortage_source| carrying flow above the
+-- park threshold is collected. The material-cycle SCCs are used ONLY to GROUP the
+-- collected keys for the per-group observe solve: materials sharing one cyclic SCC
+-- observe together (their escape-cost delta is coupled), every other material is
+-- its own singleton group. Iteration over the sorted primal keys keeps keys,
+-- groups, and group ids byte-identical across multiplayer clients.
 --
 -- plan = {
 --   keys = { { key, material, qty, ceiling, group, mult=1, frozen=false, resolved_round=-1 } ... },
@@ -189,7 +148,7 @@ end
 -- }
 ---@param primals table<string, Primal>
 ---@param x table<string, number>
----@param s table<string, number> Dual slack (reduced cost) values from the same PackedVariables as `x`; cycle_idle's certificate reads them.
+---@param s table<string, number> Unused (the SCC idle certificate was removed); kept for call-site signature stability.
 ---@param lines NormalizedProductionLine[]
 ---@return table?
 function M.collect_plan(primals, x, s, lines)
@@ -197,48 +156,40 @@ function M.collect_plan(primals, x, s, lines)
     local adj = material_cycles.build_material_graph(lines)
     local sccs = material_cycles.find_sccs(adj)
 
+    -- SCC -> stable group id, used ONLY as the escape grouping unit: materials in
+    -- one cyclic SCC share a group; everything else falls back to a per-material
+    -- singleton below. Membership here does NOT gate whether a material is a
+    -- reprice target.
+    local scc_group = {}
+    for si, scc in ipairs(sccs) do
+        if material_cycles.is_cyclic_scc(scc, adj) then
+            local gid = "scc:" .. si
+            for _, m in ipairs(scc) do scc_group[m] = gid end
+        end
+    end
+
     -- Stable scan order over shortage primals.
     local prim_keys = {}
     for k in pairs(primals) do prim_keys[#prim_keys + 1] = k end
     table.sort(prim_keys)
 
-    local keys, groups, exclude = {}, {}, {}
-    for si, scc in ipairs(sccs) do
-        if material_cycles.is_cyclic_scc(scc, adj) then
-            local scc_set = {}
-            for _, m in ipairs(scc) do scc_set[m] = true end
-            local active, active_mats = {}, {}
-            for _, key in ipairs(prim_keys) do
-                local p = primals[key]
-                if p.kind == "shortage_source" and p.material and scc_set[p.material]
-                    and (x[key] or 0) > threshold then
-                    active[#active + 1] = key
-                    active_mats[#active_mats + 1] = p.material
-                end
-            end
-            if #active >= 1 then
-                local self_sust = material_cycles.is_self_sustaining(lines, scc)
-                local fab = true
-                for _, mm in ipairs(active_mats) do
-                    if not material_cycles.export_feasible(lines, mm) then fab = false; break end
-                end
-                if self_sust and fab and cycle_idle(lines, scc_set, x, s) then
-                    local gid = "scc:" .. si
-                    local added = false
-                    for _, key in ipairs(active) do
-                        local qty = x[key] or 0
-                        if qty > 1e-12 then
-                            keys[#keys + 1] = {
-                                key = key, material = primals[key].material, qty = qty,
-                                ceiling = ceiling_for(qty), group = gid,
-                                mult = 1, frozen = false, resolved_round = -1,
-                            }
-                            exclude[key] = true
-                            added = true
-                        end
-                    end
-                    if added then groups[#groups + 1] = gid end
-                end
+    local keys, groups, exclude, seen_group = {}, {}, {}, {}
+    for _, key in ipairs(prim_keys) do
+        local p = primals[key]
+        -- Any active shortage is a reprice target, regardless of SCC membership.
+        if p.kind == "shortage_source" and p.material
+            and (x[key] or 0) > threshold and (x[key] or 0) > 1e-12 then
+            local qty = x[key]
+            local gid = scc_group[p.material] or ("single:" .. p.material)
+            keys[#keys + 1] = {
+                key = key, material = p.material, qty = qty,
+                ceiling = ceiling_for(qty), group = gid,
+                mult = 1, frozen = false, resolved_round = -1,
+            }
+            exclude[key] = true
+            if not seen_group[gid] then
+                seen_group[gid] = true
+                groups[#groups + 1] = gid
             end
         end
     end

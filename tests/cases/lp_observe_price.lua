@@ -7,14 +7,14 @@
 -- qualify, how the per-material override maps are built, and how the verify loop
 -- bumps / freezes a key. These operate on constructed primal / x / s / line
 -- tables -- the same shapes pre_solve hands the module -- so no Factorio runtime
--- or solve is involved. The s table is the dual slack (reduced cost) side of
--- PackedVariables; collect_plan's idle certificate reads it, and an empty table
--- (s unknown) degrades to the pure flow-epsilon test.
+-- or solve is involved. The s table (the dual slack side of PackedVariables) is
+-- no longer read by collect_plan -- it stays in the call signature for stability
+-- only -- so the tests pass {} for it.
 --
--- The qualifying shape: a self-sustaining, export-feasible cyclic SCC {A, B} that
--- sits idle (its internal recipes carry no flow) while the demanded material A is
--- penalty-imported through |shortage_source|. observe-price exists to reprice
--- that shortage so the placed cycle runs instead.
+-- The qualifying shape: ANY material carrying an active |shortage_source| at the
+-- baseline is a reprice target, independent of SCC membership. The material-cycle
+-- SCCs are used only to GROUP the collected keys -- materials in one cyclic SCC
+-- {A, B} observe together, a non-SCC material is its own singleton group.
 
 local harness = require "tests/harness"
 local op = require "solver/observe_price"
@@ -75,48 +75,39 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "collect_plan skips a cycle that is already running (not idle)",
+    name = "collect_plan targets an active shortage regardless of internal cycle flow (no idle gate)",
     run = function()
+        -- The {A, B} cycle's internal recipes carry flow (the cycle is running),
+        -- yet A is still imported via shortage. The old design skipped a running
+        -- cycle; the new one reprices any active shortage regardless of whether
+        -- the cycle runs or sits idle.
         local running = { ["recipe/r1/normal"] = 1, ["recipe/r2/normal"] = 1,
             ["recipe/r3/normal"] = 1, [A_SHORTAGE] = 1 }
-        harness.assert_eq(op.collect_plan(base_primals(), running, {}, cycle_lines()), nil,
-            "a running internal cycle does not qualify")
+        local plan = op.collect_plan(base_primals(), running, {}, cycle_lines())
+        harness.assert_true(plan ~= nil, "active shortage qualifies even with the cycle running")
+        harness.assert_eq(plan.keys[1].material, "item/A/normal", "the imported cycle material")
     end,
 })
 
 table.insert(cases, {
-    name = "collect_plan rescues an idle cycle whose dust escaped purification (dual certificate)",
+    name = "collect_plan targets a non-SCC material's active shortage as a singleton group",
     run = function()
-        -- Small-scale regime: r1/r2 carry interior-point dust ABOVE the flow
-        -- epsilon (purify_zeros missed it), so the flow test alone would read
-        -- the cycle as running and silently drop it from the plan. Their reduced
-        -- costs dominate the dust (nonbasic side), so the dual certificate
-        -- recognises the park. Without s the same x is dropped -- the
-        -- certificate, not the flow test, is what rescues it.
-        local dusty = { ["recipe/r1/normal"] = 2e-6, ["recipe/r2/normal"] = 3e-6,
-            ["recipe/r3/normal"] = 1, [A_SHORTAGE] = 1 }
-        local duals = { ["recipe/r1/normal"] = 1e-3, ["recipe/r2/normal"] = 1e-3 }
-        local plan = op.collect_plan(base_primals(), dusty, duals, cycle_lines())
-        harness.assert_true(plan ~= nil, "certified dust reads as idle")
-        harness.assert_eq(plan.keys[1].material, "item/A/normal", "the cycle's shortage is planned")
-        harness.assert_eq(op.collect_plan(base_primals(), dusty, {}, cycle_lines()), nil,
-            "without duals the dust reads as running flow")
-    end,
-})
-
-table.insert(cases, {
-    name = "collect_plan widens idle to sub-epsilon flow even when the duals say basic",
-    run = function()
-        -- The OR of the two idle tests: a cycle whose genuine flow sits below the
-        -- flow epsilon (sub-tolerance running, only possible on extremely small
-        -- plans) is still collected, because dropping a truly idle cycle has no
-        -- safety net while collecting a running one is bounded by the verify
-        -- loop and pre_solve's keep-best revert. This pins that choice.
-        local tiny = { ["recipe/r1/normal"] = 1e-7, ["recipe/r2/normal"] = 1e-7,
-            ["recipe/r3/normal"] = 1e-7, [A_SHORTAGE] = 1e-7 }
-        local basic = { ["recipe/r1/normal"] = 0, ["recipe/r2/normal"] = 0 }
-        local plan = op.collect_plan(base_primals(), tiny, basic, cycle_lines())
-        harness.assert_true(plan ~= nil, "sub-epsilon flow reads as idle regardless of duals")
+        -- X -> Y is a linear chain: X sits in no cyclic SCC. Under the
+        -- SCC-independent target rule its active shortage is still collected,
+        -- grouped on its own (the SCC is only the grouping unit, not a gate).
+        local primals = {
+            ["recipe/r1/normal"] = { kind = "recipe" },
+            ["|shortage_source|item/X/normal"] =
+                { kind = "shortage_source", material = "item/X/normal", cost = elastic_cost },
+        }
+        local x = { ["recipe/r1/normal"] = 1, ["|shortage_source|item/X/normal"] = 1 }
+        local lines = { line("r1", { it("Y", 1) }, { it("X", 1) }) }
+        local plan = op.collect_plan(primals, x, {}, lines)
+        harness.assert_true(plan ~= nil, "a non-SCC active shortage still qualifies")
+        harness.assert_eq(#plan.keys, 1, "one key")
+        harness.assert_eq(plan.keys[1].material, "item/X/normal", "the imported material")
+        harness.assert_eq(plan.keys[1].group, "single:item/X/normal", "its own singleton group")
+        harness.assert_eq(#plan.groups, 1, "one group")
     end,
 })
 

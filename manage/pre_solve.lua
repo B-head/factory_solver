@@ -158,13 +158,7 @@ function M.forwerd_solve(force_data, solution)
             -- shortage_cost_overrides instead.
             local op = solution.observe_price
             local forced = op and op.imports or nil
-            if op and op.reverted then
-                -- keep-best fallback: the priced result was worse, so cheap-import
-                -- everything (the diagnose set plus the fabricate targets).
-                forced = {}
-                for m in pairs(op.imports or {}) do forced[m] = true end
-                if op.plan then for _, k in ipairs(op.plan.keys) do forced[k.material] = true end end
-            elseif op and op.plan then
+            if op and op.plan then
                 if op.phase == "observe" then
                     options.shortage_cost_overrides =
                         observe_price.observe_overrides(op.plan, op.plan.groups[op.group_index])
@@ -550,7 +544,6 @@ function M.observe_price_step(solution, lines)
             imports = imports,
             group_index = 1,
             round = 0,
-            baseline_cheat = observe_price.cheat_mass(primals, x),
         }
         restart()
     elseif op.phase == "finalize" then
@@ -570,28 +563,12 @@ function M.observe_price_step(solution, lines)
             restart()
         end
     elseif op.phase == "verify" then
-        if op.reverted then
-            -- The keep-best revert solve (no overrides) finished: it is the
-            -- baseline-equivalent answer; accept it.
-            op.phase = "done"
-            return
-        end
         op.round = op.round + 1
         local live = observe_price.apply_verify(op.plan, x, op.round)
         if live and op.round < observe_price.MAX_ROUNDS then
             restart()
         else
-            -- Keep-best guard: observe-price is best-effort. If the priced result
-            -- carries MORE import/relaxation cheat than the baseline, discard the
-            -- overrides and re-solve once at the baseline (the placed cycle stays a
-            -- neutral import rather than a worse fabrication).
-            local final_cheat = observe_price.cheat_mass(primals, x)
-            if final_cheat > op.baseline_cheat + 1e-6 then
-                op.reverted = true
-                restart()
-            else
-                op.phase = "done"
-            end
+            op.phase = "done"
         end
     end
     -- op.phase == "done": nothing to do; the finished solution stands.
