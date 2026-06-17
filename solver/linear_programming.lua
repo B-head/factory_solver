@@ -259,7 +259,12 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     -- keeps the test absolute when the right-hand side is zero.
     local p_criteria = primal:euclidean_norm() / (1 + b:euclidean_norm())
     local d_criteria = dual:euclidean_norm() / (1 + c:euclidean_norm())
-    local mu_criteria = vector_sum(duality_gap) / p_degree
+    -- Guard the empty problem (p_degree == 0, e.g. every line pruned as
+    -- inactive): the duality gap sum is 0, so 0/0 = NaN. Lua 5.4's math.max
+    -- discards a NaN argument (the test would still pass), but LuaJIT's returns
+    -- NaN, so the convergence test never trips and the solve spins to the
+    -- iterate limit. An empty LP is trivially optimal, so report mu = 0.
+    local mu_criteria = p_degree > 0 and vector_sum(duality_gap) / p_degree or 0
 
     -- log.trace("i = %i, p_rel = %g, d_rel = %g, mu = %g",
     --     iteration, p_criteria, d_criteria, mu_criteria)
