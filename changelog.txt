@@ -1,5 +1,5 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.6.5
+Version: 0.6.6
 Date: ????
   Features:
     - The default layout now follows Factorio's ingredient-to-product order:
@@ -35,6 +35,19 @@ Date: ????
       the machine presets window, now carry the same "show / hide unresearched" and
       "show / hide hidden" filter switches as the recipe and item pickers. Preset
       rows left empty by the active filter are hidden.
+---------------------------------------------------------------------------------------------------
+Version: 0.6.5
+Date: 2026-06-17
+  Gui:
+    - Fix a multi-second freeze when opening a recipe picker that holds
+      thousands of candidates (e.g. the spent-fuel picker for a common
+      residue such as ash), by removing a quadratic GUI tree traversal.
+  Bugfixes:
+    - Collapse pointless recipe loops that consume no net raw input -- barrel
+      fill/empty round-trips, temperature-bridge hops, productivity
+      recirculation -- which the solver could otherwise inflate into a large
+      idle cycle, and pick a single stable routing among otherwise tied
+      options so the same problem returns the same solution across re-solves.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.4
 Date: 2026-06-12
