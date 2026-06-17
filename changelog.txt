@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.5
-Date: ????
+Date: 2026-06-17
   Gui:
     - Fix a multi-second freeze when opening a recipe picker that holds
       thousands of candidates (e.g. the spent-fuel picker for a common
