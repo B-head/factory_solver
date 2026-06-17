@@ -218,9 +218,33 @@ local function key_hash(s)
     return h / 1000003
 end
 
+-- Reassign every primal/dual index in sorted-key order, so the column/row layout
+-- the IPM sees is canonical -- identical across Lua VMs regardless of the build-
+-- time `pairs` order (which differs between headless luajit/lua and the engine's
+-- PUC-Lua). Idempotent and gated: only runs when `_canonicalize` is set (the
+-- cascade marks its classification fix-test builds, see cascade.shape_problem),
+-- so the heavy stage/final/polish solves and the reference are untouched. The
+-- fix-test verdict reads which priced escape still flows, a vertex-dependent
+-- read; pinning the column order pins the vertex, so the producibility /
+-- consumability verdict is the same on every VM (killing the engine-only
+-- pairs-order verdict drift that mislabels a non-producible import as producible).
+function M:ensure_canonical()
+    if not self._canonicalize or self._canonical_done then return end
+    self._canonical_done = true
+    local pk = {}
+    for k in pairs(self.primals) do pk[#pk + 1] = k end
+    table.sort(pk)
+    for i, k in ipairs(pk) do self.primals[k].index = i end
+    local dk = {}
+    for k in pairs(self.duals) do dk[#dk + 1] = k end
+    table.sort(dk)
+    for i, k in ipairs(dk) do self.duals[k].index = i end
+end
+
 ---Make a vector of the coefficient of the primal problem.
 ---@return CsrMatrix
 function M:generate_cost_vector()
+    self:ensure_canonical()
     local ret = {}
     if tie_break ~= 0 then
         local scale, floor = tie_scale, tie_floor
@@ -256,6 +280,7 @@ end
 ---when problem.has_quad (the QP path), so the pure-LP solve never pays for it.
 ---@return CsrMatrix
 function M:generate_quad_vector()
+    self:ensure_canonical()
     local ret = {}
     for _, v in pairs(self.primals) do
         ret[v.index] = v.quad or 0
@@ -266,6 +291,7 @@ end
 ---Make a vector of the coefficient of the dual problem.
 ---@return CsrMatrix
 function M:generate_limit_vector()
+    self:ensure_canonical()
     local ret = {}
     for _, v in pairs(self.duals) do
         ret[v.index] = v.limit
@@ -276,6 +302,7 @@ end
 ---Make a sparse matrix of constraint equations.
 ---@return CsrMatrix
 function M:generate_subject_matrix()
+    self:ensure_canonical()
     local ret = {}
     for p, t in pairs(self.subject_terms) do
         if self.primals[p] then
@@ -295,6 +322,7 @@ end
 ---@param raw_variables PackedVariables? The value returned by @{pack_variables}.
 ---@return CsrMatrix #Variables in vector form.
 function M:make_primal_variables(raw_variables)
+    self:ensure_canonical()
     local prev_x = raw_variables and raw_variables.x or {}
     -- Non-slack variables warm-start from prev_x (default 100). Slack variables
     -- are DEPENDENT: their constraint is Σ(non-slack terms) + coef·slack = limit

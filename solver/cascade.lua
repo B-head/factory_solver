@@ -149,17 +149,34 @@ local function count(set)
     return n
 end
 
+-- The dump hatches the Vc tier adjudicates: |surplus_sink| AND the free pinned
+-- |final_sink|. A consumable material trashed out its pinned final_sink is the
+-- same tier-2c defeat as one dumped through surplus_sink (the reference's is_dump
+-- counts both), so a Vc fix test must price both -- pricing only one lets the LP
+-- shuffle the dump to the other free hatch and misread the consumability verdict.
+local VC_DUMP_KINDS = { surplus_sink = true, final_sink = true }
+
+---True when a fix test's priced_kind -- a single PrimalKind string (the Vp import
+---tests) or a set of them (VC_DUMP_KINDS, the Vc dump tests) -- matches `kind`.
+---@param priced_kind string|table<string, true>
+---@param kind string
+---@return boolean
+local function kind_matches(priced_kind, kind)
+    if type(priced_kind) == "table" then return priced_kind[kind] == true end
+    return priced_kind == kind
+end
+
 ---Per-material own-escape residuals of a fix-test solution: sum |x| over the
 ---priced-kind escapes of the given materials.
 ---@param problem Problem
 ---@param x table<string, number>
----@param priced_kind string
+---@param priced_kind string|table<string, true>
 ---@param priced_set table<string, true>
 ---@return table<string, number>
 local function own_residuals(problem, x, priced_kind, priced_set)
     local own = {}
     for key, p in pairs(problem.primals) do
-        if p.kind == priced_kind and p.material and priced_set[p.material] then
+        if kind_matches(priced_kind, p.kind) and p.material and priced_set[p.material] then
             own[p.material] = (own[p.material] or 0) + math.abs(x[key] or 0)
         end
     end
@@ -230,9 +247,17 @@ end
 ---@param build CascadeBuild
 function M.shape_problem(problem, build)
     if build.fix then
+        -- A fix test's verdict (does the priced escape still flow) is read off a
+        -- degenerate vertex, so it must not drift with the build-time pairs order:
+        -- canonicalize the column layout (problem_generator.ensure_canonical) so the
+        -- producibility / consumability classification is identical on every Lua VM
+        -- (headless luajit/lua AND the engine's PUC-Lua). Without this the engine's
+        -- pairs order can mislabel a non-producible import as producible and lock the
+        -- later stages onto a worse vertex (the Asteroid up-cycling overshoot).
+        problem._canonicalize = true
         local priced = list_to_set(build.fix.priced)
         for _, p in pairs(problem.primals) do
-            if p.kind == build.fix.priced_kind and p.material and priced[p.material] then
+            if kind_matches(build.fix.priced_kind, p.kind) and p.material and priced[p.material] then
                 p.cost = 1
             elseif p.kind == "recipe" or p.kind == "bridge" then
                 p.cost = EPS_RECIPE
@@ -313,7 +338,7 @@ local function ship_build(state, extra)
     return b
 end
 
----@param priced_kind string
+---@param priced_kind string|table<string, true>
 ---@param demand_sign number
 ---@param mats string[]
 ---@return CascadeBuild
@@ -324,7 +349,8 @@ end
 ---Enumerate the variables the stages read, sorted by key: the import hatches
 ---(|shortage_source|, plus |initial_source| into an intermediate -- the
 ---defeat accounting must not let deficit seeding rebook an import as free),
----the dumps (|surplus_sink|), and the recipe variables (the machine count).
+---the dumps (|surplus_sink|, plus |final_sink| of an intermediate -- a consumable
+---trashed out its free pinned final_sink is a dump too), and the recipe variables.
 ---@param problem Problem
 ---@param intermediates table<string, true>
 ---@return CascadeEntry[] imports, CascadeEntry[] sinks, string[] recipes
@@ -334,7 +360,13 @@ local function capture_entries(problem, intermediates)
         if p.material and (p.kind == "shortage_source"
                 or (p.kind == "initial_source" and intermediates[p.material])) then
             imports[#imports + 1] = { key = key, material = p.material }
-        elseif p.kind == "surplus_sink" and p.material then
+        elseif p.material and (p.kind == "surplus_sink"
+                or (p.kind == "final_sink" and intermediates[p.material])) then
+            -- |final_sink| of an intermediate is a dump candidate too: a consumable
+            -- trashed out its free pinned final_sink is the tier-2c defeat the
+            -- reference's is_dump catches. A terminal byproduct's final_sink
+            -- (produced only, never an intermediate) is excluded -- draining it is
+            -- no defeat. The fix test refines consumability per material.
             sinks[#sinks + 1] = { key = key, material = p.material }
         elseif p.kind == "recipe" then
             recipes[#recipes + 1] = key
@@ -555,7 +587,7 @@ enter_vc = function(state)
     end
     state.vc_pending = pending
     if #pending > 0 then
-        return set_build(state, "vc_individual", fix_build("surplus_sink", 1, { pending[1] }))
+        return set_build(state, "vc_individual", fix_build(VC_DUMP_KINDS, 1, { pending[1] }))
     end
     vc_after_individual(state)
 end
@@ -938,7 +970,7 @@ function M.advance(state, problem, raw, solver_state)
         local mat = state.vc_pending[1]
         local pass = false
         if finished then
-            local own = own_residuals(problem, x, "surplus_sink", { [mat] = true })
+            local own = own_residuals(problem, x, VC_DUMP_KINDS, { [mat] = true })
             pass = (own[mat] or 0) <= M.FIX_TOL
         end
         state.vc_verdicts[mat] = pass
@@ -946,7 +978,7 @@ function M.advance(state, problem, raw, solver_state)
         table.remove(state.vc_pending, 1)
         if state.vc_pending[1] then
             return set_build(state, "vc_individual",
-                fix_build("surplus_sink", 1, { state.vc_pending[1] }))
+                fix_build(VC_DUMP_KINDS, 1, { state.vc_pending[1] }))
         end
         return vc_after_individual(state)
     elseif phase == "vc_support" then
@@ -966,7 +998,7 @@ function M.advance(state, problem, raw, solver_state)
             if #pending > 0 then
                 state.vc_pending = pending
                 return set_build(state, "vc_individual",
-                    fix_build("surplus_sink", 1, { pending[1] }))
+                    fix_build(VC_DUMP_KINDS, 1, { pending[1] }))
             end
         end
         return vc_price(state)

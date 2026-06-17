@@ -238,7 +238,19 @@ function M.forwerd_solve(force_data, solution)
         -- already varied tie 349<->343). The earlier worry that folding would
         -- corrupt the stage objective was wrong -- reduce reads the live
         -- (overridden) cost, not the original.
-        if substitution_enabled then
+        -- Classification fix-test builds (cascade.is_cold) are NOT folded: their
+        -- verdict reads which priced escape still flows -- a degenerate-vertex read
+        -- -- and the fold shifts that vertex onto a different reduced structure than
+        -- the full, canonicalized problem the headless drivers validate the verdict
+        -- on. Folding here reintroduced the engine-only producibility misclassification
+        -- (Asteroid up-cycling: a non-producible import read as producible -> wrong
+        -- Vp lock -> polish pinned at M=258 vs the reachable 221) because the reduced
+        -- problem is solved with its own build-order column layout, bypassing
+        -- ensure_canonical on the full problem. The heavy stage / final / polish
+        -- builds still fold (the 3.5x speedup is theirs; their objective is the
+        -- machine count, not a vertex-read verdict).
+        local fold = substitution_enabled and not (cc_build and cascade.is_cold(cc_build))
+        if fold then
             local reduced, reconstruction = substitution.reduce(solution.problem)
             solution.problem.reduced = reduced
             solution.problem.reconstruction = reconstruction
