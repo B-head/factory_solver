@@ -1144,8 +1144,18 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         local limit = constraint.limit_amount_per_second
 
         if constraint.limit_type == "upper" then
+            -- The cap's pos_slack is the headroom (limit - production); pricing it
+            -- at target_cost pulls production UP to the cap -- the cap is a target,
+            -- not merely a bound (see tests/cases/lp_constraint_types.lua). It is
+            -- neither a passive |slack| (it carries the objective) nor an |elastic|
+            -- (it fills a ceiling instead of relaxing a demand), so it gets its own
+            -- "headroom" kind, with .material set, so target readers count it
+            -- alongside elastic and map it back to the constrained material.
             local slack_name = problem:add_upper_limit_constraint(constraint_name, limit)
             problem:update_objective_cost(slack_name, target_cost)
+            local pull = problem.primals[slack_name]
+            pull.kind = "headroom"
+            pull.material = constraint_material
         elseif constraint.limit_type == "lower" then
             problem:add_lower_limit_constraint(constraint_name, limit)
 

@@ -15,7 +15,7 @@ local vk = require "solver/var_key"
 ---@field reconstruction Reconstruction? Companion to `reduced`: maps each folded-out variable back to k * x_rep so the reduced solution unfolds into full variable space.
 local M = {}
 
----@alias PrimalKind "recipe"|"bridge"|"surplus_sink"|"final_sink"|"initial_source"|"shortage_source"|"elastic"|"slack"
+---@alias PrimalKind "recipe"|"bridge"|"surplus_sink"|"final_sink"|"initial_source"|"shortage_source"|"elastic"|"headroom"|"slack"
 
 ---@class Primal
 ---@field key string
@@ -227,8 +227,10 @@ function M:generate_cost_vector()
         for _, v in pairs(self.primals) do
             -- Slacks carry no objective; perturbing them would bias the
             -- constraint balance, so only the genuine objective variables.
+            -- "headroom" (an upper cap's pull-slack) carries an objective but is
+            -- equally constraint-balance-dependent, so it is excluded too.
             local jit = 0
-            if v.kind ~= "slack" and (not tie_kinds or tie_kinds[v.kind]) then
+            if v.kind ~= "slack" and v.kind ~= "headroom" and (not tie_kinds or tie_kinds[v.kind]) then
                 jit = tie_break * key_hash(v.key)
                 if scale then
                     local s = scale[v.key]
@@ -301,11 +303,13 @@ function M:make_primal_variables(raw_variables)
     -- carried-over or default-100 slack puts the warm point OUTSIDE any freshly
     -- added constraint (e.g. a cascade budget-lock or target-budget row), so the
     -- IPM starts infeasible and the iteration count explodes. Recomputing the
-    -- slacks here keeps the warm start feasible.
+    -- slacks here keeps the warm start feasible. "headroom" (an upper cap's
+    -- pull-slack) is the pos_slack of its constraint, so it is dependent in
+    -- exactly this sense and is recomputed alongside the plain slacks.
     local x = {}
     local dual_sum = {} -- dual key -> Σ(non-slack primal value × coefficient)
     for k, p in pairs(self.primals) do
-        if p.kind ~= "slack" then
+        if p.kind ~= "slack" and p.kind ~= "headroom" then
             local val = prev_x[k] or 100
             x[k] = val
             local terms = self.subject_terms[k]
@@ -317,7 +321,7 @@ function M:make_primal_variables(raw_variables)
         end
     end
     for k, p in pairs(self.primals) do
-        if p.kind == "slack" then
+        if p.kind == "slack" or p.kind == "headroom" then
             -- A slack carried over from the previous solve stays warm (so
             -- edit-to-edit warm-start is unchanged). Only a FRESHLY added slack
             -- -- one with no prev_x value, e.g. a new cascade budget-lock row --
