@@ -8,9 +8,11 @@
 -- then read write/script-output/bundle16_drops.txt. NOT shipped (tests/*).
 --
 -- STATUS (2026-06-17): the FP drop sets are confirmed INTENDED (FP has no
--- quality / no representation for these virtual recipes). The YAFC drop sets are
+-- quality / no representation for these virtual recipes). The YAFC codec now
+-- carries <spoil> virtual recipes (Mechanics.spoil.{item}, both directions), so
+-- those no longer appear in any YAFC drop set. The remaining YAFC drops are
 -- pinned-as-observed but NOT yet confirmed correct -- the maintainer flagged them
--- as suspicious (e.g. YAFC dropping <mine>/<grow>/<spoil>/<pump> virtual recipes
+-- as suspicious (e.g. YAFC still dropping <mine>/<grow>/<pump> virtual recipes
 -- and <run>fusion-*). If the YAFC codec is fixed to carry more of these, this
 -- table must be regenerated; until then the test pins current behaviour, it does
 -- NOT certify it as desired.
@@ -48,7 +50,7 @@ return {
     ["Gleba circuit"] = {
         FP = {},
         Helmod = {},
-        YAFC = { "virtual_recipe|<grow>jellystem:jellynut-seed|normal", "virtual_recipe|<grow>yumako-tree:yumako-seed|normal", "virtual_recipe|<spoil>copper-bacteria|normal", "virtual_recipe|<spoil>iron-bacteria|normal" },
+        YAFC = { "virtual_recipe|<grow>jellystem:jellynut-seed|normal", "virtual_recipe|<grow>yumako-tree:yumako-seed|normal" },
     },
     ["Gleba loop"] = {
         FP = {},

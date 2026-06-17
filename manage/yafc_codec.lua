@@ -240,7 +240,9 @@ end
 
 ---Map a YAFC recipe token onto a factory_solver recipe TypedName. Real recipes
 ---(`Recipe.*`) map directly. Special "Mechanics.*" pseudo-recipes have no fixed
----cross-tool name, so they are resolved best-effort off the crafting `entity`:
+---cross-tool name, so they are resolved best-effort: item spoilage
+---(`Mechanics.spoil.{item}`) is rebuilt from the token alone, since it has no
+---crafting entity; the rest are resolved off the crafting `entity` --
 ---factory_solver keys most energy mechanics `<run>{entity}` (generator, reactor,
 ---fusion reactor/generator, thruster, burner-generator) and single-fluid boilers
 ---`<run>{entity}:{fluid}`. A factory_solver-native token (one starting with "<",
@@ -266,6 +268,24 @@ local function map_recipe(recipe_target, recipe_quality, entity_name)
             return { type = "virtual_recipe", name = recipe_target, quality = recipe_quality }, nil
         end
         return nil, "factory-solver-yafc-import-warning-recipe-unmappable"
+    end
+
+    -- Mechanics.spoil.{item} -> <spoil>{item}. YAFC keys its spoilage recipe by
+    -- the spoiling item (CreateSpecialRecipe(item, SpecialNames.SpoilRecipe="spoil"))
+    -- and crafts it with a synthetic "spoilage" entity that has no Factorio
+    -- prototype. factory_solver has no such entity either (its spoilage line uses
+    -- the entity-unknown sentinel), so -- unlike every other Mechanics.* recipe --
+    -- this one resolves from the token, not the crafting entity, which our own
+    -- export omits.
+    if prefix == "Mechanics" and name then
+        local spoil_item = string.match(name, "^spoil%.(.+)$")
+        if spoil_item then
+            local fs_name = "<spoil>" .. spoil_item
+            if pool[fs_name] then
+                return { type = "virtual_recipe", name = fs_name, quality = recipe_quality }, nil
+            end
+            return nil, "factory-solver-yafc-import-warning-recipe-unmappable"
+        end
     end
 
     -- Mechanics.* (or anything else): resolve off the crafting entity.
@@ -295,14 +315,14 @@ end
 ---the module in consecutive slots; `fixedCount == 0` is YAFC's "auto-fill", which
 ---we realise by filling the owner's remaining module slots with that module.
 ---@param list any
----@param owner_name string
+---@param owner_name string?
 ---@param owner_quality string
 ---@return table<string, TypedName>
 local function unpack_module_list(list, owner_name, owner_quality)
     local out = {}
     if type(list) ~= "table" then return out end
 
-    local owner_proto = prototypes.entity[owner_name]
+    local owner_proto = owner_name and prototypes.entity[owner_name]
     local total_slots = (owner_proto and acc.get_machine_module_inventory_size(owner_proto, owner_quality)) or 0
 
     local slot = 1
@@ -380,6 +400,20 @@ local function unpack_fuel(fuel_ref, machine_typed_name, player_index)
     return nil
 end
 
+---factory_solver models item spoilage as a virtual recipe with no crafting
+---machine -- the `entity-unknown` sentinel that pre_solve / is_spoilage detection
+---expects. YAFC instead crafts its spoil recipe with a synthetic "spoilage"
+---entity (no Factorio prototype), and factory_solver's own export omits the row's
+---entity entirely. Either way the machine identity is reconstructed from the
+---recipe rather than read off the row, so a spoilage line must not be gated on a
+---present `entity`.
+---@param recipe_typed_name TypedName
+---@return boolean
+local function is_spoilage_recipe(recipe_typed_name)
+    return recipe_typed_name.type == "virtual_recipe"
+        and string.match(recipe_typed_name.name, "^<spoil>") ~= nil
+end
+
 ---Convert a YAFC ProjectPage into a factory_solver payload (the same
 ---{ name, constraints, production_lines } shape `save.import_solution` expects).
 ---Lossy by nature, so per-feature mapping failures are collected as warnings
@@ -441,7 +475,18 @@ function M.yafc_to_payload(page, player_index)
                 warnings[#warnings + 1] = { warning_key, recipe_target }
             end
 
-            if recipe_typed_name and entity_name then
+            -- Resolve the crafting machine before the gate. Spoilage carries no
+            -- entity (see is_spoilage_recipe), so it gets the sentinel and is not
+            -- dropped for an absent / synthetic `entity`; every other recipe still
+            -- requires a real entity, so the row gate is unchanged for them.
+            local machine_typed_name
+            if recipe_typed_name and is_spoilage_recipe(recipe_typed_name) then
+                machine_typed_name = { type = "machine", name = "entity-unknown", quality = machine_quality or "normal" }
+            elseif entity_name then
+                machine_typed_name = { type = "machine", name = entity_name, quality = machine_quality }
+            end
+
+            if recipe_typed_name and machine_typed_name then
                 local dedup_key = string.format("%s/%s/%s",
                     recipe_typed_name.type, recipe_typed_name.name, recipe_typed_name.quality)
                 if seen[dedup_key] then
@@ -450,8 +495,6 @@ function M.yafc_to_payload(page, player_index)
                     }
                 else
                     seen[dedup_key] = true
-
-                    local machine_typed_name = { type = "machine", name = entity_name, quality = machine_quality }
 
                     production_lines[#production_lines + 1] = {
                         recipe_typed_name = recipe_typed_name,

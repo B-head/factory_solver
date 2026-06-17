@@ -794,6 +794,83 @@ fixtures.codec_yafc_virtual = {
     end,
 }
 
+---YAFC spoilage virtual-recipe mapping, both directions. Spoilage is the one
+---Mechanics.* recipe with no crafting entity: factory_solver models it with the
+---`entity-unknown` sentinel machine and YAFC crafts it with a synthetic
+---"spoilage" entity (no Factorio prototype). On export a `<spoil>{item}` line must
+---become YAFC's `Mechanics.spoil.{item}` token with the entity omitted (YAFC then
+---picks its sole spoil crafter); on import that token must rebuild from the token
+---alone, restoring the `entity-unknown` sentinel rather than being dropped for the
+---absent entity. Requires Space Age, the only official set with spoilable items;
+---the spoiling item is discovered from storage.virtuals so no SA prototype name is
+---hard-coded.
+fixtures.codec_yafc_spoilage = {
+    requires = { "space-age" },
+    ---@param solution Solution
+    build = function(solution)
+        save.init_player_data(PLAYER_INDEX)
+
+        -- Find any registered spoilage virtual recipe (`<spoil>{item}`); SA has
+        -- several (nutrients, bioflux, ...). The exact item does not matter -- the
+        -- token <-> Mechanics.spoil mapping is name-level.
+        local spoil_name
+        for name in pairs(storage.virtuals.recipe) do
+            if name:sub(1, 7) == "<spoil>" then
+                spoil_name = name
+                break
+            end
+        end
+        assert(spoil_name,
+            "no <spoil> virtual recipe registered -- Space Age spoilage assumptions broken")
+        local spoil_item = spoil_name:sub(8)
+
+        ---@type Solution
+        local probe = {
+            name = "yafc-spoilage-probe",
+            constraints = {},
+            production_lines = {
+                {
+                    recipe_typed_name = tn.create_typed_name("virtual_recipe", spoil_name),
+                    -- The sentinel machine a real spoilage line carries (see
+                    -- virtual.create_spoilage_virtual's fixed_crafting_machine).
+                    machine_typed_name = tn.create_typed_name("machine", "entity-unknown"),
+                    module_typed_names = {},
+                    affected_by_beacons = {},
+                    fuel_typed_name = nil,
+                },
+            },
+            quantity_of_machines_required = {},
+            solver_state = "ready",
+        }
+
+        local encoded = yafc_codec.encode({ probe })
+        local page = assert(yafc_codec.decode(encoded), "spoilage probe re-decode failed")
+        local row = page.content.recipes and page.content.recipes[1]
+        assert(row and row.recipe == "!Mechanics.spoil." .. spoil_item .. "!normal",
+            "spoilage did not export as !Mechanics.spoil." .. spoil_item .. "!normal (got "
+            .. tostring(row and row.recipe) .. ")")
+        -- The spoilage row must omit the crafting entity (no Factorio prototype to
+        -- name; YAFC resolves its sole spoil crafter on import).
+        assert(row.entity == nil,
+            "spoilage export should omit the crafting entity (got " .. tostring(row.entity) .. ")")
+
+        local payload = yafc_codec.yafc_to_payload(page, PLAYER_INDEX)
+        local imported
+        for _, l in ipairs(payload.production_lines) do
+            if l.recipe_typed_name.name == spoil_name then imported = l end
+        end
+        assert(imported,
+            "spoilage did not round-trip FS -> YAFC -> FS back to " .. spoil_name)
+        assert(imported.recipe_typed_name.type == "virtual_recipe",
+            "round-tripped spoilage row is not a virtual recipe")
+        assert(imported.machine_typed_name and imported.machine_typed_name.name == "entity-unknown",
+            "round-tripped spoilage row lost its entity-unknown sentinel machine (got "
+            .. tostring(imported.machine_typed_name and imported.machine_typed_name.name) .. ")")
+
+        build_iron_plate_demand(solution)
+    end,
+}
+
 -- A real YAFC 2.19 export of a single uf6 fluid. Its link goods uses the newer
 -- string form "!Fluid.uf6@39!normal" (separator "!", bare quality, temperature
 -- suffix) rather than the older { target, quality } object. Decoded by the
