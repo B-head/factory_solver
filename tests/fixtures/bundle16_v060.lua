@@ -9,7 +9,13 @@ return {
     ["Begining"] = { state = "finished", T = 1.619913368e-14, import = 0, surplus = 1.658791265e-10, machines = 36 },
     ["Fulgora bottom up"] = { state = "finished", T = 1.248968799e-14, import = 55, surplus = 10.16957483, machines = 48.61425264 },
     ["Fulgora top down"] = { state = "finished", T = 1.777794883e-14, import = 55.71481482, surplus = 10.30174506, machines = 49.24607425 },
-    ["Fusion"] = { state = "unfinished", T = 0, import = 0, surplus = 0, machines = 0 },
+    -- Fusion's constraint is already EXACT (fusion-power-cell = 0.0166667), so the
+    -- un-gated single solve is the well-posed baseline directly. Only the staged
+    -- reference solver stalls on it (its per-stage budget-lock rows ill-condition
+    -- the near-degenerate catalyst loop); 0.6.0 and the shipped single/cascade
+    -- solves all converge to 266.667 (verified: the exact single solve and the
+    -- cascade agree bit-for-bit at 266.6667819 across repeated headless runs).
+    ["Fusion"] = { state = "finished", T = 0, import = 0.01666666667, surplus = 0, machines = 266.6667819 },
     ["Generator"] = { state = "finished", T = 3.244152366e-14, import = 0.45, surplus = 9.966031775e-11, machines = 3.005 },
     ["Gleba circuit"] = { state = "finished", T = 4.66840025e-14, import = 0.3074074081, surplus = 0.006814815532, machines = 10.11851852 },
     ["Gleba loop"] = { state = "finished", T = 9.133711886e-14, import = 13.33333333, surplus = 0.01122131125, machines = 10.23379712 },

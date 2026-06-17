@@ -2889,24 +2889,35 @@ end
 -- Confirmed in the real game (0.6.0 from the portal vs the dev build). When the
 -- solver is fixed these start matching -> XPASS -> fail, prompting removal from
 -- this set. See project_open_work_index / the regression hunt notes.
--- The headroom PrimalKind fix (the cascade now counts an upper cap's pull-slack
--- as a tier-1 target, so it FILLS the cap instead of collapsing production to
--- M~0) cleared 7 of the original 10: Gleba circuit, Gleba loop, Module and
--- beacon, Oil Processing 1, Quality loop, Rocket, Simple all match 0.6.0(exact)
--- now. The 3 that remain are not upper-cap collapses -- the fix UN-collapsed
--- Asteroid (M 1.6e-5 -> 258, now overshoots 0.6.0's 221) and Fulgora top down
--- (M 2.1e-5 -> 34, still under 0.6.0's 49 on the <research> recipe difference),
--- and Begining stays at M=0.2 (a separate import-vs-fabricate collapse the
--- headroom fix does not touch). These are the cascade-vs-hardgate machine-count
--- deltas, tracked separately.
-local BUNDLE16_KNOWN_REGRESSIONS = {
-    ["Asteroid up cycleing"] = true,
-    ["Begining"] = true,
-    ["Fulgora top down"] = true,
-}
--- Fusion's 0.6.0 reference converges nondeterministically (headless pairs-order),
--- so its frozen baseline is untrustworthy -- never compared.
-local BUNDLE16_SKIP = { ["Fusion"] = true }
+-- All ten original regressions now match the well-posed baseline -- the set is
+-- empty, so a divergence on ANY solution is a fresh regression -> FAIL. How they
+-- were cleared, in three fixes:
+--  * headroom PrimalKind (the cascade counts an upper cap's pull-slack as a
+--    tier-1 target, so it FILLS the cap instead of collapsing to M~0): cleared 7
+--    -- Gleba circuit, Gleba loop, Module and beacon, Oil Processing 1, Quality
+--    loop, Rocket, Simple.
+--  * Vc final_sink-of-consumable (the cascade adjudicates a consumable trashed
+--    out its free pinned |final_sink| as a tier-2c dump, mirroring the reference's
+--    is_dump): cleared 2 -- Fulgora top down (M 34 -> 49, now CONSUMES the pinned
+--    science pack via <research>) and Begining (M 0.2 -> 36, now CONSUMES the
+--    mined copper-ore through its chain -- the same consumable-dump defeat, not
+--    the import-collapse it first looked like).
+--  * fix-test verdict determinism (M 258 -> 221): cleared Asteroid up cycleing.
+--    The engine's PUC-Lua pairs order solved the producibility classification
+--    fix-test on a different degenerate vertex than the headless drivers,
+--    mislabelling a non-producible import as producible and locking the polish
+--    above the minimum. The fix-test column layout is now canonicalized
+--    (problem_generator.ensure_canonical, set per fix build in cascade.shape_
+--    problem) and fix-test builds are no longer substitution-folded (pre_solve --
+--    the fold shifted the vertex onto a different reduced structure), so the
+--    verdict is identical on every VM (headless luajit/lua AND engine PUC-Lua).
+local BUNDLE16_KNOWN_REGRESSIONS = {}
+-- No solutions are skipped. (Fusion was skipped while its baseline read
+-- "unfinished" -- but that was the STAGED REFERENCE stalling on its per-stage
+-- budget-lock rows, not the baseline solver: Fusion's constraint is already exact,
+-- and the un-gated single solve converges to 266.667, bit-identical to the shipped
+-- cascade. Its baseline is now finished, so it is compared like every other.)
+local BUNDLE16_SKIP = {}
 
 ---RCON entry point: REGRESSION GUARD comparing the DEFAULT SHIPPING solver (the
 ---real pre_solve.forwerd_solve pump, driven synchronously to terminal, on each
@@ -3018,10 +3029,18 @@ function M.check_bundle16_v060_impl()
             verdict = "NEW-REGRESSION"
             fails[#fails + 1] = string.format("%s diverges on %s", p.name, table.concat(diff, ","))
         end
+        -- Cascade settled diagnostics: which divergence fallback (staged relay /
+        -- deletion final) fired and the per-tier rescue outcomes. A non-nil relay
+        -- or vp_deleted on a diverging case means the in-engine pump escalated past
+        -- the direct pipeline -- the degenerate-vertex tell the headless drivers miss.
+        local cc = solution.cascade
+        local ccdiag = cc and string.format(" cc{solves=%s relay=%s del=%s vp=%s vf=%s vc=%s polish=%s}",
+            tostring(cc.solves), tostring(cc.relay), tostring(cc.vp_deleted), tostring(cc.vp_rescued),
+            tostring(cc.vf_rescued), tostring(cc.vc_rescued), tostring(cc.polish)) or ""
         report[#report + 1] = string.format(
-            "[%s] %s  cur{M=%.6g imp=%.6g sur=%.6g state=%s} 0.6.0{M=%.6g imp=%.6g sur=%.6g} diff=%s",
+            "[%s] %s  cur{M=%.6g imp=%.6g sur=%.6g state=%s} 0.6.0{M=%.6g imp=%.6g sur=%.6g} diff=%s%s",
             p.name, verdict, cur.machines, cur.import, cur.surplus, tostring(solution.solver_state),
-            v060.machines, v060.import, v060.surplus, #diff > 0 and table.concat(diff, ",") or "-")
+            v060.machines, v060.import, v060.surplus, #diff > 0 and table.concat(diff, ",") or "-", ccdiag)
         ::continue::
     end
 
