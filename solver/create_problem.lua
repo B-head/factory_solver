@@ -26,6 +26,34 @@ local source_cost_heat = 100 / 10e6
 local elastic_cost = 2 ^ 10
 local target_cost = 2 ^ 20
 
+-- Tiny tie-break cost on every non-bridge recipe variable. It collapses the
+-- degenerate optima the three boundary costs (source / sink / target) cannot
+-- see: net-zero futile cycles (barrel fill <-> empty, temperature-bridge
+-- round-trips, productivity recirculation) and free terminal byproduct
+-- overproduction consume no net raw input, so source_cost is blind to them and
+-- the interior-point method otherwise inflates them arbitrarily on the
+-- degenerate face. Any eps > 0 makes running a pointless recipe strictly
+-- costly, so the LP drops it to (near) zero.
+--
+-- The value is graded empirically: too small and eps*(excess futile flow) sinks
+-- below the IPM's relative tolerance against the much larger source / elastic /
+-- target tiers, so the solver stops driving futile activity to zero on
+-- degenerate faces. Measured on a binary scale the safe window's upper edge is
+-- ~2^-6: from 2^-5 up, eps starts overriding source_cost's genuine
+-- material-efficiency tie-break. 2^-6 = 0.0156 sits just below that edge.
+--
+-- It extends the power-of-two ladder: recipe_epsilon 2^-6 < source 2^0 < elastic
+-- 2^10 < target 2^20. The 2^6 = 64x gap below source_cost keeps it from ever
+-- competing with the material-efficiency or reachability gating.
+--
+-- Note this leaves an interior-point "dust" residual of ~tolerance/eps on a
+-- recipe driven to zero (it parks at x ~ mu/s instead of exactly 0). On real
+-- (large, richly-connected) problems that dust is negligible against the actual
+-- flows; it is only visible, relative to flow, on tiny synthetic chains with an
+-- isolated dead-end recipe -- see the activity_floor handling in
+-- tests/cases/lp_scale_invariance.lua.
+local recipe_epsilon = 2 ^ -6
+
 ---@param variable_name string
 ---@return number
 local function source_cost_for(variable_name)
@@ -608,10 +636,10 @@ function M.create_problem(solution_name, constraints, production_lines)
             -- A user source recipe is priced at source_cost on its product so
             -- the LP treats it like a declared external input rather than a
             -- free fountain. Sinks (and every other virtual recipe) stay at
-            -- slack_cost = 0.
-            local recipe_cost = slack_cost
+            -- slack_cost = 0, plus the flat recipe_epsilon tie-break.
+            local recipe_cost = recipe_epsilon
             if is_source_line(line) and line.products[1] then
-                recipe_cost = source_cost_for(tn.typed_name_to_variable_name(line.products[1]))
+                recipe_cost = source_cost_for(tn.typed_name_to_variable_name(line.products[1])) + recipe_epsilon
             end
             problem:add_objective(objective_name, recipe_cost, true)
             problem:add_subject_term(objective_name, "|limit|" .. objective_name, 1)

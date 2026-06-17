@@ -232,7 +232,17 @@ table.insert(cases, {
         local p_big = cp.create_problem("scale-2t-big", make(1.0), lines)
         local x_big = solve_fresh(p_big, "limit=1.0", 400)
 
-        assert_proportional(x_small, x_big, 10, 0.15, 1e-3)
+        -- activity_floor = 1e-2: the deepest recycling tier (iron-plate-
+        -- recycling/uncommon here) is a dead-end -- it consumes the target
+        -- quality and emits an ore tier nothing else uses -- so create_problem's
+        -- recipe_epsilon correctly drives it toward zero. The interior-point
+        -- method parks it at ~tolerance/epsilon (~4e-4 here) rather than exactly
+        -- 0, and that residual is constant across scale (it depends on tol and
+        -- eps, not the target rate), so its ratio is meaningless. The genuine
+        -- recipes all sit at >= 0.9 in this fixture, far above 1e-2, so the floor
+        -- cleanly skips only the dust. See the recipe_epsilon note in
+        -- solver/create_problem.lua.
+        assert_proportional(x_small, x_big, 10, 0.15, 1e-2)
     end,
 })
 
@@ -268,7 +278,13 @@ table.insert(cases, {
         local p_big = cp.create_problem("scale-3t-big", make(0.1), lines)
         local x_big = solve_fresh(p_big, "limit=0.1", 600)
 
-        assert_proportional(x_small, x_big, 10, 0.15, 1e-4)
+        -- activity_floor = 1e-2: same recipe_epsilon dust as the 2-tier case --
+        -- the dead-end iron-plate-recycling/rare parks at ~5e-4 (scale-constant
+        -- tol/eps residual) while the genuine recipes sit at >= 0.9. The floor
+        -- skips only the dust. (Was 1e-4 before recipe_epsilon; the dead-end's
+        -- pre-epsilon degenerate value happened to scale within tolerance, so the
+        -- lower floor sufficed then.)
+        assert_proportional(x_small, x_big, 10, 0.15, 1e-2)
     end,
 })
 
