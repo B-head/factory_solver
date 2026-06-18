@@ -69,7 +69,14 @@ local ok, line = pcall(function()
     local is_target = function(p) return p.kind == "elastic" or p.kind == "headroom" end
     local is_import = function(p) return p.kind == "shortage_source"
         or (p.kind == "initial_source" and p.material and intermediates[p.material]) end
-    local is_dump = function(p) return p.kind == "surplus_sink" end
+    -- A consumable dump leaves through surplus_sink OR the free pinned final_sink
+    -- (the requested-output hatch). Gating final_sink by `intermediates` (produced
+    -- AND consumed in-set) plugs that leak the same way the shipped cascade's
+    -- VC_DUMP_KINDS does -- without it, item/soil-type consumables escape the dump
+    -- tier through final_sink and read as a Vc defeat. A terminal byproduct's
+    -- final_sink (produced, never consumed -> not an intermediate) stays free.
+    local is_dump = function(p) return p.kind == "surplus_sink"
+        or (p.kind == "final_sink" and p.material and intermediates[p.material]) end
     local is_machine = function(p) return p.kind == "recipe" end
 
     local solves, budgets, state = 0, {}, "finished"
