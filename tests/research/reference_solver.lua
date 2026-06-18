@@ -443,7 +443,11 @@ end
 ---  M: number, S: number, steps: integer, n_mats: integer, problem: Problem?,
 ---  x: table<string, number>?, producible: table<string, true>,
 ---  consumable: table<string, true> }
-function M.solve_reference(constraints, lines)
+---@param exempt table<string,true>? base-material names whose import is NOT a
+---  defeat (treated as free, like a raw): research hook for the import-vs-dump
+---  trade. Default {} -> behaviour identical to the strict reference.
+function M.solve_reference(constraints, lines, exempt)
+    exempt = exempt or {}
     local producible, np_mats, steps_p = M.producible_set(constraints, lines)
     local consumable, _, steps_c = M.consumable_set(constraints, lines)
 
@@ -468,10 +472,11 @@ function M.solve_reference(constraints, lines)
             and p.material and consumable[p.material]
     end
 
+    local function is_exempt(p) return (p.material and exempt[(tostring(p.material):gsub("@%[.-%]", ""))]) or false end
     local is_target = function(p) return p.kind == "elastic" or p.kind == "headroom" end
-    local is_prod_short = function(p) return is_import(p) and producible[p.material] end
+    local is_prod_short = function(p) return is_import(p) and producible[p.material] and not is_exempt(p) end
     local is_cons_surplus = function(p) return is_dump(p) end
-    local is_free_short = function(p) return is_import(p) and not producible[p.material] end
+    local is_free_short = function(p) return is_import(p) and not producible[p.material] and not is_exempt(p) end
     local is_machine = function(p) return p.kind == "recipe" end
 
     local r = { state = "finished", T = -1, Vp = -1, Vc = -1, Vf = -1, M = -1, S = -1,
