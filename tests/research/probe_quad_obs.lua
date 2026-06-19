@@ -17,6 +17,7 @@
 
 require "tests/headless_env"
 
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
 local tn = require "manage/typed_name"
@@ -95,34 +96,13 @@ problem.primal_length = #keys
 -- Every variable is then tagged with the SCC(s) of the material(s) it touches:
 -- an escape -> the SCC of its one material; a recipe/bridge -> the set of SCCs
 -- of all its ingredients+products.
-local mc = require "solver/material_cycles"
-local scc_lines = {}
-for _, l in ipairs(prob.normalized_lines) do scc_lines[#scc_lines + 1] = l end
-for _, l in ipairs(problem.bridges) do scc_lines[#scc_lines + 1] = l end
-local adj = mc.build_material_graph(scc_lines)
-local sccs = mc.find_sccs(adj)
-local cyclic = {}
-for _, s in ipairs(sccs) do if mc.is_cyclic_scc(s, adj) then cyclic[#cyclic + 1] = s end end
-table.sort(cyclic, function(a, b) if #a ~= #b then return #a > #b end return a[1] < b[1] end)
-local mat_scc = {}   -- material var -> tag string
-local scc_members = {}  -- id -> sorted member list
-for i, s in ipairs(cyclic) do
-    local id = string.format("C%02d", i)
-    scc_members[id] = s
-    for _, m in ipairs(s) do mat_scc[m] = id end
-end
-local function tag_of_material(m) return mat_scc[m] or "-" end
+local scc_lines = dissect.all_lines(prob.normalized_lines, problem)
+local scc = dissect.cyclic_sccs(scc_lines)
+local cyclic = scc.cyclic           -- array of member lists, C01.. order
+local scc_members = scc.members     -- id -> member list
+local function tag_of_material(m) return scc.tag[m] or "-" end
 -- recipe/bridge var -> set of material vars it touches
-local recipe_mats = {}
-for _, l in ipairs(scc_lines) do
-    local rv = tn.typed_name_to_variable_name(l.recipe_typed_name)
-    local set = recipe_mats[rv] or {}
-    recipe_mats[rv] = set
-    for _, a in ipairs(l.ingredients) do set[tn.typed_name_to_variable_name(a)] = true end
-    for _, a in ipairs(l.products) do set[tn.typed_name_to_variable_name(a)] = true end
-    if l.fuel_ingredient then set[tn.typed_name_to_variable_name(l.fuel_ingredient)] = true end
-    if l.fuel_burnt_result then set[tn.typed_name_to_variable_name(l.fuel_burnt_result)] = true end
-end
+local recipe_mats = dissect.recipe_material_sets(scc_lines)
 local function tag_of_primal(key, p)
     if p.material then return tag_of_material(p.material) end  -- escape: one material
     local mats = recipe_mats[key]

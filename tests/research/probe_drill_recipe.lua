@@ -10,6 +10,7 @@
 
 require "tests/headless_env"
 local ref = require "tests/research/reference_solver"
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
 local tn = require "manage/typed_name"
@@ -22,41 +23,18 @@ local prob = assert(problem_dump.load_problem(PATH))
 for _, c in ipairs(prob.constraints) do c.limit_amount_per_second = BIG end
 
 local p0 = create_problem.create_problem("d", prob.constraints, prob.normalized_lines, nil, nil)
-local lines = {}
-for _, l in ipairs(prob.normalized_lines) do lines[#lines + 1] = l end
-for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
+local lines = dissect.all_lines(prob.normalized_lines, p0)
 
 local r = ref.solve_reference(prob.constraints, prob.normalized_lines)
 assert(r.state == "finished", "reference state " .. tostring(r.state))
 local x = r.x
-local function rkey(line) return tn.typed_name_to_variable_name(line.recipe_typed_name) end
+local rkey = dissect.recipe_key
 
 -- in-solution produced / consumed per material, and per-material list of running consumers
-local produced, consumed = {}, {}
-local consumers_of = {}
-for _, line in ipairs(lines) do
-    local xr = x[rkey(line)] or 0
-    for _, ing in ipairs(line.ingredients or {}) do
-        local m = tn.typed_name_to_variable_name(ing)
-        if xr > 1e-9 then consumed[m] = (consumed[m] or 0) + xr * (ing.amount_per_second or 0) end
-        consumers_of[m] = consumers_of[m] or {}
-        consumers_of[m][#consumers_of[m] + 1] = { k = rkey(line), per = ing.amount_per_second or 0, x = xr }
-    end
-    if xr > 1e-9 then
-        for _, prod in ipairs(line.products or {}) do
-            local m = tn.typed_name_to_variable_name(prod); produced[m] = (produced[m] or 0) + xr * (prod.amount_per_second or 0)
-        end
-    end
-end
+local produced, consumed, consumers_of = dissect.physical_flows(lines, x, { eps = 1e-9, consumers = true })
 
 -- escape totals per material
-local esc = {}
-for key, p in pairs(r.problem.primals) do
-    if p.material then
-        local v = math.abs(x[key] or 0)
-        if v > 1e-6 then esc[p.material] = esc[p.material] or {}; esc[p.material][p.kind] = (esc[p.material][p.kind] or 0) + v end
-    end
-end
+local esc = dissect.escape_by_material(r.problem.primals, x, 1e-6)
 local function esc_str(m)
     local e = esc[m]; if not e then return "" end
     local parts = {}

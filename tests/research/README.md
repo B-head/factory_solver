@@ -20,7 +20,16 @@ shared libraries every driver here requires (`harness`, `headless_env`,
   (`internal_recipes`, `internal_flow`, `target_relax`, `other_escape_sum`,
   `shortage_of_material` / `shortage_of_keys`) the probes used to copy-paste.
   Read its header caveat before trusting any output built on it — these are
-  *screening* helpers, not verdicts.
+  *screening* helpers, not verdicts. Re-exports `dissect` as `research_lib.dissect`.
+- **`dissect.lua`** — the physical single-solution READ layer the *dump / drill*
+  inspectors share: merge real lines with create_problem's temperature bridges
+  (`all_lines`), label cyclic SCCs `C01..` (`cyclic_sccs`), turn solved activities
+  into physical produced / consumed mass (`physical_flows`, `line_in` / `line_out`),
+  read a material's boundary escapes by kind (`escape_by_material`), and the
+  recipe-relative listing cutoff (`solved_threshold`). Pure reads of a `(problem, x)`
+  — nothing here solves or mutates. The `probe_drill_recipe` / `probe_drill_material`
+  dissections and the `probe_*_dump` / `probe_quad_obs` / `probe_material_focus`
+  inspectors are thin formatters over it; a new inspector should be too.
 - **`probe_*.lua`** — single-hypothesis drivers. Most are single-shot workers
   (one dump file → stdout) fanned over the corpus by `run_corpus.ps1`; a few take
   a `--manifest` / `--thresholds` / `--flip` TSV instead (see each file's Usage

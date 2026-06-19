@@ -14,9 +14,9 @@
 --   luajit tests/research/probe_consolidate_dump.lua [dumpfile]
 
 require "tests/headless_env"
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
-local material_cycles = require "solver/material_cycles"
 local tn = require "manage/typed_name"
 local vk = require "solver/var_key"
 local lp = require "solver/linear_programming"
@@ -29,22 +29,9 @@ local FREEK = { initial_source = true, final_sink = true }
 
 local prob = assert(problem_dump.load_problem(PATH))
 
--- SCC tags over the material graph (recipes + bridges)
-local function scc_tags()
-    local p0 = create_problem.create_problem("t", prob.constraints, prob.normalized_lines, nil, nil)
-    local lines = {}
-    for _, l in ipairs(prob.normalized_lines) do lines[#lines + 1] = l end
-    for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
-    local adj = material_cycles.build_material_graph(lines)
-    local sccs = material_cycles.find_sccs(adj)
-    local cyc = {}
-    for _, s in ipairs(sccs) do if material_cycles.is_cyclic_scc(s, adj) then cyc[#cyc + 1] = s end end
-    table.sort(cyc, function(a, b) if #a ~= #b then return #a > #b end return a[1] < b[1] end)
-    local m = {}
-    for i, s in ipairs(cyc) do for _, mm in ipairs(s) do m[mm] = string.format("C%02d", i) end end
-    return m
-end
-local mat_scc = scc_tags()
+-- SCC tags over the material graph (recipes + bridges), C01.. by size
+local p0 = create_problem.create_problem("t", prob.constraints, prob.normalized_lines, nil, nil)
+local mat_scc = dissect.cyclic_sccs(dissect.all_lines(prob.normalized_lines, p0)).tag
 local function tag(material) return material and (mat_scc[material] or "-") or "?" end
 
 -- build: targets -> hard equality at BIG (elastic/slacks stripped), violations=1,
@@ -81,9 +68,7 @@ end
 local x, st, steps = solve(problem)
 
 -- threshold
-local maxr = 0
-for k, p in pairs(problem.primals) do if p.kind == "recipe" then local a = math.abs(x[k] or 0); if a > maxr then maxr = a end end end
-local thr = math.max(1e-9, maxr * 1e-6)
+local thr = dissect.solved_threshold(problem, x)
 
 -- collect by kind
 local groups = {}

@@ -49,6 +49,11 @@ M.park_threshold = ed.park_threshold
 M.is_recipe = ed.is_recipe
 M.CHEAT_EPS = ed.CHEAT_EPS
 
+-- The physical single-solution READ layer (dump / drill inspectors): all_lines,
+-- cyclic_sccs, physical_flows, escape_by_material, line_in/out, solved_threshold.
+-- Reached either as research_lib.dissect.* or by requiring it directly.
+M.dissect = require "tests/research/dissect"
+
 -- Location of the canonical research corpus (explorer-dumped problems, promoted
 -- by hand -- the explorer itself publishes to tests/explore_problems/). There is
 -- deliberately NO baked-in default: the corpus lives wherever the maintainer

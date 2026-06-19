@@ -12,11 +12,11 @@
 
 require "tests/headless_env"
 local ref = require "tests/research/reference_solver"
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
 local material_cycles = require "solver/material_cycles"
 local tn = require "manage/typed_name"
-local vk = require "solver/var_key"
 
 local PATH = arg[1] or "S:/tmp/explore_problems/seed_143_cycle_scc_vex_sex_p1_noq_trecipe_con_h72_cyconly.lua"
 local MAT = arg[2] or "fluid/psc@[10,10]"
@@ -27,59 +27,29 @@ for _, c in ipairs(prob.constraints) do c.limit_amount_per_second = BIG end
 
 -- all lines = real recipes + temperature bridges
 local p0 = create_problem.create_problem("d", prob.constraints, prob.normalized_lines, nil, nil)
-local lines = {}
-for _, l in ipairs(prob.normalized_lines) do lines[#lines + 1] = l end
-for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
+local lines = dissect.all_lines(prob.normalized_lines, p0)
 
 local r = ref.solve_reference(prob.constraints, prob.normalized_lines)
 assert(r.state == "finished", "reference did not finish: " .. tostring(r.state))
 local x = r.x
 
-local function rkey(line) return tn.typed_name_to_variable_name(line.recipe_typed_name) end
-local function out_of(line, mat)
-    local s = 0
-    for _, prod in ipairs(line.products or {}) do if tn.typed_name_to_variable_name(prod) == mat then s = s + (prod.amount_per_second or 0) end end
-    if line.fuel_burnt_result and tn.typed_name_to_variable_name(line.fuel_burnt_result) == mat then s = s + (line.fuel_burnt_result.amount_per_second or 0) end
-    return s
-end
-local function in_of(line, mat)
-    local s = 0
-    for _, ing in ipairs(line.ingredients or {}) do if tn.typed_name_to_variable_name(ing) == mat then s = s + (ing.amount_per_second or 0) end end
-    if line.fuel_ingredient and tn.typed_name_to_variable_name(line.fuel_ingredient) == mat then s = s + (line.fuel_ingredient.amount_per_second or 0) end
-    return s
-end
+local rkey = dissect.recipe_key
+local out_of, in_of = dissect.line_out, dissect.line_in
 
 -- per-material in-solution production / consumption totals (for availability test)
-local produced, consumed = {}, {}
-for _, line in ipairs(lines) do
-    local xr = x[rkey(line)] or 0
-    if xr > 0 then
-        for _, prod in ipairs(line.products or {}) do
-            local m = tn.typed_name_to_variable_name(prod); produced[m] = (produced[m] or 0) + xr * (prod.amount_per_second or 0)
-        end
-        if line.fuel_burnt_result then local m = tn.typed_name_to_variable_name(line.fuel_burnt_result); produced[m] = (produced[m] or 0) + xr * (line.fuel_burnt_result.amount_per_second or 0) end
-        for _, ing in ipairs(line.ingredients or {}) do
-            local m = tn.typed_name_to_variable_name(ing); consumed[m] = (consumed[m] or 0) + xr * (ing.amount_per_second or 0)
-        end
-        if line.fuel_ingredient then local m = tn.typed_name_to_variable_name(line.fuel_ingredient); consumed[m] = (consumed[m] or 0) + xr * (line.fuel_ingredient.amount_per_second or 0) end
-    end
-end
+local produced, consumed = dissect.physical_flows(lines, x, { fuel = true, eps = 0 })
 
--- escape values for a material
-local function escape_val(kindfn)
-    local total, items = 0, {}
-    for key, p in pairs(r.problem.primals) do
-        if p.material and kindfn(p.kind) then
-            local v = math.abs(x[key] or 0)
-            if v > 1e-6 then items[p.material] = (items[p.material] or 0) + v end
-        end
-    end
-    return items
+-- escape values for a material, split by kind
+local esc = dissect.escape_by_material(r.problem.primals, x, 1e-6)
+local function esck(kind)
+    local t = {}
+    for m, kv in pairs(esc) do if kv[kind] then t[m] = kv[kind] end end
+    return t
 end
-local surplus_items = escape_val(function(k) return k == "surplus_sink" end)
-local final_items = escape_val(function(k) return k == "final_sink" end)
-local shortage_items = escape_val(function(k) return k == "shortage_source" end)
-local initial_items = escape_val(function(k) return k == "initial_source" end)
+local surplus_items = esck("surplus_sink")
+local final_items = esck("final_sink")
+local shortage_items = esck("shortage_source")
+local initial_items = esck("initial_source")
 
 -- availability verdict for a material (could we consume MORE without a new import?)
 local function avail(m)

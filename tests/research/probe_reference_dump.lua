@@ -12,9 +12,9 @@
 
 require "tests/headless_env"
 local ref = require "tests/research/reference_solver"
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
-local material_cycles = require "solver/material_cycles"
 
 local PATH = arg[1] or "S:/tmp/explore_problems/seed_143_cycle_scc_vex_sex_p1_noq_trecipe_con_h72_cyconly.lua"
 local BIG = tonumber(arg[2]) or 1e6
@@ -22,22 +22,9 @@ local BIG = tonumber(arg[2]) or 1e6
 local prob = assert(problem_dump.load_problem(PATH))
 for _, c in ipairs(prob.constraints) do c.limit_amount_per_second = BIG end
 
--- SCC tags
-local function scc_tags()
-    local p0 = create_problem.create_problem("t", prob.constraints, prob.normalized_lines, nil, nil)
-    local lines = {}
-    for _, l in ipairs(prob.normalized_lines) do lines[#lines + 1] = l end
-    for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
-    local adj = material_cycles.build_material_graph(lines)
-    local sccs = material_cycles.find_sccs(adj)
-    local cyc = {}
-    for _, s in ipairs(sccs) do if material_cycles.is_cyclic_scc(s, adj) then cyc[#cyc + 1] = s end end
-    table.sort(cyc, function(a, b) if #a ~= #b then return #a > #b end return a[1] < b[1] end)
-    local m = {}
-    for i, s in ipairs(cyc) do for _, mm in ipairs(s) do m[mm] = string.format("C%02d", i) end end
-    return m
-end
-local mat_scc = scc_tags()
+-- SCC tags (cyclic SCCs of the material graph, bridges included), C01.. by size
+local p0 = create_problem.create_problem("t", prob.constraints, prob.normalized_lines, nil, nil)
+local mat_scc = dissect.cyclic_sccs(dissect.all_lines(prob.normalized_lines, p0)).tag
 local function tag(material) return material and (mat_scc[material] or "-") or "?" end
 
 local r = ref.solve_reference(prob.constraints, prob.normalized_lines)
@@ -70,9 +57,7 @@ local function classify(p)
 end
 
 -- threshold
-local maxr = 0
-for k, p in pairs(problem.primals) do if p.kind == "recipe" then local a = math.abs(x[k] or 0); if a > maxr then maxr = a end end end
-local thr = math.max(1e-9, maxr * 1e-6)
+local thr = dissect.solved_threshold(problem, x)
 
 local cats, order = {}, {}
 for k, p in pairs(problem.primals) do

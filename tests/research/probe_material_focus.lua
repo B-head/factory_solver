@@ -10,9 +10,9 @@
 
 require "tests/headless_env"
 
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
-local material_cycles = require "solver/material_cycles"
 local tn = require "manage/typed_name"
 local vk = require "solver/var_key"
 local lp = require "solver/linear_programming"
@@ -64,32 +64,10 @@ until (state ~= "ready" and state ~= "calculating") or steps > prob.meta.step_ca
 local x = (last and last.x) or {}
 
 -- material graph (with bridges) for SCC + neighbor context
-local scc_lines = {}
-for _, l in ipairs(prob.normalized_lines) do scc_lines[#scc_lines + 1] = l end
-for _, l in ipairs(problem.bridges) do scc_lines[#scc_lines + 1] = l end
-local adj = material_cycles.build_material_graph(scc_lines)
-local sccs = material_cycles.find_sccs(adj)
-local in_cyclic = false
-for _, s in ipairs(sccs) do
-    if material_cycles.is_cyclic_scc(s, adj) then
-        for _, m in ipairs(s) do if m == FOCUS then in_cyclic = true end end
-    end
-end
-
-local function amount_of(line, want, is_ing)
-    local list = is_ing and line.ingredients or line.products
-    local total = 0
-    for _, a in ipairs(list) do
-        if tn.typed_name_to_variable_name(a) == want then total = total + a.amount_per_second end
-    end
-    if is_ing and line.fuel_ingredient and tn.typed_name_to_variable_name(line.fuel_ingredient) == want then
-        total = total + line.fuel_ingredient.amount_per_second
-    end
-    if (not is_ing) and line.fuel_burnt_result and tn.typed_name_to_variable_name(line.fuel_burnt_result) == want then
-        total = total + line.fuel_burnt_result.amount_per_second
-    end
-    return total
-end
+local scc_lines = dissect.all_lines(prob.normalized_lines, problem)
+local scc = dissect.cyclic_sccs(scc_lines)
+local adj = scc.adj
+local in_cyclic = scc.tag[FOCUS] ~= nil
 
 io.write(string.format("solve state=%s steps=%d ; FOCUS=%s ; in_cyclic_SCC=%s\n",
     state, steps, FOCUS, tostring(in_cyclic)))
@@ -103,7 +81,7 @@ end
 local prod_total, cons_total = 0, 0
 io.write("\n-- PRODUCERS (recipe produces FOCUS) --   flow = per_sec * activity\n")
 for _, l in ipairs(scc_lines) do
-    local a = amount_of(l, FOCUS, false)
+    local a = dissect.line_out(l, FOCUS)
     if a > 0 then
         local rv = tn.typed_name_to_variable_name(l.recipe_typed_name)
         local act = x[rv] or 0
@@ -117,7 +95,7 @@ io.write(string.format("  >> total production = %.6g\n", prod_total))
 
 io.write("\n-- CONSUMERS (recipe consumes FOCUS) --\n")
 for _, l in ipairs(scc_lines) do
-    local a = amount_of(l, FOCUS, true)
+    local a = dissect.line_in(l, FOCUS)
     if a > 0 then
         local rv = tn.typed_name_to_variable_name(l.recipe_typed_name)
         local act = x[rv] or 0
