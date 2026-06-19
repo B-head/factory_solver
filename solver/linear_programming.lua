@@ -77,6 +77,26 @@ M.cholesky_memo = false
 M.qp_accept_tolerance = 1e-3
 M.qp_stall_iterations = 50
 
+-- How the QP (has_quad) path handles the iteration-1 EXTERNAL warm-start handoff
+-- (a norm switch / edit / reload). The plain LP warm-start path destabilises the
+-- QP Newton iteration -- it nearly converges then a free column runs to ~1e15 and
+-- the solve diverges to a fabricated all-zero result (the "Begining" L2 bug; see
+-- the dispatch in M.solve). Strategies:
+--   "cold"          discard the warm-start, mehrotra cold start. SHIPPED DEFAULT.
+--   "warm_mehrotra" mehrotra centred around the warm primal (gated research hook).
+--   "warm_center"   keep the warm primal, set s to the QP-consistent reduced cost
+--                   c+Qx-Aᵀy (gated research hook).
+-- "cold" is the default because it is robust AND no slower: an in-engine A/B
+-- measured both warm strategies converging but taking ~the same ~22 iterations as
+-- cold even re-solving from the EXACT l2 optimum -- warm-starting an interior-point
+-- method needs the warm point ON the central path, but an external solution is at
+-- the optimum boundary (off-centre), so the path-following walks the duality
+-- measure back down regardless. The warm strategies are kept GATED OFF for future
+-- research (e.g. if a simplex-style crossover or a central-path-aware warm point is
+-- added). A field (not a constant) so a probe can flip it; "cold" is byte-identical
+-- to the un-gated shipped behaviour.
+M.qp_warm_strategy = "cold"
+
 ---@param vector CsrMatrix
 ---@return number
 local function vector_sum(vector)
@@ -116,10 +136,14 @@ end
 ---@param c CsrMatrix
 ---@param p_degree integer
 ---@param d_degree integer
+---@param x_seed number[]? Optional warm primal hint (dense list): substitutes for the
+---  least-norm x̃, so the same positivity / centring shifts are applied around the
+---  warm point instead. Research hook for the gated "warm_mehrotra" QP start (see
+---  M.qp_warm_strategy); the cold path passes nil and is byte-identical.
 ---@return CsrMatrix? x
 ---@return CsrMatrix? y
 ---@return CsrMatrix? s
-local function mehrotra_start(A, AT, b, c, p_degree, d_degree)
+local function mehrotra_start(A, AT, b, c, p_degree, d_degree, x_seed)
     -- One symmetric factorisation of A·Aᵀ drives every normal-equation solve
     -- below. This is the same d×d system shape (and sparsity pattern, since SX
     -- is diagonal) as the per-iteration A·D²·Aᵀ Cholesky, so it costs roughly
@@ -132,9 +156,9 @@ local function mehrotra_start(A, AT, b, c, p_degree, d_degree)
             csr_matrix.forward_substitution(LD, rhs))
     end
 
-    -- x̃ = Aᵀ·(A·Aᵀ)⁻¹·b  (least-norm primal solution to A·x = b)
-    -- ỹ = (A·Aᵀ)⁻¹·(A·c), s̃ = c - Aᵀ·ỹ  (least-squares dual)
-    local x_tilde = csr_matrix.to_list(AT * solve_normal(b))
+    -- x̃ = Aᵀ·(A·Aᵀ)⁻¹·b  (least-norm primal solution to A·x = b), or the warm hint.
+    -- ỹ = (A·Aᵀ)⁻¹·(A·c), s̃ = c - Aᵀ·ỹ  (least-squares dual, always fresh from c)
+    local x_tilde = x_seed or csr_matrix.to_list(AT * solve_normal(b))
     local y = solve_normal(A * c)
     local s_tilde = csr_matrix.to_list(c - AT * y)
 
@@ -447,8 +471,64 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
     local p_degree = problem.primal_length
     local d_degree = problem.dual_length
 
+    -- The QP (has_quad) Newton path is numerically unstable when warm-started from
+    -- an EXTERNAL packed solution -- the iteration-1 handoff after a fresh "ready"
+    -- (a norm switch, a constraint / line edit, a mod reload). The plain warm path
+    -- recentres x and s with the clamp below, which is tuned for the LP central
+    -- path; for the QP that point sits off the QP central path and the solve nearly
+    -- converges (~7 iterations to mu ≈ 0.4) then DESTABILIZES -- the dual residual
+    -- blows up and a free recipe column slides to ~1e15 (observed: an L2 solve of
+    -- "Begining" right after a legacy->l2 switch ran to the iterate limit with
+    -- x ~ 4.5e15 and a fabricated all-zero result).
+    --
+    -- The handoff is routed through M.qp_warm_strategy (default "cold"; see its note
+    -- above). "cold" discards the warm-start and mehrotra cold-starts -- robust AND
+    -- no slower than the gated warm strategies (an in-engine A/B measured both warm
+    -- strategies converging but at the same ~22 iterations as cold even from the
+    -- exact l2 optimum, since an IPM warm point must be on the central path, not just
+    -- near the boundary optimum). qp_handoff is false without quad, so the pure-LP
+    -- path is byte-identical and keeps its (stable, iteration-saving) warm-start.
+    -- Only the iteration-1 handoff is special-cased: the IPM's OWN iterates
+    -- (iteration >= 2, the genuine central-path progression) take the warm path.
+    local qp_handoff = problem.has_quad == true and (iteration or 0) <= 1 and raw_variables ~= nil
+    local strategy = qp_handoff and (M.qp_warm_strategy or "cold") or nil
+
     local x, y, s
-    if raw_variables == nil then
+    if strategy == "warm_mehrotra" then
+        -- GATED research hook (off by default; see M.qp_warm_strategy). Seed
+        -- mehrotra with the warm primal (slacks recomputed feasibly) instead of the
+        -- least-norm x̃, so the strictly-interior balanced start sits near the warm
+        -- hint. Converges, but measured no faster than cold (the centring shifts
+        -- move the point off the boundary the warm hint sat on).
+        local warm_x = csr_matrix.to_list(problem:make_primal_variables(raw_variables))
+        x, y, s = mehrotra_start(A, AT, b, c, p_degree, d_degree, warm_x)
+        if x == nil then
+            local b_inf_norm = math.max(2 ^ -32, vector_inf_norm(b))
+            local c_inf_norm = math.max(2 ^ -32, vector_inf_norm(c))
+            x = csr_matrix.with_vector(b_inf_norm, p_degree)
+            y = csr_matrix.with_vector(0, d_degree)
+            s = csr_matrix.with_vector(c_inf_norm, p_degree)
+        end
+        ---@cast x CsrMatrix
+        ---@cast y CsrMatrix
+        ---@cast s CsrMatrix
+    elseif strategy == "warm_center" then
+        -- GATED research hook (off by default; see M.qp_warm_strategy). Keep the
+        -- warm primal (proximity to the optimum) but set the slack to the
+        -- QP-consistent reduced cost s = c + Q·x − Aᵀ·y, floored positive so the
+        -- point stays strictly interior. Unlike the plain warm path (which clamps s
+        -- UP to c_inf·2⁻¹⁰, forcing a large slack onto the free / zero-cost columns
+        -- whose true reduced cost is ~0 -- wrecking complementarity and diverging),
+        -- this keeps s small exactly there. Converges, but measured no faster than
+        -- cold (the off-boundary x floor needed for Cholesky conditioning resets mu).
+        x = problem:make_primal_variables(raw_variables)
+        y = problem:make_dual_variables(raw_variables)
+        local q = problem:generate_quad_vector()
+        local c_inf_norm = math.max(2 ^ -32, vector_inf_norm(c))
+        local b_inf_norm = math.max(2 ^ -32, vector_inf_norm(b))
+        s = (c + hmul(q, x) - AT * y):clamp(c_inf_norm * 2 ^ -30, machine_upper_epsilon)
+        x = x:clamp(b_inf_norm * 2 ^ -30, machine_upper_epsilon)
+    elseif raw_variables == nil or strategy == "cold" then
         -- Cold start via Mehrotra's heuristic starting point. It seeds x from
         -- the least-norm solution of A·x = b, so x's magnitude tracks the
         -- problem's true scale -- including coefficient-driven amplification,

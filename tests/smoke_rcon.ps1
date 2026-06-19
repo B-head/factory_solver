@@ -315,6 +315,26 @@ try {
         $allPass = $false
     }
 
+    # QP (l2 "balanced") warm-start regression guard: solving l2 warm-started from
+    # a prior solution (a norm switch / edit) destabilised the QP Newton path -- it
+    # nearly converged then a free recipe column ran to ~1e15 and the solve diverged
+    # to the iterate limit, fabricating an all-zero result (seen in-game on
+    # "Begining" after a legacy->l2 switch). ENGINE-ONLY (the divergence is
+    # IPM-path / pairs()-order dependent, so the headless suite cannot reproduce it),
+    # hence this lives in the smoke gate. Compares l2 warm vs l2 cold per bundle16
+    # problem. SKIPs without Space Age. Report in write/script-output/qp_warmstart_report.txt.
+    $qpWarm = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_qp_warmstart'))"
+    if ($qpWarm -match '^OK') {
+        Write-Host "SMOKE PASS: [qp_warmstart] $qpWarm"
+    } elseif ($qpWarm -match '^SKIP:') {
+        Write-Host "SMOKE SKIP: [qp_warmstart] $($qpWarm -replace '^SKIP:\s*', '')"
+        $skipCount++
+    } else {
+        Write-Host "SMOKE FAIL: [qp_warmstart] $qpWarm"
+        $allPass = $false
+    }
+
     # Refresh the confirmed drop report on disk (write/script-output/bundle16_drops.txt)
     # so a -KeepRun run leaves an up-to-date copy to regenerate
     # tests/fixtures/bundle16_expected_drops.lua from. Quiet -- the file, not the

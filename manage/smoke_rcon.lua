@@ -3258,6 +3258,114 @@ function M.check_bundle16_norms_impl()
         matched_n, xfail_n, skipped, #BUNDLE16_NORMS, #payloads)
 end
 
+---RCON entry point: REGRESSION GUARD for the QP (l2 "balanced") warm-start
+---divergence. Switching a solution's norm to l2 -- or editing it under l2 --
+---re-solves the QP warm-started from the previous packed solution
+---(save.update_solver_norm keeps solution.raw_variables). The QP Newton path
+---destabilised from that external warm point: it nearly converged, then a free
+---recipe column slid to ~1e15 and the solve ran to the iterate limit, reporting a
+---fabricated all-zero result (seen in-game on "Begining" after a legacy->l2
+---switch). This is ENGINE-ONLY -- the divergence is pairs()-order / IPM-path
+---dependent, so the headless suite (stock lua) takes a convergent path and cannot
+---reproduce it (the headless test in lp_solver_norms only documents the contract);
+---the guard has to run in the engine, which is why it lives here.
+---For each bundle16 problem it solves l2 cold (the reference optimum) and l2 warm
+---(legacy -> update_solver_norm("l2"), the real UI flow), and FAILS if any warm
+---solve does not finish, blows a variable past 1e9, or lands on a different
+---machine count than the cold solve. SKIPs without Space Age.
+---@return string
+function M.check_qp_warmstart()
+    if not script.active_mods["space-age"] then
+        return "SKIP: qp_warmstart needs Space Age (most recipes are SA-only)"
+    end
+    local ok, result = pcall(M.check_qp_warmstart_impl)
+    if not ok then return "ERROR: qp_warmstart raised: " .. tostring(result) end
+    return result
+end
+
+---@return string
+function M.check_qp_warmstart_impl()
+    save.init_force_data(FORCE_INDEX)
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data.solutions
+    local payloads = assert(solution_codec.decode(bundle16_shared), "decode failed")
+    local saved_bonuses = force_data.research_bonuses
+    force_data.research_bonuses = M.bundle16_research_bonuses()
+
+    -- machines (sum over recipe columns) and the max |x| over every column.
+    local function machines_and_peak(solution)
+        local m, peak = 0, 0
+        local primals = solution.problem and solution.problem.primals or {}
+        local x = solution.raw_variables and solution.raw_variables.x or {}
+        for key, p in pairs(primals) do
+            local v = math.abs(x[key] or 0)
+            if v > peak then peak = v end
+            if p.kind == "recipe" then m = m + v end
+        end
+        return m, peak
+    end
+    local function drive(solution)
+        local steps = 0
+        while solution.solver_state == "ready" or solution.solver_state == "calculating" do
+            pre_solve.forwerd_solve(force_data, solution)
+            steps = steps + 1
+            if steps > 5000 then break end
+        end
+        return steps
+    end
+
+    local report, fails = {}, {}
+    for _, p in ipairs(payloads) do
+        -- Cold reference: a fresh import (no raw_variables) solved straight under l2.
+        for n in pairs(solutions) do solutions[n] = nil end
+        local cn = save.import_solution(solutions, p)
+        local cold = assert(solutions[cn])
+        cold.solver_norm = "l2"
+        cold.solver_state = "ready"
+        local cold_steps = drive(cold)
+        local cold_m = machines_and_peak(cold)
+        local cold_state = cold.solver_state
+
+        -- Warm: solve legacy, then switch to l2 like the UI (raw_variables kept).
+        for n in pairs(solutions) do solutions[n] = nil end
+        local wn = save.import_solution(solutions, p)
+        local warm = assert(solutions[wn])
+        warm.solver_norm = "legacy"
+        warm.solver_state = "ready"
+        drive(warm)
+        save.update_solver_norm(warm, "l2") -- keeps raw_variables: the warm-start
+        local warm_steps = drive(warm)
+        local warm_m, warm_peak = machines_and_peak(warm)
+
+        local bad = {}
+        if warm.solver_state ~= "finished" then
+            bad[#bad + 1] = "warm state=" .. tostring(warm.solver_state)
+        end
+        if warm_peak > 1e9 then
+            bad[#bad + 1] = string.format("warm blew up (max|x|=%.3g)", warm_peak)
+        end
+        -- Same optimum as cold (only meaningful when cold itself finished).
+        if cold_state == "finished"
+            and math.abs(warm_m - cold_m) > math.max(1e-3, 2e-2 * math.max(warm_m, cold_m)) then
+            bad[#bad + 1] = string.format("warm M=%.6g != cold M=%.6g", warm_m, cold_m)
+        end
+        report[#report + 1] = string.format(
+            "[%s] %s  cold{M=%.6g state=%s steps=%d} warm{M=%.6g peak=%.3g state=%s steps=%d}",
+            p.name, #bad == 0 and "OK" or "FAIL", cold_m, cold_state, cold_steps,
+            warm_m, warm_peak, tostring(warm.solver_state), warm_steps)
+        if #bad > 0 then fails[#fails + 1] = p.name .. ": " .. table.concat(bad, "; ") end
+    end
+
+    for n in pairs(solutions) do solutions[n] = nil end
+    force_data.research_bonuses = saved_bonuses
+
+    helpers.write_file("qp_warmstart_report.txt", table.concat(report, "\n"))
+    if #fails > 0 then
+        return "ERROR: " .. #fails .. " QP warm-start divergence(s): " .. table.concat(fails, " | ")
+    end
+    return string.format("OK: %d problems, l2 warm-start converges to the cold optimum", #payloads)
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -3277,6 +3385,7 @@ function M.register()
         dump_bundle16_normalized = M.dump_bundle16_normalized,
         check_bundle16_v060 = M.check_bundle16_v060,
         check_bundle16_norms = M.check_bundle16_norms,
+        check_qp_warmstart = M.check_qp_warmstart,
         check_target_rescue = M.check_target_rescue,
         check_force_caches = M.check_force_caches,
         check_relation_split = M.check_relation_split,

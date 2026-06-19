@@ -163,6 +163,55 @@ table.insert(cases, {
     end,
 })
 
+table.insert(cases, {
+    name = "L2 (QP) warm-started from a prior solution still converges (no divergence)",
+    run = function()
+        -- Regression: switching a solution's norm to "l2" (or editing it under
+        -- l2) re-solves the QP WARM-STARTED from the previous packed solution
+        -- (save.update_solver_norm keeps solution.raw_variables). The QP Newton
+        -- path destabilised from that external warm point -- it nearly converged,
+        -- then a free recipe column slid to ~1e15 and the solve ran to the iterate
+        -- limit, reporting a fabricated all-zero result (observed in-game on the
+        -- "Begining" Fulgora-starter problem after a legacy->l2 switch). The fix
+        -- (linear_programming.solve: the QP discards the iteration-1 external
+        -- warm-start and cold-starts via mehrotra) must make the warm re-solve
+        -- converge to the SAME optimum as the cold solve. The BIG-M target/elastic
+        -- cost scale of surplus_fixture is what drove the warm-start clamp off the
+        -- QP central path, so it is the reproduction vehicle here.
+        local lines, constraints = surplus_fixture()
+        local function build()
+            local p = cp.create_problem("l2-warm", constraints, lines, nil,
+                { reachability_gating = false, recipe_epsilon = 2 ^ -20, target_budget = 1e-6 })
+            cp.shape_l2(p, 2)
+            return p
+        end
+
+        local cold = build()
+        local cs, cv = solve(cold)
+        harness.assert_eq(cs, "finished", "cold solve finishes")
+        assert(cv, "expected packed variables (cold)")
+        local cold_max = violation_stats(cold, cv)
+
+        -- Warm-start the SAME problem from the cold optimum (the norm-switch flow).
+        local warm = build()
+        local ws, wv = harness.solve_to_completion(lp, warm,
+            { tolerance = 1e-7, iterate_limit = 600 }, cv)
+        harness.assert_eq(ws, "finished", "warm solve finishes (did not diverge)")
+        assert(wv, "expected packed variables (warm)")
+        -- The fabricated-divergence symptom was x exploding to ~1e15; assert the
+        -- warm solve stays at the cold scale, not blown up.
+        local warm_max = violation_stats(warm, wv)
+        harness.assert_near(warm_max, cold_max, math.max(1e-2, 1e-2 * cold_max),
+            "warm violation peak matches the cold solve (no blow-up)")
+        for key, p in pairs(warm.primals) do
+            if p.kind == "recipe" then
+                harness.assert_true(math.abs(wv.x[key] or 0) < 1e6,
+                    "no recipe column ran away to ~1e15 (" .. key .. ")")
+            end
+        end
+    end,
+})
+
 --------------------------------------------------------------------------------
 -- L-infinity: the min-max shaping.
 --------------------------------------------------------------------------------
