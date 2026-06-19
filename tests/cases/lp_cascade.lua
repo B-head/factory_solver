@@ -4,14 +4,13 @@
 -- (manage/pre_solve.lua M.cascade_step): a finished solve feeds cascade.advance,
 -- which either wants another build (re-arm "ready"), settles ("done"), or asks
 -- to restore the adopted answer ("restore"). This file drives that exact loop
--- SYNCHRONOUSLY -- a minimal mirror of the pump and of
--- tests/research/probe_vp_rescue.lua's solve_shipped -- and pins the state
+-- SYNCHRONOUSLY -- a minimal mirror of the pump -- and pins the state
 -- machine's observable behaviour: a producible import is rescued to zero, a
 -- clean chain passes through untouched (exercising the restore path), a
 -- non-consumable dump is correctly left alone, and the whole thing is
--- deterministic. The corpus equivalence driver
--- (tests/research/probe_cascade_ship.lua) covers the numeric fidelity against
--- the reference on real problems; this covers the wiring.
+-- deterministic. The corpus reference grader
+-- (tests/research/probe_reference_compare.lua) covers the numeric fidelity
+-- against the reference on real problems; this covers the wiring.
 
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
