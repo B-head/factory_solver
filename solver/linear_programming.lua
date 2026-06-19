@@ -65,6 +65,18 @@ local M = {}
 -- A field (not a constant) so probes can flip it for an A/B.
 M.cholesky_memo = false
 
+-- QP stall-acceptance (has_quad path only). The worst coefficient-amplified cycle
+-- problems cannot drive max(p,d,mu) to `tolerance`: a variable of magnitude ~1e8-1e10
+-- times its complementary partner pinned at the machine_lower_epsilon clamp (2^-52)
+-- floors the duality product at ~1e-5. The iterate is nonetheless a usable solution
+-- (feasibility ~1e-4 relative). So once a QP solve has plateaued (no new best for
+-- qp_stall_iterations) or spent its budget, the best iterate seen is accepted as
+-- "finished" if its max-criteria is within qp_accept_tolerance. Pure-LP solves never
+-- set has_quad, so their convergence test and byte-identity are untouched. Fields
+-- (not constants) so research probes can sweep them.
+M.qp_accept_tolerance = 1e-3
+M.qp_stall_iterations = 50
+
 ---@param vector CsrMatrix
 ---@return number
 local function vector_sum(vector)
@@ -551,6 +563,30 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
         return "finished", iteration, problem:pack_variables(x, y, s)
     end
 
+    -- QP stall-acceptance (has_quad only; see M.qp_accept_tolerance). Track the best
+    -- iterate, and accept it as finished once the residual has plateaued or the budget
+    -- is spent, if it is within the looser qp_accept_tolerance. Runs after the strict
+    -- test above, so anything reaching `tolerance` still finishes the normal way.
+    if has_quad then
+        local crit = math.max(p_criteria, d_criteria, mu_criteria)
+        if iteration <= 1 or not problem.qp_best_crit then
+            problem.qp_best_crit, problem.qp_best_vars, problem.qp_stall = crit, nil, 0
+        end
+        if crit < problem.qp_best_crit or not problem.qp_best_vars then
+            problem.qp_best_crit = math.min(problem.qp_best_crit, crit)
+            problem.qp_best_vars = problem:pack_variables(x, y, s)
+            problem.qp_stall = 0
+        else
+            problem.qp_stall = problem.qp_stall + 1
+        end
+        if problem.qp_best_crit <= M.qp_accept_tolerance
+            and (iterate_limit <= iteration or problem.qp_stall >= M.qp_stall_iterations) then
+            log.trace("-- QP stall-accept solve '%s' (best %.3g <= %.3g, stall %i) --",
+                problem.name, problem.qp_best_crit, M.qp_accept_tolerance, problem.qp_stall)
+            return "finished", iteration, problem.qp_best_vars
+        end
+    end
+
     if iterate_limit <= iteration then
         if fs_log.is_enabled("trace") then log.trace("primal <x>:\n%s", problem:dump_primal(x)) end
         log.trace("-- unfinished solve '%s' --", problem.name)
@@ -609,14 +645,33 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
         local d2_diag = d2:diag()
         local w = dual - s + sigma_mu * hpow(x, -1)
         local aug = -primal - A * hmul(d2, w)
+        -- Jacobi (diagonal) equilibration of the normal equations P = A·D²·Aᵀ.
+        -- The QP regime pins import columns at D²ᵢᵢ ≤ 1/q = O(1) while recipe/free
+        -- columns roam to xᵢ/sᵢ ~ 2±large (coefficient-driven amplification, see the
+        -- Mehrotra-start note: a tiny input cap fans through small coefficients into
+        -- a large genuine internal throughput -- NOT a futile loop to be penalised).
+        -- So P spans ~2¹⁴⁰ and the unscaled Cholesky's Schur sums overflow to NaN
+        -- ("singular" on 191/1678 of the pyanodon cycle corpus). Scale P symmetrically
+        -- by e = diag(1/√Pᵢᵢ): solve (E·P·E)·z = E·aug on the unit-diagonal system,
+        -- recover Δy = E·z. Exact -- the step is unchanged up to round-off, so the L2
+        -- solution is preserved -- and it makes reg_epsilon meaningful (ε on a
+        -- unit-diagonal matrix is a real perturbation, not lost under 2¹⁴⁰ entries).
+        -- diag(P)ᵢ = Σ_k A_ik²·D²_k, formed without materialising P via (A∘A)·d2.
+        -- Gated inside has_quad, so the pure-LP path stays byte-identical.
+        local p_diag = hpow(A, 2) * d2
+        local e = hpow(p_diag, -0.5):clamp(2 ^ -60, 2 ^ 60)
+        local A_scaled = e:diag() * A
+        local A_scaled_T = A_scaled:T()
+        local P_base = A_scaled * d2_diag * A_scaled_T
+        local e_aug = hmul(e, aug)
         solve_step = function(reg_epsilon)
-            local P = A * d2_diag * AT
-            if reg_epsilon > 0 then
-                P = P + csr_matrix.with_diagonal(reg_epsilon, d_degree)
-            end
+            local P = (reg_epsilon > 0)
+                and (P_base + csr_matrix.with_diagonal(reg_epsilon, d_degree))
+                or P_base
             local L, D = cholesky(P)
-            local y_step_ = csr_matrix.backward_substitution(L:T(),
-                csr_matrix.forward_substitution(L * D, aug))
+            local z = csr_matrix.backward_substitution(L:T(),
+                csr_matrix.forward_substitution(L * D, e_aug))
+            local y_step_ = hmul(e, z)
             local x_step_ = hmul(d2, AT * y_step_ + w)
             local s_step_ = AT * -y_step_ - dual + hmul(q, x_step_)
             return y_step_, s_step_, x_step_
@@ -644,7 +699,24 @@ function M.solve(problem, solver_state, iteration, raw_variables, tolerance, ite
 
     local y_step, s_step, x_step = solve_step(0)
     if has_nan(y_step) or has_nan(s_step) or has_nan(x_step) then
-        y_step, s_step, x_step = solve_step(2 ^ -12)
+        -- Escalating Tikhonov regularization ladder. The old code retried once at
+        -- ε = 2⁻¹², which rescued the cancellation-overflow mode on well-scaled LPs
+        -- but not the QP regime: mixing q-bounded import columns (D²ᵢᵢ ≤ 1/q = O(1))
+        -- with unbounded recipe/free columns (D²ᵢᵢ = xᵢ/sᵢ, spanning ~2±large) gives
+        -- A·D²·Aᵀ a far wider dynamic range, so a single small ε leaves the
+        -- overflow-driving rows untouched and the factorization still NaNs (191/1678
+        -- "singular" on the pyanodon cycle corpus). Climb ε by 2⁴ per rung until the
+        -- step is finite; the cap (2⁶) is past the point where the regularized move
+        -- is essentially a damped descent step, which still makes progress toward the
+        -- optimum (and improves the conditioning of later iterations) rather than
+        -- aborting. The unregularised solve_step(0) above is untouched, so every
+        -- problem that already factors cleanly -- the entire shipped pure-LP path --
+        -- is byte-identical; the ladder only ever fires after a detected NaN.
+        local reg = 2 ^ -12
+        repeat
+            y_step, s_step, x_step = solve_step(reg)
+            reg = reg * 2 ^ 4
+        until not (has_nan(y_step) or has_nan(s_step) or has_nan(x_step)) or reg > 2 ^ 6
     end
     if has_nan(y_step) or has_nan(s_step) or has_nan(x_step) then
         log.trace("-- singular solve '%s' (Cholesky lost precision) --",
