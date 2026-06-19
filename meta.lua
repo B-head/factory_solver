@@ -17,6 +17,9 @@
 -- user edit re-arms it to "ready" like every other solution, replacing the
 -- frozen values with a normal in-game solve.
 ---@alias SolverState "ready"|"calculating"|"finished"|"unfinished"|"singular"|"unbounded"|"unfeasible"|"freeze"
+-- Per-solution import/dump balancing norm. The first four are user-selectable in
+-- the UI; "cascade" is the retired staged rescue, kept dispatchable but hidden.
+---@alias SolverNorm "l1"|"l2"|"linf"|"legacy"|"cascade"
 ---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
 -- Fluid temperature is carried range-only: a point temperature is the degenerate
 -- range minimum_temperature == maximum_temperature. There is no single-value
@@ -213,6 +216,7 @@ __factory_solver__storage = {}
 ---@field problem Problem?
 ---@field solver_state SolverState
 ---@field solver_iteration integer?
+---@field solver_norm SolverNorm?  Per-solution import/dump balancing norm (manage/pre_solve.lua dispatch). "l1" un-gated baseline (linear elastic), "l2" QP least-norm on the violation elastics, "linf" lexicographic min-max, "legacy" the hard reachability gate + two-pass. "cascade" is the retired staged rescue, kept dispatchable (not exposed in the UI) so its fixtures keep validating. nil = "legacy" (the default; backfilled on load).
 ---@field raw_variables PackedVariables?
 ---@field done_lines table<string, true>?
 ---@field forced_imports table<string, true>?  Legacy two-pass reclassify (manage/pre_solve.lua, used only when observe_price is disabled): avoidable cheats diagnosed from pass 1, re-seeded as |initial_source| imports for pass 2. nil during pass 1 / a clean solve.
@@ -223,6 +227,13 @@ __factory_solver__storage = {}
 ---@field tr_restart boolean?  Internal flag: set when the target rescue re-arms solver_state="ready", so the rebuild keeps the in-flight rescue state instead of dropping it as it would for a fresh edit.
 ---@field cascade CascadeState?  In-flight cascade staged rescue (manage/pre_solve.lua M.cascade_step / solver/cascade.lua), the shipped replacement for observe_price. nil before the baseline solve; a "done" sentinel once settled. Plain tables only (it carries a PackedVariables snapshot), so it rides storage without a metatable.
 ---@field cc_restart boolean?  Internal flag: set when the cascade advances and re-arms solver_state="ready", so the rebuild keeps the in-flight cascade state instead of dropping it as it would for a fresh edit.
+---@field linf LinfState?  In-flight L∞ (min-max) two-stage solve (manage/pre_solve.lua M.linf_step), only for solver_norm == "linf". nil before the baseline solve; a "done" sentinel once settled. Plain table, storage-safe.
+---@field lf_restart boolean?  Internal flag: set when the L∞ stages re-arm solver_state="ready", so the rebuild keeps the in-flight linf state instead of dropping it as it would for a fresh edit.
+
+---@class LinfState
+---@field phase "minmax"|"capped"|"done"  Which L∞ stage the next finished solve belongs to. "minmax" minimizes the peak violation t; "capped" minimizes total violation under t <= t_min; "done" is the settled sentinel.
+---@field t_limit number?  The target-rescue budget threaded into both stages (so meeting the targets stays tier-1 above the min-max), nil when no rescue fired.
+---@field t_budget number?  The locked peak cap (stage-1 optimum plus margin), threaded into the capped stage. Set when minmax finishes.
 
 ---@class TargetRescueState
 ---@field phase "stage1"|"resolve"|"restore"|"done"  Which rescue stage the next finished solve belongs to. "resolve" is the budget-locked re-solve at ship costs; "restore" is the plain re-solve when stage 1 found no headroom; "done" is the settled sentinel.

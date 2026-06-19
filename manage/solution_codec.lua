@@ -59,6 +59,10 @@ function M.encode(solutions)
             production_lines = solution.production_lines,
             solved_machines = solution.solver_state == "freeze"
                 and solution.quantity_of_machines_required or nil,
+            -- The per-solution norm is a user choice (not solver-derived), so it
+            -- travels with the share string. Omitted when nil; import defaults
+            -- it to "legacy" (manage/save.lua M.import_solution).
+            solver_norm = solution.solver_norm,
         }
     end
     local envelope = {
@@ -116,6 +120,15 @@ function M.decode(s)
                 if type(k) ~= "string" or type(v) ~= "number" then
                     return nil, { "factory-solver-import-error-structure" }
                 end
+            end
+        end
+        -- Optional per-solution norm. Reject an unknown value rather than
+        -- silently falling back, so a corrupt string surfaces instead of
+        -- importing under the wrong solver.
+        if payload.solver_norm ~= nil then
+            local n = payload.solver_norm
+            if n ~= "l1" and n ~= "l2" and n ~= "linf" and n ~= "legacy" and n ~= "cascade" then
+                return nil, { "factory-solver-import-error-structure" }
             end
         end
         migrate_typed_names(payload)

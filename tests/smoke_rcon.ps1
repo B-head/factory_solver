@@ -297,6 +297,24 @@ try {
         $allPass = $false
     }
 
+    # The four user-selectable norms (l1/l2/linf/legacy) over the same 16-Solution
+    # bundle: a CONVERGENCE guard (each norm is a distinct solver with no value
+    # baseline). Non-converging (problem, norm) pairs are pinned as XFAIL in the
+    # Lua check (BUNDLE16_NORM_XFAIL), so the run stays GREEN while a documented
+    # non-convergence stands and goes RED on a fresh one (or an XPASS). SKIPs
+    # without Space Age. Report in write/script-output/bundle16_norms_report.txt.
+    $bundleNorms = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_bundle16_norms'))"
+    if ($bundleNorms -match '^OK') {
+        Write-Host "SMOKE PASS: [bundle16_norms] $bundleNorms"
+    } elseif ($bundleNorms -match '^SKIP:') {
+        Write-Host "SMOKE SKIP: [bundle16_norms] $($bundleNorms -replace '^SKIP:\s*', '')"
+        $skipCount++
+    } else {
+        Write-Host "SMOKE FAIL: [bundle16_norms] $bundleNorms"
+        $allPass = $false
+    }
+
     # Refresh the confirmed drop report on disk (write/script-output/bundle16_drops.txt)
     # so a -KeepRun run leaves an up-to-date copy to regenerate
     # tests/fixtures/bundle16_expected_drops.lua from. Quiet -- the file, not the

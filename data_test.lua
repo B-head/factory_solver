@@ -859,6 +859,24 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
             ingredients = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 2 } },
         },
+        -- Conversion off the catalyst loop to a terminal product, so the smoke
+        -- catalyst_reclassify fixture can target a non-cycle output: the cheat
+        -- then lands on a cycle intermediate (iron-gear-wheel) rather than on the
+        -- constrained material itself. (A constrained produced+consumed material
+        -- no longer gets a free |final_sink|, so constraining a cycle material
+        -- directly stopped producing the cheat the fixture pins -- it just ran the
+        -- loop and dumped instead. See tests/cases/lp_two_pass_reclassify.lua for
+        -- the same shape.) copper-cable is a vanilla item but extend_test stamps
+        -- auto_recycle=false, so it does not clobber its quality-recycling recipe.
+        {
+            type = "recipe",
+            name = "fs-test-catalyst-c",
+            category = "fs-test-catalyst-cat",
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "copper-plate", amount = 1 } },
+            results = { { type = "item", name = "copper-cable", amount = 1 } },
+        },
     })
 end
 

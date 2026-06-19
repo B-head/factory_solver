@@ -12,6 +12,16 @@ local limit_type_to_index = {
     ["equal"] = 3,
 }
 
+-- The user-selectable solver norms, in dropdown order. The retired "cascade"
+-- norm is deliberately absent (it stays dispatchable but UI-hidden); a solution
+-- carrying it shows no selection until the user picks one of these.
+local solver_norm_to_index = {
+    ["l1"] = 1,
+    ["l2"] = 2,
+    ["linf"] = 3,
+    ["legacy"] = 4,
+}
+
 -- Amount quick-set popup (slider + belt/pump buttons). The slider sets a
 -- multiplier (0..10x in 1x steps) applied to a base per-second value held on the
 -- slider's tags: the constraint's current amount, or a belt/pump throughput set
@@ -670,6 +680,27 @@ function handlers.on_remove_constraint_click(event)
     fs_util.dispatch_to_subtree(root, "on_constraint_changed")
 end
 
+---Reflect the selected solution's norm in the dropdown (on build and whenever
+---the selected solution changes), and disable it when no solution is selected.
+---A solution on the hidden "cascade" norm shows no selection.
+---@param event EventDataTrait
+function handlers.on_solver_norm_refresh(event)
+    local elem = event.element
+    local solution = save.get_selected_solution(event.player_index)
+    elem.enabled = solution ~= nil
+    elem.selected_index = (solution and solver_norm_to_index[solution.solver_norm or "legacy"]) or 0
+end
+
+---Apply a norm change to the selected solution and re-arm a solve.
+---@param event EventData.on_gui_selection_state_changed
+function handlers.on_solver_norm_changed(event)
+    local solution = save.get_selected_solution(event.player_index)
+    if not solution then return end
+    local norm = flib_table.find(solver_norm_to_index, event.element.selected_index)
+    if not norm then return end
+    save.update_solver_norm(solution, norm --[[@as SolverNorm]])
+end
+
 fs_util.add_handlers(handlers)
 
 ---@type fs.GuiElemDef
@@ -683,6 +714,25 @@ return {
         style = "factory_solver_right_panel_scroll_pane",
         horizontal_scroll_policy = "never",
         vertical_scroll_policy = "auto",
+        {
+            type = "label",
+            style = "caption_label",
+            caption = { "factory-solver-solver-norm" },
+        },
+        {
+            type = "drop-down",
+            items = {
+                { "factory-solver-solver-norm-l1" },
+                { "factory-solver-solver-norm-l2" },
+                { "factory-solver-solver-norm-linf" },
+                { "factory-solver-solver-norm-legacy" },
+            },
+            handler = {
+                [defines.events.on_gui_selection_state_changed] = handlers.on_solver_norm_changed,
+                on_added = handlers.on_solver_norm_refresh,
+                on_selected_solution_changed = handlers.on_solver_norm_refresh,
+            },
+        },
         {
             type = "label",
             style = "caption_label",

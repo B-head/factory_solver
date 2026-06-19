@@ -5,32 +5,34 @@ local linear_programming = require "solver/linear_programming"
 local substitution = require "solver/substitution"
 local observe_price = require "solver/observe_price"
 local cascade = require "solver/cascade"
+local vk = require "solver/var_key"
 
 local iterate_limit = 600
 
--- The shipped solver pipeline (2026-06-13): the cascade staged rescue
--- (solver/cascade.lua) on an UN-GATED baseline. It approximates the reference
--- solver's 5-tier lexicographic optimum (target >> producible imports >>
--- makeup imports >> consumable dumps >> machines) with lazy budget-locked
--- stages, paid only when the corresponding defeat actually flows. It replaces
--- the observer (soft gate + observe-price): observe-price's cone fabrication
--- is the Vf stage's job now (see project_vp_rescue / project_solver_names).
--- Flip to false to roll back to the observer below (which itself rolls back to
--- the legacy hard gate via observe_price_enabled). cascade_enabled wins: when
--- true, neither observe-price nor the two-pass runs.
-local cascade_enabled = true
-
--- Observer rollback (only consulted when cascade_enabled is false). Flip to
--- false to fall straight back to the legacy hard reachability gate + two-pass
--- diagnose (immediate rollback). When true, the gate is replaced by a SOFT
--- gate -- reachable shortages priced at elastic_cost * soft_gate_k so the
--- chain still wins -- and the unreachable self-sustaining catalyst cycles are
--- repriced by the observe-price fixed point below.
-local observe_price_enabled = true
--- The soft-gate multiplier. Must stay below target_cost/elastic_cost (= 2^10) so
--- a reachable shortage never undercuts target relaxation; 256 is the measured
--- minimum that clears every headless fixture (see project_tilted_cost memo).
-local soft_gate_k = 256
+-- The shipped solver dispatch (2026-06-20) is per-solution: solution.solver_norm
+-- picks how the import/dump imbalance is balanced. All four user-selectable norms
+-- run on the SAME un-gated baseline build and differ only in problem shaping:
+--   "l1"     concentrate -- the plain ungated baseline (linear elastic_cost), one
+--            solve. The L1 norm: the imbalance piles onto few channels.
+--   "l2"     balanced -- the baseline with the violation elastics repriced to a
+--            pure quadratic (create_problem's violation_quad), one (QP) solve.
+--            The L2 norm: the imbalance spreads evenly.
+--   "linf"   leveled -- a two-stage min-max (M.linf_step): minimize the peak
+--            violation, then minimize total under that cap. The L-infinity norm.
+--   "legacy" the old hard reachability gate + two-pass diagnose (the rollback
+--            path, kept as a conservative default).
+-- "cascade" is the retired staged rescue (solver/cascade.lua), kept dispatchable
+-- but NOT offered in the UI, so its fixtures keep validating it. The target
+-- rescue (M.target_rescue_step) runs in front of every norm: targets are tier-1.
+local VIOLATION_QUAD = 2 -- L2 norm curvature (research QUAD0; project_quad_escape_observation)
+-- The L2 build's recipe/bridge tier. Tiny so the QP's build-vs-import crossover
+-- (quad*x = recipe cost) sits at a negligible x -- otherwise L2 leaks a small
+-- buildable import per intermediate. 2^-20 is the cascade's face-regularizer
+-- value (verified to drive the leak to ~0 on a buildable chain).
+local L2_RECIPE_EPS = 2 ^ -20
+-- L-infinity capped-stage peak budget: relative slack for the IPM's relative
+-- residual plus an absolute floor when the peak is 0 (the target-rescue values).
+local linf_budget_rel, linf_budget_abs = 1e-3, 1e-6
 
 -- Lexicographic target rescue (M.target_rescue_step). The single weighted LP
 -- trades the target against violations at the finite exchange rate
@@ -114,21 +116,27 @@ function M.forwerd_solve(force_data, solution)
         end
         solution.tr_restart = nil
 
+        local norm = solution.solver_norm or "legacy"
         local options = nil
         -- The cascade build in flight this tick (nil = the un-gated baseline).
         -- A cascade build is shaped after create_problem and skips the
-        -- substitution fold (its objective is overwritten).
+        -- substitution fold (its objective is overwritten). Set only on the
+        -- retained "cascade" norm.
         local cc_build = nil
-        if cascade_enabled then
-            -- Shipped path: un-gated baseline, then the cascade staged rescue
-            -- (M.cascade_step) owns every later build. observe-price and the
-            -- two-pass are not run; their state is dropped. A fresh "ready"
+        -- The L-infinity stage shaping this build (nil unless norm == "linf").
+        local linf_stage = nil
+        -- Whether to apply the L2 cost shaping after construction (norm == "l2").
+        local apply_l2 = false
+        if norm == "cascade" then
+            -- Retained (UI-hidden) staged rescue: un-gated baseline, then the
+            -- cascade (M.cascade_step) owns every later build. A fresh "ready"
             -- drops in-flight cascade state; the loop's OWN restart keeps it.
             if not solution.cc_restart then solution.cascade = nil end
             solution.cc_restart = nil
             solution.observe_price = nil
             solution.forced_imports = nil
             solution.reclassify_pending = nil
+            solution.linf = nil
 
             local cc = solution.cascade
             if cc and cc.build then
@@ -139,43 +147,78 @@ function M.forwerd_solve(force_data, solution)
                 -- cascade's stages, not a gate, do the rescue work.
                 options = { reachability_gating = false }
             end
-        elseif observe_price_enabled then
-            -- Shipped path: replace the hard gate with the soft gate and apply the
-            -- current observe-price phase's per-material shortage overrides. A
-            -- fresh "ready" (edit / migration / new solution) drops in-flight
-            -- observe-price state so the next solve restarts from a clean
-            -- baseline; the loop's OWN restarts set op_restart to keep their plan.
-            if not solution.op_restart then solution.observe_price = nil end
-            solution.op_restart = nil
-            solution.reclassify_pending = nil
-
-            options = { reachability_gating = false, reachability_soft_gate_k = soft_gate_k }
-            -- forced_imports here carries the two-pass diagnose's cheap-import set
-            -- (the avoidable export-feasible cheats observe-price does NOT
-            -- fabricate -- the running-on-imported-input cycles where import is
-            -- correct). It is computed once after the baseline solve and reapplied
-            -- on every rebuild; observe-price's fabricate targets get
-            -- shortage_cost_overrides instead.
-            local op = solution.observe_price
-            local forced = op and op.imports or nil
-            if op and op.plan then
-                if op.phase == "observe" then
-                    options.shortage_cost_overrides =
-                        observe_price.observe_overrides(op.plan, op.plan.groups[op.group_index])
-                elseif op.phase == "verify" then
-                    options.shortage_cost_overrides = observe_price.verify_overrides(op.plan)
-                end
-            end
-            solution.forced_imports = forced
         else
-            -- Legacy rollback: hard reachability gate + two-pass diagnose. A fresh
-            -- "ready" drops forced imports left from a previous reclassify pass;
-            -- the two-pass restart sets reclassify_pending to keep its seeds.
-            if not solution.reclassify_pending then
-                solution.forced_imports = nil
-            end
-            solution.reclassify_pending = nil
+            -- The four shipping norms share the un-gated baseline; clear the
+            -- retained loops' in-flight state so a switch INTO one of these
+            -- starts clean.
+            solution.cascade = nil
+            solution.cc_restart = nil
             solution.observe_price = nil
+            solution.op_restart = nil
+
+            -- l1 / l2 / linf are FULLY un-gated: every create_problem gate and
+            -- cycle-entry heuristic is explicitly OFF (only legacy turns them on).
+            -- Stated in full so the dispatch reads the whole option set, not the
+            -- create_problem defaults.
+            if norm == "l1" then
+                solution.forced_imports = nil
+                solution.reclassify_pending = nil
+                solution.linf = nil
+                options = {
+                    reachability_gating = false,
+                    deficit_seeding = false,
+                    catalyst_closure = false,
+                    surplus_sink_gating = false,
+                }
+            elseif norm == "l2" then
+                solution.forced_imports = nil
+                solution.reclassify_pending = nil
+                solution.linf = nil
+                -- L2: un-gated, with a TINY recipe tier so the QP build-vs-import
+                -- crossover leak is negligible, then shaped by shape_l2 below.
+                options = {
+                    reachability_gating = false,
+                    deficit_seeding = false,
+                    catalyst_closure = false,
+                    surplus_sink_gating = false,
+                    recipe_epsilon = L2_RECIPE_EPS,
+                }
+                apply_l2 = true
+            elseif norm == "linf" then
+                solution.forced_imports = nil
+                solution.reclassify_pending = nil
+                -- A fresh "ready" drops the in-flight L-infinity state; the
+                -- stage's OWN restart (lf_restart) keeps it so the rebuild stays
+                -- on the same stage.
+                if not solution.lf_restart then solution.linf = nil end
+                solution.lf_restart = nil
+                options = {
+                    reachability_gating = false,
+                    deficit_seeding = false,
+                    catalyst_closure = false,
+                    surplus_sink_gating = false,
+                }
+                linf_stage = solution.linf and solution.linf.phase or nil
+            else
+                -- "legacy": the original gated solver -- the hard reachability
+                -- gate plus deficit / catalyst cycle-entry seeding and the
+                -- two-pass diagnose. surplus_sink_gating stays OFF: it breaks IPM
+                -- convergence on the Fulgora recycling problems (and legacy is the
+                -- default norm), matching the create_problem doc that ships it off.
+                -- A fresh "ready" drops forced imports left from a previous
+                -- reclassify pass; the two-pass restart sets reclassify_pending.
+                if not solution.reclassify_pending then
+                    solution.forced_imports = nil
+                end
+                solution.reclassify_pending = nil
+                solution.linf = nil
+                options = {
+                    reachability_gating = true,
+                    deficit_seeding = true,
+                    catalyst_closure = true,
+                    surplus_sink_gating = false,
+                }
+            end
         end
 
         -- Target-rescue build shaping (config-independent; see
@@ -209,6 +252,17 @@ function M.forwerd_solve(force_data, solution)
         -- and synthetic-demand rows. See solver/cascade.lua M.shape_problem.
         if cc_build then
             cascade.shape_problem(solution.problem, cc_build)
+        elseif apply_l2 then
+            -- L2 ("balanced"): violation elastics -> pure quadratic, ports free.
+            create_problem.shape_l2(solution.problem, VIOLATION_QUAD)
+        elseif linf_stage == "minmax" then
+            -- L-infinity stage 1: re-cost to min-max (add the peak primal + cap
+            -- rows). See create_problem.shape_minmax / M.linf_step.
+            create_problem.shape_minmax(solution.problem, "minmax", nil)
+        elseif linf_stage == "capped" then
+            -- L-infinity stage 2: cap the peak at the locked t_budget and keep
+            -- the build's normal L1 costs.
+            create_problem.shape_minmax(solution.problem, "capped", solution.linf.t_budget)
         end
         -- Mirror the inactive-recipe set onto the solution so save / UI lookups
         -- (which see solution, not problem) can gray out isolated lines without
@@ -243,7 +297,19 @@ function M.forwerd_solve(force_data, solution)
         -- ensure_canonical on the full problem. The heavy stage / final / polish
         -- builds still fold (the 3.5x speedup is theirs; their objective is the
         -- machine count, not a vertex-read verdict).
-        local fold = substitution_enabled and not (cc_build and cascade.is_cold(cc_build))
+        -- The L-infinity shaped builds are not folded: shape_minmax adds the
+        -- peak primal and one cap row per violation after construction, so the
+        -- violation columns are multi-row and the simple doubleton fold would
+        -- not match the post-shape structure cleanly. linf is opt-in and only
+        -- two solves, so skipping the fold costs little.
+        -- The L2 / L-infinity shaped builds are not folded: shape_l2 puts a
+        -- quadratic on the (singleton) violation escapes and shape_minmax adds
+        -- cap rows, so the doubleton fold (which folds singleton escapes onto a
+        -- recipe) would drop the quad / not match the post-shape structure.
+        local fold = substitution_enabled
+            and not (cc_build and cascade.is_cold(cc_build))
+            and linf_stage == nil
+            and not apply_l2
         if fold then
             local reduced, reconstruction = substitution.reduce(solution.problem)
             solution.problem.reduced = reduced
@@ -295,29 +361,27 @@ function M.forwerd_solve(force_data, solution)
         return
     end
 
-    if cascade_enabled then
-        -- The cascade staged rescue (the shipped replacement for the observer).
-        -- Each stage is a full incremental solve; advancing it sets
-        -- solver_state="ready" + cc_restart so the rebuild above stays on the
-        -- same cascade build. Driven on ANY terminal state, not just "finished":
-        -- a stage CAN diverge (the deletion-final / staged-relay fallbacks exist
-        -- for exactly that), so cascade_step must run to advance the fallback
-        -- chain rather than stall in a terminal non-"finished" state. See
-        -- M.cascade_step.
+    local norm = solution.solver_norm or "legacy"
+    if norm == "cascade" then
+        -- The retained (UI-hidden) cascade staged rescue. Each stage is a full
+        -- incremental solve; advancing it sets solver_state="ready" + cc_restart
+        -- so the rebuild above stays on the same cascade build. Driven on ANY
+        -- terminal state, not just "finished": a stage CAN diverge (the
+        -- deletion-final / staged-relay fallbacks exist for exactly that), so
+        -- cascade_step must run to advance the fallback chain rather than stall.
         local st = solution.solver_state
         if st ~= "ready" and st ~= "calculating" then
             M.cascade_step(solution, get_normalized())
         end
-    elseif observe_price_enabled then
-        -- observe-price fixed point (the observer's replacement for the
-        -- two-pass). Each phase below is a full incremental solve; advancing it
-        -- sets solver_state="ready" + op_restart so the rebuild above stays on
-        -- the same plan. See M.observe_price_step.
+    elseif norm == "linf" then
+        -- L-infinity two-stage min-max. Each stage is a full incremental solve;
+        -- advancing it sets solver_state="ready" + lf_restart so the rebuild
+        -- above stays on the same stage. See M.linf_step.
         if solution.solver_state == "finished" then
-            M.observe_price_step(solution, get_normalized())
+            M.linf_step(solution)
         end
-    else
-        -- Legacy two-pass diagnose-then-reclassify (rollback). When the FIRST pass
+    elseif norm == "legacy" then
+        -- Legacy two-pass diagnose-then-reclassify. When the FIRST pass
         -- converges, re-seed every avoidable export-feasible cheat as a forced
         -- import and restart once, warm-started. forced_imports is nil through
         -- pass 1 so this fires exactly once per solve cycle.
@@ -336,6 +400,8 @@ function M.forwerd_solve(force_data, solution)
             end
         end
     end
+    -- "l1" / "l2": the baseline (plus the target rescue above) is the answer; no
+    -- downstream loop.
 end
 
 ---Advance the lexicographic target rescue one step after a finished solve.
@@ -392,6 +458,48 @@ function M.target_rescue_step(solution)
     -- stands and the downstream loops may proceed on it this tick.
     rescue.phase = "done"
     return false
+end
+
+---Advance the L-infinity ("leveled") two-stage min-max one step after a finished
+---solve (solver_norm == "linf"). The target rescue settles first (targets are
+---tier-1); then:
+---  baseline finished -> arm "minmax" (re-solve under create_problem.shape_minmax
+---    "minmax", which minimizes the peak violation t). The settled target budget
+---    threads in so the min-max keeps the targets met.
+---  "minmax" finished -> read the least peak t_min, lock t_budget = t_min + margin,
+---    arm "capped" (re-solve minimizing total violation under t <= t_budget).
+---  "capped" finished -> the leveled answer stands.
+---Mutates solution.linf and, when another solve is needed, re-arms
+---solver_state="ready" with lf_restart set so the rebuild keeps the stage.
+---@param solution Solution
+function M.linf_step(solution)
+    if not solution.raw_variables or not solution.problem then return end
+    local linf = solution.linf
+    if linf and linf.phase == "done" then return end
+
+    local function restart()
+        solution.lf_restart = true
+        solution.solver_state = "ready"
+        solution.solver_iteration = nil
+    end
+
+    if not linf then
+        -- The baseline (target-rescued) just finished. Arm the min-max stage,
+        -- threading the settled target budget (nil when no rescue fired).
+        local t_limit = solution.target_rescue and solution.target_rescue.budget or nil
+        solution.linf = { phase = "minmax", t_limit = t_limit }
+        restart()
+    elseif linf.phase == "minmax" then
+        -- The peak primal's value is the least achievable peak violation; lock it
+        -- (with the IPM relative-residual margin) and re-solve under the cap.
+        local t_min = math.abs(solution.raw_variables.x[vk.linf_peak()] or 0)
+        linf.t_budget = t_min * (1 + linf_budget_rel) + linf_budget_abs
+        linf.phase = "capped"
+        restart()
+    else
+        -- "capped" just finished: the leveled solution stands.
+        linf.phase = "done"
+    end
 end
 
 ---Advance the cascade staged rescue one step after a terminal solve. On the

@@ -1030,22 +1030,6 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             problem:add_objective(elastic_name, surplus_cost, false, "surplus_sink", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, -1)
         end
-        -- A user-pinned material ships through a free |final_sink| even though
-        -- it is also consumed in-set: it is a requested output, not waste. The
-        -- terminal-product loop below only reaches materials that are never an
-        -- ingredient, so without this a pinned intermediate would have nowhere
-        -- to leave except the penalised |surplus_sink| and the solution would
-        -- make the pinned amount only to dump all of it back. A bridge-target
-        -- range variable is excluded for the same reason it gets no surplus_sink
-        -- above: it is a synthetic temperature relabelling, not a fluid that
-        -- physically leaves the factory, so letting it final_sink would drain a
-        -- range-constrained chain straight out instead of through its consumer.
-        if constrained_materials[constraint_name]
-            and not bridge_target_variables[constraint_name] then
-            local final_name = vk.final_sink(constraint_name)
-            problem:add_objective(final_name, slack_cost, false, "final_sink", constraint_name)
-            problem:add_subject_term(final_name, constraint_name, -1)
-        end
         -- Cycle entry points identified by find_deficit_materials get a
         -- |initial_source| at source_cost: they are the natural external
         -- inputs of the cycle (think cu/normal + ir/normal in a quality
@@ -1108,7 +1092,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- Research probe (import_quad, QP route): convex curvature on this
             -- import column so its marginal cost rises with import quantity (the
             -- artifact-free "curve"; no cap row, so no IPM-convergence tax). The
-            -- crossover where crafting beats importing self-selects per material.
+            -- L2 norm uses M.shape_l2 (a post-pass) instead, not this option.
             if opt_import_quad and opt_import_quad ~= 0 then
                 problem:set_quad(elastic_name, opt_import_quad)
             end
@@ -1265,6 +1249,106 @@ function M.diagnose_avoidable_cheats(x, primals, production_lines, epsilon)
         end
     end
     return avoidable
+end
+
+---Shape the L2 ("balanced") norm onto a freshly-built ungated baseline problem
+---(solver_norm == "l2"; see manage/pre_solve.lua). This is exactly the research
+---QP cost structure (tests/research/probe_amount_dump.lua build_qp): the two
+---violation elastics (|shortage_source| import + |surplus_sink| dump) drop to a
+---pure diagonal convex quadratic (linear cost 0, set_quad = quad), and the
+---legitimate ports (|initial_source| / |final_sink|) drop to cost 0. The optimum
+---then minimizes the L2 norm of the import/dump imbalance, spreading it evenly
+---across equivalent channels instead of L1's concentrate-into-one.
+---
+---Two things make this build the chain instead of cheating by importing what it
+---could make (verified on a buildable chain + seed_143):
+---  * the ports are FREE, so building (a recipe consuming a free raw) is cheaper
+---    than the quadratic import -- with the ports left at source_cost the import
+---    undercut the build and L2 leaked buildable imports;
+---  * the L2 build uses a TINY recipe_epsilon (manage/pre_solve.lua), so the
+---    build-vs-import crossover (quad*x = recipe cost) sits at a negligible x.
+---Targets (kinds "elastic" / "headroom") are left at their target_cost tier so
+---they are still met first. Flips problem.has_quad (the QP Newton path).
+---@param problem Problem  A freshly built ungated baseline.
+---@param quad number  The diagonal quadratic coefficient on each violation (research QUAD0 = 2).
+function M.shape_l2(problem, quad)
+    for key, p in pairs(problem.primals) do
+        if p.kind == "shortage_source" or p.kind == "surplus_sink" then
+            p.cost = 0
+            problem:set_quad(key, quad)
+        elseif p.kind == "initial_source" or p.kind == "final_sink" then
+            p.cost = 0
+        end
+    end
+end
+
+---Shape an L∞ ("leveled" / min-max) stage onto a freshly-built ungated baseline
+---problem (the solver_norm == "linf" path; see manage/pre_solve.lua M.linf_step).
+---Two lexicographic stages over the SAME violation elastics the L1 build already
+---priced (|shortage_source| imports + |surplus_sink| dumps):
+---
+---  "minmax": minimize the PEAK violation. A single peak primal t is added with
+---            cost 1 and pulled up to the largest violation by one cap row per
+---            violation column (t - x_v >= 0 => t >= x_v). Every other column
+---            drops to a tiny uniform epsilon floor (recipe_epsilon), so t
+---            dominates the objective (min peak) while the floor keeps the face
+---            bounded -- no free import/dump wash through the zero-cost ports.
+---            The solve's t value is the least achievable peak, t_min.
+---  "capped": LEAVE the build's normal L1 elastic_cost in place (t gets cost 0)
+---            and add t <= t_cap (t_cap = t_min + margin). Minimizing then picks,
+---            among all solutions whose peak stays under the cap, the least-total
+---            (and machine-lean via the recipe tier) one -- the leveled answer.
+---
+---The target budget (tier-1) is threaded separately as create_problem's
+---target_budget option on both stage builds, so targets are still met first.
+---@param problem Problem  A freshly built ungated baseline (linear elastic_cost).
+---@param stage "minmax"|"capped"
+---@param t_cap number?  The locked peak budget; required (and only used) for "capped".
+function M.shape_minmax(problem, stage, t_cap)
+    local peak = vk.linf_peak()
+    -- Collect the violation columns BEFORE adding any new primal (the cap-row
+    -- slacks and the peak would otherwise show up in this scan).
+    local violations = {}
+    for key, p in pairs(problem.primals) do
+        if p.kind == "shortage_source" or p.kind == "surplus_sink" then
+            violations[#violations + 1] = key
+        end
+    end
+
+    problem:add_objective(peak, stage == "minmax" and 1 or 0, false, "linf_peak")
+    for _, v in ipairs(violations) do
+        -- t - x_v >= 0  (=> t >= x_v): a >= row with the peak at +1, the
+        -- violation at -1. The row's negative slack carries the gap.
+        local row = vk.linf_cap(v)
+        problem:add_lower_limit_constraint(row, 0)
+        problem:add_subject_term(peak, row, 1)
+        problem:add_subject_term(v, row, -1)
+    end
+
+    if stage == "minmax" then
+        -- Re-cost to lexicographic targets >> peak >> flows. t (cost 1) governs
+        -- the peak; the target elastics (kinds "elastic" / "headroom") keep their
+        -- built target_cost tier so meeting the targets still dominates t; every
+        -- other non-slack column drops to a uniform recipe_epsilon floor, which
+        -- bounds the face and resolves the degenerate wash toward minimal flow
+        -- without competing with t.
+        for key, p in pairs(problem.primals) do
+            if key == peak then
+                -- keep cost 1
+            elseif p.kind == "elastic" or p.kind == "headroom" then
+                -- target relaxation: leave the build's target_cost tier intact.
+            elseif p.kind == "slack" then
+                p.cost = 0
+            else
+                p.cost = recipe_epsilon
+            end
+        end
+    else
+        -- Capped: keep the build's normal L1 costs; lock the peak under t_cap.
+        local budget = vk.linf_cap_budget()
+        problem:add_upper_limit_constraint(budget, t_cap or 0)
+        problem:add_subject_term(peak, budget, 1)
+    end
 end
 
 -- Cost tiers exported so solver/observe_price.lua can compute its ceiling

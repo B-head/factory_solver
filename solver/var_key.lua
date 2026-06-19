@@ -38,6 +38,12 @@ local TARGET_BUDGET = "|target_budget|"
 local CASCADE_BUDGET = "|cascade_budget|"
 local CASCADE_PROBE = "|cascade_probe|"
 local CASCADE_DEMAND = "|cascade_demand|"
+-- L∞ (min-max) min-max rows (see create_problem.shape_minmax / pre_solve
+-- M.linf_step): the single peak primal t, one cap dual per violation column
+-- (t >= that violation), and the budget dual that locks t <= t_min in stage 2.
+local LINF_PEAK = "|linf_peak|"
+local LINF_CAP = "|linf_cap|"
+local LINF_CAP_BUDGET = "|linf_cap_budget|"
 -- A bare |elastic| sits on a |limit| dual, so the composite a constraint
 -- relaxation carries is |elastic||limit|<material>.
 local ELASTIC_LIMIT = ELASTIC .. LIMIT
@@ -119,6 +125,21 @@ function M.cascade_probe(material) return CASCADE_PROBE .. material end
 ---@param material string base material variable key
 ---@return string
 function M.cascade_demand(material) return CASCADE_DEMAND .. material end
+
+---The single peak primal t the L∞ min-max minimizes (it is pulled up to the
+---largest violation by the per-column cap rows).
+---@return string
+function M.linf_peak() return LINF_PEAK end
+
+---The dual row enforcing t >= one violation column (t - x_violation >= 0).
+---One per priced violation; keyed by that column's key so they stay distinct.
+---@param column string the violation primal key the cap is over
+---@return string
+function M.linf_cap(column) return LINF_CAP .. column end
+
+---The single dual row locking t <= t_min in the L∞ capped stage.
+---@return string
+function M.linf_cap_budget() return LINF_CAP_BUDGET end
 
 ---@param dual_variable string
 ---@return string

@@ -329,6 +329,10 @@ fixtures.migration_legacy_shape = {
         }
         flib_table.insert(solution.constraints, iron_constraint)
 
+        -- A legacy save predates the per-solution norm field; clear it so the
+        -- migration's backfill (asserted below) is genuinely exercised.
+        solution.solver_norm = nil
+
         -- Run the exact migration control.lua runs on_configuration_changed.
         -- Force-scoped, no player -- the whole reason it is reachable headless.
         save.reinit_force_data(FORCE_INDEX)
@@ -358,6 +362,8 @@ fixtures.migration_legacy_shape = {
             "scalar temperature not lifted to a [T,T] range")
         assert(solution.problem == nil and solution.raw_variables == nil,
             "cached problem / warm-start not discarded by migration")
+        assert(solution.solver_norm == "legacy",
+            "solver_norm not backfilled to the default: " .. tostring(solution.solver_norm))
     end,
 }
 
@@ -984,10 +990,20 @@ fixtures.catalyst_reclassify = {
     requires = {},
     ---@param solution Solution
     build = function(solution)
-        assert(prototypes.recipe["fs-test-catalyst-a"] and prototypes.recipe["fs-test-catalyst-b"],
-            "fs-test-catalyst-a/-b recipes missing -- data_test.lua not loaded?")
+        -- This fixture validates the (now UI-hidden) cascade staged rescue, so
+        -- pin its dispatchable norm; the default "legacy" runs no cascade.
+        solution.solver_norm = "cascade"
+        assert(prototypes.recipe["fs-test-catalyst-a"] and prototypes.recipe["fs-test-catalyst-b"]
+            and prototypes.recipe["fs-test-catalyst-c"],
+            "fs-test-catalyst-a/-b/-c recipes missing -- data_test.lua not loaded?")
 
-        for _, recipe in ipairs({ "fs-test-catalyst-a", "fs-test-catalyst-b" }) do
+        -- The catalyst loop (a + b) plus the conversion c that ships a cycle
+        -- material out as a terminal product (copper-cable). The target is the
+        -- terminal, so the cheat lands on a cycle INTERMEDIATE (iron-gear-wheel),
+        -- which a constrained-material no-final_sink change does not suppress --
+        -- constraining a cycle material directly stopped cheating (it ran the loop
+        -- and dumped instead). See tests/cases/lp_two_pass_reclassify.lua.
+        for _, recipe in ipairs({ "fs-test-catalyst-a", "fs-test-catalyst-b", "fs-test-catalyst-c" }) do
             ---@type ProductionLine
             local line = {
                 recipe_typed_name = tn.create_typed_name("recipe", recipe),
@@ -998,13 +1014,14 @@ fixtures.catalyst_reclassify = {
             flib_table.insert(solution.production_lines, line)
         end
 
-        -- Demand exactly 1 copper-plate. It is trapped in the cycle (no seed) and
-        -- the real chain is costlier than the shortage penalty, so the baseline
-        -- cheats and the cascade's staged rescue has an import to drive to zero.
+        -- Demand 1 copper-cable (the terminal). Making it needs copper-plate from
+        -- the cycle, whose only entry burns 2000 iron-plate -- costlier than the
+        -- shortage penalty -- so the baseline fabricates a cycle material and the
+        -- cascade's staged rescue has an import to drive to zero.
         ---@type Constraint
         local constraint = {
             type = "item",
-            name = "copper-plate",
+            name = "copper-cable",
             quality = "normal",
             limit_type = "equal",
             limit_amount_per_second = 1,
@@ -1030,6 +1047,8 @@ fixtures.cascade_vp = {
     requires = {},
     ---@param solution Solution
     build = function(solution)
+        -- Validates the (now UI-hidden) cascade Vp stage; pin its norm.
+        solution.solver_norm = "cascade"
         assert(prototypes.recipe["fs-test-vp-make"] and prototypes.recipe["fs-test-vp-use"],
             "fs-test-vp-make/-use recipes missing -- data_test.lua not loaded?")
 
@@ -1072,6 +1091,8 @@ fixtures.cascade_vc = {
     requires = {},
     ---@param solution Solution
     build = function(solution)
+        -- Validates the (now UI-hidden) cascade Vc stage; pin its norm.
+        solution.solver_norm = "cascade"
         assert(prototypes.recipe["fs-test-vc-make"] and prototypes.recipe["fs-test-vc-useb"],
             "fs-test-vc-make/-useb recipes missing -- data_test.lua not loaded?")
 
@@ -2919,6 +2940,64 @@ local BUNDLE16_KNOWN_REGRESSIONS = {}
 -- cascade. Its baseline is now finished, so it is compared like every other.)
 local BUNDLE16_SKIP = {}
 
+-- The four user-selectable shipping norms (manage/pre_solve.lua dispatch). The
+-- cascade is checked by check_bundle16_v060 against the 0.6.0 baseline; these four
+-- run the SAME tier-sum comparison against that baseline -- only the solver norm
+-- changes (check_bundle16_norms).
+local BUNDLE16_NORMS = { "l1", "l2", "linf", "legacy" }
+-- (norm -> problem-name -> true): the bundle16 problems a norm does NOT reproduce
+-- the 0.6.0 (cascade) baseline on -- the EXPECTED divergences (XFAIL), since each
+-- norm is a different solver. Same role as BUNDLE16_KNOWN_REGRESSIONS: a pinned
+-- pair that now matches is an XPASS (remove it); an unpinned pair that diverges is
+-- a fresh regression. Discovered empirically (bundle16_norms_report.txt).
+-- Discovered empirically (2026-06-20, SA mod set): the (norm, problem) pairs that
+-- diverge from the 0.6.0 cascade baseline. l2 diverges on every problem with
+-- violations (the L2 spread is a different solution everywhere); l1/linf/legacy
+-- diverge only where their norm changes the import/dump split or (linf/Fusion)
+-- fails to converge. Problems absent here reproduce the cascade baseline (no
+-- violations to redistribute), so they stay MATCH.
+-- Discovered empirically (2026-06-20, SA mod set). After the L2 fix (shape_l2 +
+-- free ports + tiny recipe tier) every norm reproduces the cascade baseline
+-- EXCEPT on the few problems with genuine import/dump distribution freedom
+-- (Begining, the two Fulgora recycling problems) -- where the norm legitimately
+-- picks a different split -- plus linf/Fusion (does not converge) and
+-- linf/Gleba circuit. 51 of 64 pairs MATCH.
+-- Discovered empirically (2026-06-20, SA mod set) for the shipped gating:
+-- l1/l2/linf are FULLY un-gated (reachability / surplus_sink / deficit_seeding /
+-- catalyst_closure all off), legacy has the reachability gate + deficit / catalyst
+-- seeding (surplus_sink_gating off everywhere -- it breaks Fulgora convergence).
+-- Un-gated norms diverge from the cascade baseline on the recycling-heavy problems
+-- (Asteroid / Quality loop / SpacePlatform / Gleba circuit) and the Fulgora /
+-- Begining distribution-freedom problems; all are finished (valid alternative
+-- solutions) except linf/Fusion (does not converge -- budget-lock face). 43/64
+-- MATCH the baseline.
+local BUNDLE16_NORM_XFAIL = {
+    l1 = {
+        ["Asteroid up cycleing"] = true,
+        ["Fulgora bottom up"] = true,
+        ["Fulgora top down"] = true,
+        ["Quality loop"] = true,
+    },
+    l2 = {
+        ["Asteroid up cycleing"] = true,
+        ["Begining"] = true, -- L2's even spread differs from cascade even with the chain run
+        ["Fulgora bottom up"] = true,
+        ["Fulgora top down"] = true,
+        ["Quality loop"] = true,
+        ["SpacePlatform"] = true,
+    },
+    linf = {
+        ["Asteroid up cycleing"] = true,
+        ["Fulgora bottom up"] = true,
+        ["Fulgora top down"] = true,
+        ["Fusion"] = true, -- does not converge (budget-lock face)
+        ["Gleba circuit"] = true,
+        ["Quality loop"] = true,
+        ["SpacePlatform"] = true,
+    },
+    legacy = {},
+}
+
 ---RCON entry point: REGRESSION GUARD comparing the DEFAULT SHIPPING solver (the
 ---real pre_solve.forwerd_solve pump, driven synchronously to terminal, on each
 ---Solution's ORIGINAL constraints) against the well-posed exact-constraint
@@ -2995,6 +3074,11 @@ function M.check_bundle16_v060_impl()
         for n in pairs(solutions) do solutions[n] = nil end
         local name = save.import_solution(solutions, p)
         local solution = assert(solutions[name])
+        -- The 0.6.0 baseline (bundle16_v060) was generated with the staged
+        -- cascade as the shipping solver. The cascade is now UI-hidden but kept
+        -- dispatchable under the "cascade" norm; pin it so this regression guard
+        -- keeps comparing like with like.
+        solution.solver_norm = "cascade"
         solution.solver_state = "ready"
         local steps = 0
         while solution.solver_state == "ready" or solution.solver_state == "calculating" do
@@ -3055,6 +3139,125 @@ function M.check_bundle16_v060_impl()
         matched_n, diverged_n, skipped)
 end
 
+---RCON entry point: runs the SAME comparison as check_bundle16_v060 -- each
+---bundle16 problem's tier sums (T / import / surplus / machines) vs the 0.6.0
+---baseline, generous REL for degenerate-vertex wobble -- but driven under each of
+---the four user-selectable norms (BUNDLE16_NORMS) instead of the cascade. Only the
+---solver changes. Because each norm is a different solver, most problems with
+---violations diverge from the cascade baseline; those (norm, problem) pairs are
+---pinned in BUNDLE16_NORM_XFAIL as expected (XFAIL). Verdict logic mirrors
+---check_bundle16_v060 / BUNDLE16_KNOWN_REGRESSIONS:
+---  * not pinned + matches  -> MATCH;
+---  * pinned + still diverges -> XFAIL (keeps the run GREEN);
+---  * pinned + now matches  -> XPASS -> FAIL (remove it);
+---  * not pinned + diverges -> a fresh divergence -> FAIL.
+---Per-pair report in script-output/bundle16_norms_report.txt (-KeepRun). SKIPs
+---without Space Age.
+---@return string
+function M.check_bundle16_norms()
+    if not script.active_mods["space-age"] then
+        return "SKIP: bundle16 needs Space Age (most recipes are SA-only)"
+    end
+    local ok, result = pcall(M.check_bundle16_norms_impl)
+    if not ok then return "ERROR: bundle16 norms raised: " .. tostring(result) end
+    return result
+end
+
+---@return string
+function M.check_bundle16_norms_impl()
+    save.init_force_data(FORCE_INDEX)
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data.solutions
+    local payloads = assert(solution_codec.decode(bundle16_shared), "decode failed")
+
+    local saved_bonuses = force_data.research_bonuses
+    force_data.research_bonuses = M.bundle16_research_bonuses()
+
+    -- IDENTICAL tier extraction and tolerance to check_bundle16_v060.
+    local function tiers(solution)
+        local out = { T = 0, import = 0, surplus = 0, machines = 0 }
+        local primals = solution.problem and solution.problem.primals or {}
+        local x = solution.raw_variables and solution.raw_variables.x or {}
+        for key, p in pairs(primals) do
+            local v = math.abs(x[key] or 0)
+            if p.kind == "elastic" or p.kind == "headroom" then out.T = out.T + v
+            elseif p.kind == "shortage_source" or p.kind == "initial_source" then out.import = out.import + v
+            elseif p.kind == "surplus_sink" then out.surplus = out.surplus + v
+            elseif p.kind == "recipe" then out.machines = out.machines + v end
+        end
+        return out
+    end
+    local ABS, REL = 1e-3, 2e-2
+    local function near(a, b)
+        return math.abs(a - b) <= math.max(ABS, REL * math.max(math.abs(a), math.abs(b)))
+    end
+
+    local report, fails = {}, {}
+    local matched_n, xfail_n, skipped = 0, 0, 0
+    for _, norm in ipairs(BUNDLE16_NORMS) do
+        local expect = BUNDLE16_NORM_XFAIL[norm] or {}
+        for _, p in ipairs(payloads) do
+            local v060 = bundle16_v060[p.name]
+
+            for n in pairs(solutions) do solutions[n] = nil end
+            local name = save.import_solution(solutions, p)
+            local solution = assert(solutions[name])
+            solution.solver_norm = norm
+            solution.solver_state = "ready"
+            local steps = 0
+            while solution.solver_state == "ready" or solution.solver_state == "calculating" do
+                pre_solve.forwerd_solve(force_data, solution)
+                steps = steps + 1
+                if steps > 5000 then break end
+            end
+
+            local cur = tiers(solution)
+            if BUNDLE16_SKIP[p.name] or not v060 or v060.state ~= "finished" then
+                skipped = skipped + 1
+                report[#report + 1] = string.format("[%s/%s] SKIP (state=%s)",
+                    norm, p.name, tostring(solution.solver_state))
+                goto continue
+            end
+
+            local diff = {}
+            for _, f in ipairs({ "T", "import", "surplus", "machines" }) do
+                if not near(cur[f], v060[f]) then diff[#diff + 1] = f end
+            end
+            local matched = (solution.solver_state == "finished" and #diff == 0)
+            local expected = expect[p.name] == true
+            local verdict
+            if matched and not expected then
+                verdict = "MATCH"; matched_n = matched_n + 1
+            elseif (not matched) and expected then
+                verdict = "XFAIL"; xfail_n = xfail_n + 1
+            elseif matched and expected then
+                verdict = "XPASS(remove from BUNDLE16_NORM_XFAIL)"
+                fails[#fails + 1] = string.format("%s/%s XPASS (now matches 0.6.0)", norm, p.name)
+            else
+                verdict = "NEW-DIVERGENCE"
+                fails[#fails + 1] = string.format("%s/%s diverges on %s", norm, p.name,
+                    #diff > 0 and table.concat(diff, ",") or tostring(solution.solver_state))
+            end
+            report[#report + 1] = string.format(
+                "[%s/%s] %s  cur{M=%.6g imp=%.6g sur=%.6g T=%.6g state=%s} 0.6.0{M=%.6g imp=%.6g sur=%.6g} diff=%s",
+                norm, p.name, verdict, cur.machines, cur.import, cur.surplus, cur.T,
+                tostring(solution.solver_state), v060.machines, v060.import, v060.surplus,
+                #diff > 0 and table.concat(diff, ",") or "-")
+            ::continue::
+        end
+    end
+
+    for n in pairs(solutions) do solutions[n] = nil end
+    force_data.research_bonuses = saved_bonuses
+
+    helpers.write_file("bundle16_norms_report.txt", table.concat(report, "\n"))
+    if #fails > 0 then
+        return "ERROR: " .. #fails .. " unexpected: " .. table.concat(fails, " | ")
+    end
+    return string.format("OK: %d match, %d xfail, %d skip (%d norms x %d problems)",
+        matched_n, xfail_n, skipped, #BUNDLE16_NORMS, #payloads)
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -3073,6 +3276,7 @@ function M.register()
         bundle16_drop_report = M.bundle16_drop_report,
         dump_bundle16_normalized = M.dump_bundle16_normalized,
         check_bundle16_v060 = M.check_bundle16_v060,
+        check_bundle16_norms = M.check_bundle16_norms,
         check_target_rescue = M.check_target_rescue,
         check_force_caches = M.check_force_caches,
         check_relation_split = M.check_relation_split,

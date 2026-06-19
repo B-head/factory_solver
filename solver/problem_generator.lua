@@ -15,7 +15,7 @@ local vk = require "solver/var_key"
 ---@field reconstruction Reconstruction? Companion to `reduced`: maps each folded-out variable back to k * x_rep so the reduced solution unfolds into full variable space.
 local M = {}
 
----@alias PrimalKind "recipe"|"bridge"|"surplus_sink"|"final_sink"|"initial_source"|"shortage_source"|"elastic"|"headroom"|"slack"
+---@alias PrimalKind "recipe"|"bridge"|"surplus_sink"|"final_sink"|"initial_source"|"shortage_source"|"elastic"|"headroom"|"slack"|"linf_peak"
 
 ---@class Primal
 ---@field key string

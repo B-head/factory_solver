@@ -271,6 +271,13 @@ function M.reinit_force_data(force_index)
             solution.op_restart = nil
             solution.cascade = nil
             solution.cc_restart = nil
+            solution.linf = nil
+            solution.lf_restart = nil
+            -- solver_norm gained later: older saves lack it. Backfill the
+            -- default so the dispatch (manage/pre_solve.lua) always reads a
+            -- valid norm. Unlike the in-flight state above this is a user knob,
+            -- so an existing choice is preserved.
+            solution.solver_norm = solution.solver_norm or "legacy"
             -- A frozen solution's counts came from an external solver, not from
             -- a Problem this configuration built, so there is nothing to
             -- re-solve -- keep it frozen through the migration.
@@ -620,6 +627,7 @@ function M.new_solution(solutions, solution_name)
         production_lines = {},
         quantity_of_machines_required = {},
         solver_state = "finished",
+        solver_norm = "legacy",
     }
     solutions[new_solution_name] = solution
 
@@ -662,6 +670,7 @@ function M.import_solution(solutions, payload)
         production_lines = payload.production_lines,
         quantity_of_machines_required = payload.solved_machines or {},
         solver_state = payload.solved_machines and "freeze" or "ready",
+        solver_norm = payload.solver_norm or "legacy",
     }
     solutions[new_solution_name] = solution
 
@@ -769,6 +778,17 @@ function M.update_constraint(solution, constraint_index, data)
         data,
     }
 
+    solution.solver_state = "ready"
+end
+
+---Change the per-solution solver norm and re-arm a solve. The on_tick pump
+---rebuilds the problem under the new norm from a clean baseline (the "ready"
+---rebuild in manage/pre_solve.lua drops the in-flight rescue/cascade/linf state
+---unless its own restart flag is set, which this is not).
+---@param solution Solution
+---@param norm SolverNorm
+function M.update_solver_norm(solution, norm)
+    solution.solver_norm = norm
     solution.solver_state = "ready"
 end
 

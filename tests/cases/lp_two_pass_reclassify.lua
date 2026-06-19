@@ -61,34 +61,42 @@ end
 
 local cases = {}
 
--- An export-feasible cycle that the LP fabricates anyway. `target` is both
--- produced and consumed inside a {target, mid} cycle that CAN net-produce it
--- (export_feasible: x=(1,1) gives target +1, mid balanced), but the only entry
--- runs through an expensive raw, so per unit of target the real chain costs more
--- than the |shortage_source| penalty (elastic_cost = 2^10) -- exactly limestone's
--- shape, where a long mass-losing upstream made fabrication look cheaper. The
--- cycle is also self-sustaining, so the net-flow / catalyst heuristics skip it.
--- Pass 1 cheats; the diagnose pass sees the cheat IS export-feasible and re-seeds
--- it as an import; pass 2 closes at zero cheat.
---   r1: 1 target + 2000 raw -> 1 mid     (expensive entry: cost > shortage)
---   r2: 1 mid               -> 2 target  (recycles to a net surplus)
+-- An export-feasible cycle that the LP fabricates anyway. A {cyc, mid} cycle
+-- whose entry burns an expensive raw feeds a conversion recipe whose product is
+-- the target. The cycle CAN net-produce its materials (export_feasible: rA + rB
+-- net +1 cyc, mid balanced), but per unit it burns more raw than the
+-- |shortage_source| penalty (elastic_cost = 2^10 = 1024), so the LP fabricates a
+-- cycle material instead of running the real chain -- exactly limestone's shape,
+-- a mass-losing upstream that makes fabrication look cheaper. The cycle is also
+-- self-sustaining, so the net-flow / catalyst heuristics skip it. Pass 1 cheats;
+-- the diagnose pass sees the cheat IS export-feasible and re-seeds it as an
+-- import; pass 2 closes at zero cheat.
+--   rA:    1 cyc + 2000 raw -> 1 mid       (mass-losing entry: cost > shortage)
+--   rB:    1 mid            -> 2 cyc       (recycles to a net surplus)
+--   rConv: 1 cyc            -> 1 product   (the target is the final product)
+-- The 2000-raw loss (NOT a small factor like 2) is deliberate: the cheat only
+-- appears once the real chain costs MORE than the 1024 shortage penalty, so the
+-- per-unit raw burn must exceed 1024 (measured: loss=2 runs the chain, no cheat).
 table.insert(cases, {
     name = "avoidable cheat: export-feasible cycle is imported on the second pass",
     run = function()
         -- `raw` has no producer, so it is a priced |initial_source| (cost 1/unit);
-        -- 2000 of it per target makes the real chain cost 2000/target, above the
-        -- 1024 shortage penalty. (A free mining recipe for raw would zero that cost
-        -- and the LP would just run the chain -- the cheat needs a priced input.)
+        -- 2000 of it per cyc makes the real chain cost 2000/cyc, above the 1024
+        -- shortage penalty. (A free mining recipe for raw would zero that cost and
+        -- the LP would just run the chain -- the cheat needs a priced input.) The
+        -- target is the final `product`, which leaves via its terminal |final_sink|
+        -- (it is never an in-set ingredient); the cheat lands on the cycle material.
         local lines = {
-            line("r1", { it("mid", 1) }, { it("target", 1), it("raw", 2000) }),
-            line("r2", { it("target", 2) }, { it("mid", 1) }),
+            line("rA", { it("mid", 1) }, { it("cyc", 1), it("raw", 2000) }),
+            line("rB", { it("cyc", 2) }, { it("mid", 1) }),
+            line("rConv", { it("product", 1) }, { it("cyc", 1) }),
         }
         local constraints = {
-            { type = "item", name = "target", quality = "normal",
+            { type = "item", name = "product", quality = "normal",
               limit_type = "equal", limit_amount_per_second = 1 },
         }
 
-        -- Pass 1: target is trapped in the cycle (unreachable) and fabricating it
+        -- Pass 1: the cycle materials are trapped (unreachable) and fabricating one
         -- (1024 / unit) undercuts the 2000-raw real chain, so the LP cheats.
         local x1, p1 = solve("avoidable-p1", constraints, lines, nil)
         harness.assert_true(cheat_mass(x1) > 0.1,
