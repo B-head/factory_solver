@@ -40,6 +40,7 @@ local linear_programming = require "solver/linear_programming"
 local ed = require "tests/explore_detect"
 local problem_dump = require "tests/problem_dump"
 local tn = require "manage/typed_name"
+local vk = require "solver/var_key"
 
 local M = {}
 
@@ -234,6 +235,66 @@ end
 ---@return string
 function M.fileid(path)
     return path:match("[^/\\]+$") or path
+end
+
+-- ---- QP / hard-target framing (shared solve setup) --------------------------
+--
+-- The dump / spectrum / tilt probes that re-cost the escapes and observe the
+-- result all share the same two setup steps, copy-pasted inline: harden every
+-- user target into a NON-elastic equality at a large RHS (so the constraint dual
+-- becomes "production == BIG" with no relaxation), then drive the IPM keeping the
+-- last non-nil iterate so values stay observable even on non-convergence. The
+-- per-probe part is only the COST framing in between (which escapes get a
+-- quadratic / linear / amount-baked cost); these two bookends are not.
+
+---Harden every constraint into a hard equality at `BIG` and strip the target
+---relaxation: set each `|limit|` dual's limit to BIG, then DELETE the elastic +
+---headroom primals and the per-constraint inequality slacks, and reindex the
+---surviving primals contiguously (sorted, so the index order is deterministic).
+---Mutates the passed (research-owned) Problem in place.
+---@param problem Problem
+---@param constraints (TypedName)[] The dump's constraints (for the per-constraint duals).
+---@param BIG number Large hard-equality RHS (e.g. 1e6).
+function M.harden_targets(problem, constraints, BIG)
+    local rm = {}
+    for _, c in ipairs(constraints) do
+        local dual = vk.limit(tn.typed_name_to_variable_name(c))
+        if problem.duals[dual] then problem.duals[dual].limit = BIG end
+        rm[vk.elastic(dual)] = true
+        rm[vk.pos_slack(dual)] = true
+        rm[vk.neg_slack(dual)] = true
+    end
+    for key, p in pairs(problem.primals) do
+        if p.kind == "elastic" or p.kind == "headroom" then rm[key] = true end
+    end
+    for key in pairs(rm) do
+        if problem.primals[key] then problem.primals[key] = nil; problem.subject_terms[key] = nil end
+    end
+    local keys = {}
+    for k in pairs(problem.primals) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for i, k in ipairs(keys) do problem.primals[k].index = i end
+    problem.primal_length = #keys
+end
+
+---Drive the IPM to a terminal state, RETAINING the last non-nil iterate so the
+---values are observable even when the solve does not converge (unlike M.solve,
+---which delegates to solve_dumped). Returns the solved activities `x` (empty table
+---if nothing solved), the terminal state, and the step count. On a solve that
+---raises, the state is "errored".
+---@param problem Problem
+---@param meta { tolerance: number, iterate_limit: integer, step_cap: integer }
+---@return table<string, number> x, string state, integer steps
+function M.drive_solve(problem, meta)
+    local state, it, vars, last, steps = "ready", nil, nil, nil, 0
+    repeat
+        local ok, s, i2, v = pcall(linear_programming.solve, problem, state, it, vars, meta.tolerance, meta.iterate_limit)
+        if not ok then state = "errored"; break end
+        state, it = s, i2
+        if v then vars = v; last = v end
+        steps = steps + 1
+    until (state ~= "ready" and state ~= "calculating") or steps > meta.step_cap
+    return (last and last.x) or {}, state, steps
 end
 
 -- ---- SCC / escape aggregation (shared probe reads) --------------------------

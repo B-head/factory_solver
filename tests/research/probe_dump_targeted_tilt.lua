@@ -13,11 +13,11 @@
 
 require "tests/headless_env"
 local ref = require "tests/research/reference_solver"
+local dissect = require "tests/research/dissect"
+local research_lib = require "tests/research/research_lib"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
 local tn = require "manage/typed_name"
-local vk = require "solver/var_key"
-local lp = require "solver/linear_programming"
 
 local PATH = arg[1] or "S:/tmp/explore_problems/seed_143_cycle_scc_vex_sex_p1_noq_trecipe_con_h72_cyconly.lua"
 local HI = tonumber(arg[2]) or 1024
@@ -37,10 +37,8 @@ local function base(mat) return (tostring(mat):gsub("@%[.-%]", "")) end
 
 -- lines = recipes + bridges
 local p0 = create_problem.create_problem("d", prob.constraints, prob.normalized_lines, nil, nil)
-local lines = {}
-for _, l in ipairs(prob.normalized_lines) do lines[#lines + 1] = l end
-for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
-local function rkey(line) return tn.typed_name_to_variable_name(line.recipe_typed_name) end
+local lines = dissect.all_lines(prob.normalized_lines, p0)
+local rkey = dissect.recipe_key
 
 local function build(cheap_bases)
     local problem = create_problem.create_problem("tt", prob.constraints, prob.normalized_lines, nil, nil)
@@ -49,42 +47,14 @@ local function build(cheap_bases)
         elseif p.kind == "surplus_sink" then p.cost = DUMP
         elseif p.kind == "initial_source" or p.kind == "final_sink" then p.cost = 0 end
     end
-    local rm = {}
-    for _, c in ipairs(prob.constraints) do
-        local dual = vk.limit(tn.typed_name_to_variable_name(c))
-        if problem.duals[dual] then problem.duals[dual].limit = BIG end
-        rm[vk.elastic(dual)] = true; rm[vk.pos_slack(dual)] = true; rm[vk.neg_slack(dual)] = true
-    end
-    for key, p in pairs(problem.primals) do if p.kind == "elastic" or p.kind == "headroom" then rm[key] = true end end
-    for key in pairs(rm) do if problem.primals[key] then problem.primals[key] = nil; problem.subject_terms[key] = nil end end
-    local keys = {}; for k in pairs(problem.primals) do keys[#keys + 1] = k end; table.sort(keys)
-    for i, k in ipairs(keys) do problem.primals[k].index = i end
-    problem.primal_length = #keys
+    research_lib.harden_targets(problem, prob.constraints, BIG)
     return problem
 end
 
-local function solve(pp)
-    local state, it, vars, last, steps = "ready", nil, nil, nil, 0
-    repeat
-        local ok, s, i2, v = pcall(lp.solve, pp, state, it, vars, prob.meta.tolerance, prob.meta.iterate_limit)
-        if not ok then state = "errored"; break end
-        state, it = s, i2; if v then vars = v; last = v end; steps = steps + 1
-    until (state ~= "ready" and state ~= "calculating") or steps > prob.meta.step_cap
-    return (last and last.x) or {}, state, steps
-end
+local function solve(pp) return research_lib.drive_solve(pp, prob.meta) end
 
 -- per-material produced/consumed under a solution x
-local function flows(x)
-    local produced, consumed = {}, {}
-    for _, line in ipairs(lines) do
-        local xr = x[rkey(line)] or 0
-        if xr > 1e-9 then
-            for _, pr in ipairs(line.products or {}) do local m = tn.typed_name_to_variable_name(pr); produced[m] = (produced[m] or 0) + xr * (pr.amount_per_second or 0) end
-            for _, ing in ipairs(line.ingredients or {}) do local m = tn.typed_name_to_variable_name(ing); consumed[m] = (consumed[m] or 0) + xr * (ing.amount_per_second or 0) end
-        end
-    end
-    return produced, consumed
-end
+local function flows(x) return dissect.physical_flows(lines, x, { eps = 1e-9 }) end
 
 local function summarize(problem, x)
     local maxr = 0

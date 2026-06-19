@@ -14,6 +14,7 @@
 
 require "tests/headless_env"
 local ref = require "tests/research/reference_solver"
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
 local tn = require "manage/typed_name"
@@ -71,10 +72,8 @@ local function run_greedy(prob)
     local function is_import(p) return p.kind == "shortage_source" or (p.kind == "initial_source" and p.material and intermediates[p.material]) end
 
     local p0 = create_problem.create_problem("g", constraints, lines0, nil, nil)
-    local lines = {}
-    for _, l in ipairs(lines0) do lines[#lines + 1] = l end
-    for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
-    local function rkey(line) return tn.typed_name_to_variable_name(line.recipe_typed_name) end
+    local lines = dissect.all_lines(lines0, p0)
+    local rkey = dissect.recipe_key
 
     local function build(cheap)
         local problem = create_problem.create_problem("g", constraints, lines0, nil, nil)
@@ -107,11 +106,7 @@ local function run_greedy(prob)
         return { Vp = Vp, Vf = Vf, Vc = Vc, T = T, nrec = nrec, dumps = dumps, thr = thr, total = Vp + Vf + Vc }
     end
     local function flows(x)
-        local consumed = {}
-        for _, line in ipairs(lines) do
-            local xr = x[rkey(line)] or 0
-            if xr > 1e-9 then for _, ing in ipairs(line.ingredients or {}) do local m = tn.typed_name_to_variable_name(ing); consumed[m] = (consumed[m] or 0) + xr * (ing.amount_per_second or 0) end end
-        end
+        local _, consumed = dissect.physical_flows(lines, x, { eps = 1e-9 })
         return consumed
     end
     local function evaluate(cheap)

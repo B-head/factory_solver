@@ -13,6 +13,7 @@
 
 require "tests/headless_env"
 local ref = require "tests/research/reference_solver"
+local dissect = require "tests/research/dissect"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
 local tn = require "manage/typed_name"
@@ -54,10 +55,8 @@ local function analyze(prob)
     local function is_import(p) return p.kind == "shortage_source" or (p.kind == "initial_source" and p.material and intermediates[p.material]) end
 
     local p0 = create_problem.create_problem("u", constraints, lines0, nil, ref.OPTS)
-    local lines = {}
-    for _, l in ipairs(lines0) do lines[#lines + 1] = l end
-    for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
-    local function rkey(line) return tn.typed_name_to_variable_name(line.recipe_typed_name) end
+    local lines = dissect.all_lines(lines0, p0)
+    local rkey = dissect.recipe_key
 
     -- measure a solved reference result (Vp counts ALL producible imports)
     local function measure(r)
@@ -82,11 +81,7 @@ local function analyze(prob)
 
     -- producible co-products of running recipes that ALSO dump (the dump-forcing fabrications)
     local function candidates(m, justified)
-        local consumed = {}
-        for _, line in ipairs(lines) do
-            local xr = m.x[rkey(line)] or 0
-            if xr > 1e-9 then for _, ing in ipairs(line.ingredients or {}) do local mm = tn.typed_name_to_variable_name(ing); consumed[mm] = (consumed[mm] or 0) + xr * (ing.amount_per_second or 0) end end
-        end
+        local _, consumed = dissect.physical_flows(lines, m.x, { eps = 1e-9 })
         local set = {}
         for _, d in ipairs(m.dumps) do
             for _, line in ipairs(lines) do

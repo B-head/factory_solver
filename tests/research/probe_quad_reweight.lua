@@ -12,12 +12,10 @@
 --   luajit tests/research/probe_quad_reweight.lua [ss|all] [dumpfile] [BIG]
 
 require "tests/headless_env"
+local dissect = require "tests/research/dissect"
+local research_lib = require "tests/research/research_lib"
 local create_problem = require "solver/create_problem"
 local problem_dump = require "tests/problem_dump"
-local material_cycles = require "solver/material_cycles"
-local tn = require "manage/typed_name"
-local vk = require "solver/var_key"
-local lp = require "solver/linear_programming"
 
 local MODE = arg[1] or "ss"
 local PATH = arg[2] or "S:/tmp/explore_problems/seed_143_cycle_scc_vex_sex_p1_noq_trecipe_con_h72_cyconly.lua"
@@ -31,22 +29,9 @@ local FREEK = (MODE == "all") and {} or { initial_source = true, final_sink = tr
 
 local prob = assert(problem_dump.load_problem(PATH))
 
--- material graph (with bridges) for SCC tags
-local function scc_tags()
-    local p0 = create_problem.create_problem("t", prob.constraints, prob.normalized_lines, nil, nil)
-    local lines = {}
-    for _, l in ipairs(prob.normalized_lines) do lines[#lines + 1] = l end
-    for _, l in ipairs(p0.bridges) do lines[#lines + 1] = l end
-    local adj = material_cycles.build_material_graph(lines)
-    local sccs = material_cycles.find_sccs(adj)
-    local cyc = {}
-    for _, s in ipairs(sccs) do if material_cycles.is_cyclic_scc(s, adj) then cyc[#cyc + 1] = s end end
-    table.sort(cyc, function(a, b) if #a ~= #b then return #a > #b end return a[1] < b[1] end)
-    local m = {}
-    for i, s in ipairs(cyc) do for _, mm in ipairs(s) do m[mm] = string.format("C%02d", i) end end
-    return m
-end
-local mat_scc = scc_tags()
+-- material graph (with bridges) for SCC tags (cyclic SCCs, C01.. by size)
+local p0 = create_problem.create_problem("t", prob.constraints, prob.normalized_lines, nil, nil)
+local mat_scc = dissect.cyclic_sccs(dissect.all_lines(prob.normalized_lines, p0)).tag
 local function tag(material) return material and (mat_scc[material] or "-") or "?" end
 
 local function build(quad_for)
@@ -55,35 +40,13 @@ local function build(quad_for)
         if ELASTIC[p.kind] then p.cost = 0; problem:set_quad(key, quad_for(key))
         elseif FREEK[p.kind] then p.cost = 0; problem:set_quad(key, 0) end
     end
-    local rm = {}
-    for _, c in ipairs(prob.constraints) do
-        local dual = vk.limit(tn.typed_name_to_variable_name(c))
-        if problem.duals[dual] then problem.duals[dual].limit = BIG end
-        rm[vk.elastic(dual)] = true; rm[vk.pos_slack(dual)] = true; rm[vk.neg_slack(dual)] = true
-    end
-    for key, p in pairs(problem.primals) do if p.kind == "elastic" or p.kind == "headroom" then rm[key] = true end end
-    for key in pairs(rm) do if problem.primals[key] then problem.primals[key] = nil; problem.subject_terms[key] = nil end end
-    local keys = {}; for k in pairs(problem.primals) do keys[#keys + 1] = k end; table.sort(keys)
-    for i, k in ipairs(keys) do problem.primals[k].index = i end
-    problem.primal_length = #keys
+    research_lib.harden_targets(problem, prob.constraints, BIG)
     return problem
 end
 
-local function solve(problem)
-    local state, it, vars, last, steps = "ready", nil, nil, nil, 0
-    repeat
-        local ok, s, i2, v = pcall(lp.solve, problem, state, it, vars, prob.meta.tolerance, prob.meta.iterate_limit)
-        if not ok then state = "errored"; break end
-        state, it = s, i2; if v then vars = v; last = v end; steps = steps + 1
-    until (state ~= "ready" and state ~= "calculating") or steps > prob.meta.step_cap
-    return (last and last.x) or {}, state, steps
-end
+local function solve(problem) return research_lib.drive_solve(problem, prob.meta) end
 
-local function park_threshold(problem, x)
-    local maxr = 0
-    for k, p in pairs(problem.primals) do if p.kind == "recipe" then local a = math.abs(x[k] or 0); if a > maxr then maxr = a end end end
-    return math.max(1e-9, maxr * 1e-6)
-end
+local park_threshold = dissect.solved_threshold
 local function is_elastic(p) return ELASTIC[p.kind] end
 local function masses(problem, x)
     local em, rm, lin, quad = 0, 0, 0, 0
