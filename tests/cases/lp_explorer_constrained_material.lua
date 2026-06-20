@@ -31,6 +31,12 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
+-- These explorer fixtures reproduce real in-game solves, which run on the GATED
+-- legacy solver (deficit seeding + catalyst closure + reachability gate).
+-- create_problem now defaults to the PLAIN problem, so request the gating
+-- explicitly where a case relies on it.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
+
 -- cheat = shortage + elastic; ships = some final_sink active; imports = some
 -- initial_source active.
 local function classify(vars)
@@ -2531,7 +2537,7 @@ local lines_bmp = {
 table.insert(cases, {
     name = "constrained intermediate (sodium-sulfate = 1) closes cleanly with imports + shipping",
     run = function()
-        local problem = cp.create_problem("constrained-sodium_sulfate", constraints_sodium_sulfate, lines_sodium_sulfate)
+        local problem = cp.create_problem("constrained-sodium_sulfate", constraints_sodium_sulfate, lines_sodium_sulfate, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 600 })
         harness.assert_eq(state, "finished", "solver_state")
@@ -2547,7 +2553,7 @@ table.insert(cases, {
 table.insert(cases, {
     name = "constrained intermediate (yotoi-leaves = 1) closes cleanly with imports + shipping",
     run = function()
-        local problem = cp.create_problem("constrained-yotoi_leaves", constraints_yotoi_leaves, lines_yotoi_leaves)
+        local problem = cp.create_problem("constrained-yotoi_leaves", constraints_yotoi_leaves, lines_yotoi_leaves, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 600 })
         harness.assert_eq(state, "finished", "solver_state")

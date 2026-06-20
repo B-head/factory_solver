@@ -22,6 +22,12 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
+-- create_problem now defaults to the PLAIN problem (no cycle-entry seeding, no
+-- reachability gate). This fixture asserts the GATED solver behaviour -- the
+-- legacy ship default -- so it requests deficit seeding + catalyst closure +
+-- the hard reachability gate explicitly.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
+
 local fixture = require "tests/cases/fixture"
 local item, line = fixture.item, fixture.line
 
@@ -39,7 +45,7 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 5 },
         }
 
-        local problem = cp.create_problem("classify", constraints, lines)
+        local problem = cp.create_problem("classify", constraints, lines, nil, GATED)
 
         local function has(name) return problem.primals[name] ~= nil end
 
@@ -108,7 +114,7 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 1 },
         }
 
-        local problem = cp.create_problem("deadend-cycle", constraints, lines)
+        local problem = cp.create_problem("deadend-cycle", constraints, lines, nil, GATED)
 
         harness.assert_true(problem.primals["|shortage_source|item/loop/normal"] ~= nil,
             "an unreachable cycle material gets a shortage_source escape hatch")
@@ -149,7 +155,7 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 1 },
         }
 
-        local problem = cp.create_problem("deadend-strong-loss", constraints, lines)
+        local problem = cp.create_problem("deadend-strong-loss", constraints, lines, nil, GATED)
 
         harness.assert_true(problem.primals["|initial_source|item/loop/normal"] ~= nil,
             "strongly mass-losing loop -> initial_source cycle input")
@@ -191,7 +197,7 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 1 },
         }
 
-        local problem = cp.create_problem("fed-cycle", constraints, lines)
+        local problem = cp.create_problem("fed-cycle", constraints, lines, nil, GATED)
 
         -- loop is produced + consumed -> surplus_sink, but with a real
         -- producer it is neither sourced externally nor short.

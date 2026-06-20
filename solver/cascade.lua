@@ -221,10 +221,15 @@ end
 -- create_problem(..., M.build_options(build)) + M.shape_problem(problem, build).
 --------------------------------------------------------------------------------
 
----create_problem options for a build. Fix tests run on the bare structural
----problem (the reference's shape: every escape-hatch heuristic off); every
----other build is the un-gated ship shape carrying the target budget and, once
----the deletion fallback fired, the hatch exclusion.
+---create_problem options for a build. The cascade approximates the reference
+---solver, which solves the PLAIN problem, so EVERY cascade build is plain (every
+---escape-hatch heuristic off) -- the stages, not a gate or cycle-entry seeding,
+---do the rescue work. Fix tests get the bare plain problem; every other build
+---adds the target budget and, once the deletion fallback fired, the hatch
+---exclusion on top of that same plain base. Stated in full: earlier the non-fix
+---builds named only reachability_gating and silently inherited the gated
+---deficit / catalyst seeding from create_problem's old default -- a bug, since
+---the cascade was never meant to seed (create_problem now defaults to plain).
 ---@param build CascadeBuild
 ---@return CreateProblemOptions
 function M.build_options(build)
@@ -232,6 +237,8 @@ function M.build_options(build)
         return { deficit_seeding = false, catalyst_closure = false, reachability_gating = false }
     end
     return {
+        deficit_seeding = false,
+        catalyst_closure = false,
         reachability_gating = false,
         target_budget = build.target_budget,
         hatch_exclude = build.hatch_exclude,

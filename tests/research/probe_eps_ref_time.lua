@@ -37,6 +37,7 @@ local function list_to_set(l) local s = {}; for _, k in ipairs(l) do s[k] = true
 local function build_solve_ship(constraints, lines, overrides, eps)
     local ok, p = pcall(create_problem.create_problem, "ship", constraints, lines, nil,
         { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K,
+            deficit_seeding = true, catalyst_closure = true,
             shortage_cost_overrides = overrides, recipe_epsilon = eps })
     if not ok then return nil, "build-error", nil, nil, 0 end
     local s, v, steps = harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER })

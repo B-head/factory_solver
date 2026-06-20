@@ -21,6 +21,11 @@ local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 local mc = require "solver/material_cycles"
 
+-- create_problem now defaults to the PLAIN problem; this fixture asserts the
+-- GATED solver behaviour (deficit seeding + catalyst closure + reachability
+-- gate, the legacy ship default), so it requests them explicitly.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
+
 local function it(name, amount)
     return { type = "item", name = name, quality = "normal", amount_per_second = amount }
 end
@@ -70,7 +75,7 @@ table.insert(cases, {
         harness.assert_true(deficits["item/P/normal"] == nil,
             "P must NOT be flagged (X supplies it from outside the SCC)")
 
-        local problem = cp.create_problem("nonsource-scc-deficit", constraints, lines)
+        local problem = cp.create_problem("nonsource-scc-deficit", constraints, lines, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 400 })
 
@@ -114,7 +119,7 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 0.5 },
         }
 
-        local problem = cp.create_problem("masslosing-ash", constraints, lines)
+        local problem = cp.create_problem("masslosing-ash", constraints, lines, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 400 })
 

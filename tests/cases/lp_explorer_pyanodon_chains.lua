@@ -9,6 +9,12 @@
 local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
+
+-- These explorer fixtures reproduce real in-game solves, which run on the GATED
+-- legacy solver (deficit seeding + catalyst closure + reachability gate).
+-- create_problem now defaults to the PLAIN problem, so request the gating
+-- explicitly.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
 local constraints9 = {
   { type = "item", name = "auog-food-02", quality = "normal", limit_type = "equal", limit_amount_per_second = 1 },
 }
@@ -1183,7 +1189,7 @@ local cases = {}
 cases[#cases + 1] = {
     name = "pyanodon seed 9 (-> auog-food-02) formalizes and solves clean",
     run = function()
-        local state, vars = solve(cp.create_problem("seed9", constraints9, lines9))
+        local state, vars = solve(cp.create_problem("seed9", constraints9, lines9, nil, GATED))
         harness.assert_eq(state, "finished", "converges")
         harness.assert_near(cheat_of(vars), 0, 1e-3, "no shortage")
     end,
@@ -1192,7 +1198,7 @@ cases[#cases + 1] = {
 cases[#cases + 1] = {
     name = "pyanodon seed 25 (-> scrondrix) formalizes and solves to a finished partial-shortage",
     run = function()
-        local state, vars = solve(cp.create_problem("seed25", constraints25, lines25))
+        local state, vars = solve(cp.create_problem("seed25", constraints25, lines25, nil, GATED))
         harness.assert_eq(state, "finished", "converges")
         harness.assert_near(cheat_of(vars), 0.6337, 1e-2,
             "catalyst loop fabricates its net-zero catalyst (~0.6337)")

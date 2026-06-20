@@ -45,6 +45,11 @@ local lp = require "solver/linear_programming"
 local pg = require "solver/problem_generator"
 local cp = require "solver/create_problem"
 
+-- create_problem now defaults to the PLAIN problem; these cascade fixtures
+-- assert the GATED solver behaviour (deficit seeding + catalyst closure +
+-- reachability gate, the legacy ship default), so they request it explicitly.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
+
 -- Helpers for the create_problem-driven case.
 local function ci(name, q, amt)
     return { type = "item", name = name, quality = q, amount_per_second = amt }
@@ -413,7 +418,7 @@ table.insert(cases, {
               limit_type = "equal", limit_amount_per_second = 1 },
         }
 
-        local problem = cp.create_problem("asteroid-upcycle-isolated", constraints, lines)
+        local problem = cp.create_problem("asteroid-upcycle-isolated", constraints, lines, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 600 })
 
@@ -549,7 +554,7 @@ table.insert(cases, {
               limit_type = "upper", limit_amount_per_second = 1 },
         }
 
-        local problem = cp.create_problem("asteroid-upcycle-real", constraints, lines)
+        local problem = cp.create_problem("asteroid-upcycle-real", constraints, lines, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 600 })
 

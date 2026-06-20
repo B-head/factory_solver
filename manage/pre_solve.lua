@@ -143,9 +143,17 @@ function M.forwerd_solve(force_data, solution)
                 cc_build = cc.build
                 options = cascade.build_options(cc_build)
             else
-                -- The baseline: un-gated flat hatches (no soft gate). The
-                -- cascade's stages, not a gate, do the rescue work.
-                options = { reachability_gating = false }
+                -- The baseline: the PLAIN problem -- un-gated and with no
+                -- cycle-entry seeding -- matching the reference the cascade
+                -- approximates. The cascade's stages, not a gate or seeding, do
+                -- the rescue work. (Earlier this named only reachability_gating
+                -- and silently inherited the gated deficit / catalyst seeding
+                -- from create_problem's old default -- a bug, now stated in full.)
+                options = {
+                    reachability_gating = false,
+                    deficit_seeding = false,
+                    catalyst_closure = false,
+                }
             end
         else
             -- The four shipping norms share the un-gated baseline; clear the

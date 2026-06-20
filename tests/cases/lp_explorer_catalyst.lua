@@ -34,6 +34,12 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
+-- These explorer fixtures reproduce real in-game solves, which run on the GATED
+-- legacy solver (deficit seeding + catalyst closure + reachability gate).
+-- create_problem now defaults to the PLAIN problem, so request the gating
+-- explicitly where a case relies on it.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
+
 -- Cheat mass (shortage + elastic) and whether any declared external input is drawn.
 local function cheat_and_imports(vars)
     local cheat, has_initial = 0, false
@@ -782,7 +788,7 @@ table.insert(cases, {
     run = function()
         local x1, p1 = (function()
             local problem = cp.create_problem("explorer-limestone-p1",
-                constraints_limestone, lines_limestone)
+                constraints_limestone, lines_limestone, nil, GATED)
             local state, vars = harness.solve_to_completion(lp, problem,
                 { tolerance = 1e-6, iterate_limit = 600 })
             harness.assert_eq(state, "finished", "pass 1 solver_state")
@@ -794,7 +800,7 @@ table.insert(cases, {
             "limestone is diagnosed as an avoidable cheat (its cycle is export-feasible)")
 
         local problem = cp.create_problem("explorer-limestone-p2",
-            constraints_limestone, lines_limestone, avoidable)
+            constraints_limestone, lines_limestone, avoidable, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 600 })
         harness.assert_eq(state, "finished", "pass 2 solver_state")

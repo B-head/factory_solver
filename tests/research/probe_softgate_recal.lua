@@ -42,9 +42,13 @@ local LADDER = { 2, 4, 8, 16, 32, 64, 128, 256, 1024, 4096, 16384, 65536 }
 local OBSERVE_MULT = 16384
 local K_PRED = 1.5
 
+-- softgate mirrors the shipped soft-gate path: gate replaced by the soft price,
+-- cycle-entry seeding (deficit / catalyst closure) ON. Stated in full because
+-- create_problem now defaults to the PLAIN problem (every switch off).
 local CONFIGS = {
     alloff   = { deficit_seeding = false, catalyst_closure = false, reachability_gating = false },
-    softgate = { reachability_gating = false, reachability_soft_gate_k = 256 },
+    softgate = { reachability_gating = false, reachability_soft_gate_k = 256,
+        deficit_seeding = true, catalyst_closure = true },
 }
 
 local R = require "tests/research/research_lib"

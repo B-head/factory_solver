@@ -47,6 +47,12 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
+-- The Nuc Sample 2 case asserts the GATED solver's catalyst-loop closure (it
+-- bootstraps the loop instead of fabricating pu-238 via |shortage_source|).
+-- create_problem now defaults to the PLAIN problem, so request the gating
+-- explicitly -- the legacy ship default.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
+
 local function it(name, amount)
     return { type = "item", name = name, quality = "normal", amount_per_second = amount }
 end
@@ -150,7 +156,7 @@ table.insert(cases, {
               limit_type = "upper", limit_amount_per_second = 0.5 },
         }
 
-        local problem = cp.create_problem("nuc-sample-2", constraints, lines)
+        local problem = cp.create_problem("nuc-sample-2", constraints, lines, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 1000 })
 

@@ -22,7 +22,11 @@ local op = require "solver/observe_price"
 
 local TOL, ITER = 1e-7, 800
 local SOFT_GATE_K = 256
-local OPTS_BASE = { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K }
+-- The shipped soft-gate config: reachability gate replaced by the soft price,
+-- but the cycle-entry seeding (deficit / catalyst closure) ON like the ship
+-- path. Stated in full because create_problem now defaults to the PLAIN problem.
+local OPTS_BASE = { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K,
+    deficit_seeding = true, catalyst_closure = true }
 
 -- A/B switch: FS_LEGACY=1 restores the pre-recalibration predictor (mass-weighted
 -- escape_cost over surplus_sink + shortage_source only, K_PRED=1.5) so the same
@@ -48,6 +52,7 @@ local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = 
 local function build_solve(constraints, lines, overrides)
     local ok, p = pcall(create_problem.create_problem, "e2e", constraints, lines, nil,
         { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K,
+          deficit_seeding = true, catalyst_closure = true,
           shortage_cost_overrides = overrides })
     if not ok then return nil, "build-error", nil end
     local s, v = solve(p)

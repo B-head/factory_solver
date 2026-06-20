@@ -46,13 +46,18 @@ end
 
 local TOL, ITER = 1e-7, 800
 local SOFT_GATE_K = 256
-local SHIP_OPTS = { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K }
+-- The shipped soft-gate config: gate replaced by the soft price, cycle-entry
+-- seeding (deficit / catalyst closure) ON like the ship path. Stated in full
+-- because create_problem now defaults to the PLAIN problem (every switch off).
+local SHIP_OPTS = { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K,
+    deficit_seeding = true, catalyst_closure = true }
 
 local function solve(p) return harness.solve_to_completion(lp, p, { tolerance = TOL, iterate_limit = ITER }) end
 
 local function build_solve_ship(constraints, lines, overrides)
     local ok, p = pcall(create_problem.create_problem, "ship", constraints, lines, nil,
         { reachability_gating = false, reachability_soft_gate_k = SOFT_GATE_K,
+            deficit_seeding = true, catalyst_closure = true,
             shortage_cost_overrides = overrides })
     if not ok then return nil, "build-error", nil, nil end
     local s, v = solve(p)

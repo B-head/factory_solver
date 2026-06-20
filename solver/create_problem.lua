@@ -734,17 +734,19 @@ function M.dump_constraints(constraints)
     return table.concat(out, "\n")
 end
 
----Research-only switches for the produced-AND-consumed (cycle-material) escape
----hatch preprocessing. Every field defaults to its current shipped behaviour
----(on) when nil; only the standalone headless solve worker (tests/solve_problem)
----sets them, from env vars, to ablate one mechanism at a time on a fixed corpus.
+---Switches for the produced-AND-consumed (cycle-material) escape hatch
+---preprocessing. The three gating fields (deficit_seeding / catalyst_closure /
+---reachability_gating) DEFAULT OFF, so the default build is the PLAIN problem;
+---the gated solver paths (the legacy norm, the cascade) turn them on explicitly,
+---and the standalone headless solve worker (tests/solve_problem) toggles them
+---from env vars to ablate one mechanism at a time on a fixed corpus.
 ---NEVER read from os.getenv in here -- create_problem runs in-engine under the
 ---Factorio sandbox (os stripped) and on the deterministic-lockstep path, so the
 ---toggles must arrive as an argument, decided by the Factorio-free caller.
 ---@class CreateProblemOptions
----@field deficit_seeding boolean?      Default true. Seed find_deficit_materials' raw deficits as |initial_source| cycle entry points. Off: skip that seeding.
----@field catalyst_closure boolean?     Default true. Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. Off: skip the loop.
----@field reachability_gating boolean?  Default true. HARD gate: deny |shortage_source| to reachable materials (they must run their chain). Off: un-gated -- every non-deficit produced+consumed material gets a |shortage_source|. The shipped build replaces this with reachability_soft_gate_k (below); the hard gate is retained for the A/B and for fixtures that still assert the deny-the-hatch behaviour.
+---@field deficit_seeding boolean?      Default FALSE (plain). Seed find_deficit_materials' raw deficits as |initial_source| cycle entry points. On: enable that seeding -- the gated solver paths (the legacy norm and the cascade) turn it on explicitly.
+---@field catalyst_closure boolean?     Default FALSE (plain). Run the catalyst-loop closure loop that seeds still-unreachable primer candidates one at a time. On: enable the loop -- the gated solver paths turn it on explicitly.
+---@field reachability_gating boolean?  Default FALSE (plain). HARD gate: deny |shortage_source| to reachable materials (they must run their chain). Default (off) is the un-gated plain problem -- every produced+consumed material gets a flat |shortage_source|. On: deny the hatch to reachable materials (the legacy gated path). The shipped build also offers a SOFT replacement via reachability_soft_gate_k (below); the hard gate is retained for the A/B and for fixtures that still assert the deny-the-hatch behaviour.
 ---@field reachability_soft_gate_k number?  SOFT gate (the shipped replacement for the hard reachability_gating): instead of denying the hatch to a reachable material, emit its |shortage_source| at elastic_cost * k (k >> 1), so running the chain beats the penalised import. Reproduces the gate as a cost using create_problem's OWN reachability verdict (active lines + deficit seeds + catalyst closure). k must stay below target_cost/elastic_cost (= 2^10) so a reachable shortage never undercuts target relaxation; the shipped value is 256. Applies only to reachable, non-deficit materials; unreachable materials keep the flat elastic_cost hatch (their import-vs-fabricate is observe_price's job via shortage_cost_overrides). nil leaves the hatch flat.
 ---@field shortage_cost_overrides table<string, number>?  Per-material multiplier on the |shortage_source| objective (cost = elastic_cost * mult), keyed by material variable name. Plain string-keyed table, storage-safe and deterministic. Applied regardless of gating and takes precedence over reachability_soft_gate_k. This is solver/observe_price's production channel: it reprices the unreachable self-sustaining catalyst shortages so the placed cycle fabricates instead of penalty-importing. Absent materials keep their gate/flat cost. nil leaves costs unchanged.
 ---@field shortage_cost_fn (fun(constraint_name: string, is_reachable: boolean): number)?  Research only. When set (and reachability_gating is off so the hatch is un-gated), the un-gated |shortage_source| objective is priced by this callback instead of the flat elastic_cost -- the hook for the tilted-cost experiment. is_reachable is create_problem's OWN reachability verdict (the same set the gate uses: active lines + deficit seeds + catalyst closure), so a "soft gate" can lift only reachable materials and leave unreachable ones their cheap import hatch. The caller may also close over any precomputed signal (e.g. M.compute_reachability_depth). nil leaves the flat elastic_cost in place.
@@ -767,12 +769,17 @@ end
 function M.create_problem(solution_name, constraints, production_lines, forced_imports, options)
     local problem = problem_generator.new(solution_name)
 
-    -- Ablation switches (all default ON; only the headless research worker flips
-    -- them). Read once here so the gated sites below stay readable.
+    -- Cycle-material escape-hatch switches. ALL DEFAULT OFF: with no options the
+    -- build is the PLAIN problem -- un-gated and with no cycle-entry seeding, so
+    -- every produced+consumed material gets both a |surplus_sink| and a flat
+    -- |shortage_source| (the produced-only / consumed-only materials get a
+    -- |final_sink| / |initial_source| respectively). The gated solver paths (the
+    -- legacy norm and the cascade) turn these on explicitly. Read once here so
+    -- the gated sites below stay readable.
     options = options or {}
-    local opt_deficit_seeding = options.deficit_seeding ~= false
-    local opt_catalyst_closure = options.catalyst_closure ~= false
-    local opt_reachability_gating = options.reachability_gating ~= false
+    local opt_deficit_seeding = options.deficit_seeding == true
+    local opt_catalyst_closure = options.catalyst_closure == true
+    local opt_reachability_gating = options.reachability_gating == true
     -- Research probe; unlike the three above it defaults OFF (the shipped build
     -- never gates surplus_sink), so only an explicit `true` from the headless
     -- worker turns it on.

@@ -17,6 +17,12 @@ local harness = require "tests/harness"
 local lp = require "solver/linear_programming"
 local cp = require "solver/create_problem"
 
+-- The all-in-cycle case below asserts the GATED solver's deficit seeding (it
+-- auto-promotes cu/normal + ir/normal to |initial_source| cycle inputs).
+-- create_problem now defaults to the PLAIN problem, so request the gating
+-- explicitly -- the legacy ship default.
+local GATED = { deficit_seeding = true, catalyst_closure = true, reachability_gating = true }
+
 local fixture = require "tests/cases/fixture"
 local QUALITY = fixture.QUALITY
 local item, line, cascade = fixture.item, fixture.line, fixture.cascade
@@ -244,7 +250,7 @@ table.insert(cases, {
               limit_type = "upper", limit_amount_per_second = 1 },
         }
 
-        local problem = cp.create_problem("all-in-cycle", constraints, lines)
+        local problem = cp.create_problem("all-in-cycle", constraints, lines, nil, GATED)
         local state, vars = harness.solve_to_completion(lp, problem,
             { tolerance = 1e-6, iterate_limit = 600 })
 
