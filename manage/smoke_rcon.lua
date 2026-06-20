@@ -2978,12 +2978,15 @@ local BUNDLE16_NORM_XFAIL = {
         ["Fulgora top down"] = true,
         ["Quality loop"] = true,
     },
+    -- After the L2 dust fix (pre_solve VIOLATION_QUAD/L2_RECIPE_EPS raised together
+    -- + the violation linear floor, so the 0-optimal columns snap to exactly 0
+    -- instead of parking at dust) Begining and Gleba loop now reproduce the cascade
+    -- baseline tier sums -- the dust they parked was the only divergence -- so they
+    -- are no longer pinned. The remainder genuinely redistribute the violation.
     l2 = {
         ["Asteroid up cycleing"] = true,
-        ["Begining"] = true, -- L2's even spread differs from cascade even with the chain run
         ["Fulgora bottom up"] = true,
         ["Fulgora top down"] = true,
-        ["Gleba loop"] = true, -- L2 spreads the (now slot-unit) fluid surplus differently
         ["Quality loop"] = true,
         ["SpacePlatform"] = true,
     },

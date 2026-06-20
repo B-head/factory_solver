@@ -1390,12 +1390,23 @@ end
 ---    build-vs-import crossover (quad*x = recipe cost) sits at a negligible x.
 ---Targets (kinds "elastic" / "headroom") are left at their target_cost tier so
 ---they are still met first. Flips problem.has_quad (the QP Newton path).
+---
+---`floor` (default 0) is a small LINEAR cost kept on each violation alongside the
+---quad -- the elastic-net L1 admixture. The pure quad has zero marginal cost at
+---the origin, so a 0-optimal violation parks at the analytic-centre dust instead
+---of snapping to 0; a floor above the IPM zero-resolution threshold sqrt(mu) gives
+---it a reduced cost the dual-certified zero-purification can act on. It is
+---negligible against the quad for real (non-zero) violations, so the L2 optimum is
+---unchanged; it only bites near 0. See manage/pre_solve.lua (VIOLATION_FLOOR) for
+---why the quad is also scaled up rather than relying on the floor alone.
 ---@param problem Problem  A freshly built ungated baseline.
 ---@param quad number  The diagonal quadratic coefficient on each violation (research QUAD0 = 2).
-function M.shape_l2(problem, quad)
+---@param floor number?  Linear cost retained on each violation elastic (default 0).
+function M.shape_l2(problem, quad, floor)
+    floor = floor or 0
     for key, p in pairs(problem.primals) do
         if p.kind == "shortage_source" or p.kind == "surplus_sink" then
-            p.cost = 0
+            p.cost = floor
             problem:set_quad(key, quad)
         elseif p.kind == "initial_source" or p.kind == "final_sink" then
             p.cost = 0

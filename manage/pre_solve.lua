@@ -24,12 +24,43 @@ local iterate_limit = 600
 -- "cascade" is the retired staged rescue (solver/cascade.lua), kept dispatchable
 -- but NOT offered in the UI, so its fixtures keep validating it. The target
 -- rescue (M.target_rescue_step) runs in front of every norm: targets are tier-1.
-local VIOLATION_QUAD = 2 -- L2 norm curvature (research QUAD0; project_quad_escape_observation)
--- The L2 build's recipe/bridge tier. Tiny so the QP's build-vs-import crossover
--- (quad*x = recipe cost) sits at a negligible x -- otherwise L2 leaks a small
--- buildable import per intermediate. 2^-20 is the cascade's face-regularizer
--- value (verified to drive the leak to ~0 on a buildable chain).
-local L2_RECIPE_EPS = 2 ^ -20
+-- L2 cost scale. The IPM converges to the analytic centre of the optimal face,
+-- so a 0-optimal variable parks at the "dust" residual x ~ mu/s* (mu ~ tol at
+-- termination, s* its reduced cost). The dual-certified zero-purification
+-- (linear_programming.certify_zeros) only snaps a variable it can prove zero --
+-- s_i > x_i, equivalently x_i < sqrt(mu) -- so a 0-optimal column is reachable by
+-- purify only if its s* clears sqrt(mu) ~ sqrt(1e-7) ~ 2^-11.6. The earlier L2
+-- build priced its violation elastics at 0 + a quad=2 (zero marginal cost at the
+-- origin -> s* -> 0) and its recipe tier at a tiny 2^-20 (s* ~ 2^-20), so EVERY
+-- 0-optimal column sat far below the purify threshold and L2 snapped nothing to 0
+-- (it left tens of recipes / imports / dumps parked at 1e-4..1e-1).
+--
+-- The fix raises the recipe tier and the violation quad TOGETHER (a uniform scale
+-- of the {recipe, violation} objective by 2^10, so the build-vs-import crossover
+-- eps/quad stays at 2^-21 and the L2 optimum is argmin-invariant -- verified:
+-- sum(viol^2), the genuine recipe set, and the import/dump totals are preserved),
+-- and adds a small linear floor on the violation elastics (the elastic-net L1
+-- admixture). Now every costable column's reduced cost clears sqrt(mu): the recipe
+-- zeros park near 0 (s* = eps = 2^-10, well above sqrt(mu)) and the violation zeros
+-- snap to EXACTLY 0 (the floor carries their purify certificate). The quad must be
+-- raised, not just the linear floor: without it the now-material recipe tier is
+-- undercut by the cheap quad import and an over-cycling chain collapses to importing
+-- its completed intermediates (the L1 cheat); the leak point is kept at 2^-21 so
+-- building still wins at the margin.
+--
+-- The scale factor (2^10) is deliberately kept SMALL: the quad sits just above the
+-- target tier (2^11 vs target_cost 2^10) so it prevents the collapse and pulls the
+-- violations to the purify floor WITHOUT dominating the target tier and over-firing
+-- the rescue. (An earlier cut scaled by 2^14 -- quad 2^15, 32x the target tier --
+-- which cleaned the pathological deep-cycle recipe dust to EXACTLY 0 too, but made
+-- the baseline relax targets for tiny forced violations; this trades a little of
+-- that recipe-dust cleaning -- those zeros now park at ~1e-4, below the report
+-- threshold rather than exactly 0 -- for a quad that respects the tier order.)
+-- sqrt(mu) is the IPM zero floor, NOT a constant we can lower without re-tuning
+-- tolerance / conditioning.
+local VIOLATION_QUAD = 2 ^ 11 -- L2 norm curvature, scaled with L2_RECIPE_EPS (was 2)
+local VIOLATION_FLOOR = 2 ^ -8 -- elastic-net linear floor on the violation elastics (> sqrt(mu))
+local L2_RECIPE_EPS = 2 ^ -10
 -- L-infinity capped-stage peak budget: relative slack for the IPM's relative
 -- residual plus an absolute floor when the peak is 0 (the target-rescue values).
 local linf_budget_rel, linf_budget_abs = 1e-3, 1e-6
@@ -182,8 +213,9 @@ function M.forwerd_solve(force_data, solution)
                 solution.forced_imports = nil
                 solution.reclassify_pending = nil
                 solution.linf = nil
-                -- L2: un-gated, with a TINY recipe tier so the QP build-vs-import
-                -- crossover leak is negligible, then shaped by shape_l2 below.
+                -- L2: un-gated, with the recipe tier raised to clear the purify
+                -- zero-floor sqrt(mu) (see L2_RECIPE_EPS), then shaped by shape_l2
+                -- below (violation quad + linear floor).
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -261,8 +293,9 @@ function M.forwerd_solve(force_data, solution)
         if cc_build then
             cascade.shape_problem(solution.problem, cc_build)
         elseif apply_l2 then
-            -- L2 ("balanced"): violation elastics -> pure quadratic, ports free.
-            create_problem.shape_l2(solution.problem, VIOLATION_QUAD)
+            -- L2 ("balanced"): violation elastics -> quadratic + a small linear
+            -- floor (the elastic-net admixture that lets purify reach 0), ports free.
+            create_problem.shape_l2(solution.problem, VIOLATION_QUAD, VIOLATION_FLOOR)
         elseif linf_stage == "minmax" then
             -- L-infinity stage 1: re-cost to min-max (add the peak primal + cap
             -- rows). See create_problem.shape_minmax / M.linf_step.

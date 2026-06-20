@@ -130,6 +130,30 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
+    name = "shape_l2 floor keeps a small linear cost on the violations (elastic-net)",
+    run = function()
+        -- The shipping L2 (manage/pre_solve.lua) passes a small linear floor so a
+        -- 0-optimal violation gets a reduced cost above sqrt(mu) and the dual-
+        -- certified zero-purification can snap it to exactly 0 (the pure quad has
+        -- zero marginal cost at the origin, so it parks at dust instead). The floor
+        -- rides ON the violation elastics; the legitimate ports stay free.
+        local lines, constraints = surplus_fixture()
+        local l2 = cp.create_problem("norm-l2-floor", constraints, lines, nil,
+            { reachability_gating = false })
+        cp.shape_l2(l2, 2, 2 ^ -8)
+        harness.assert_true(l2.has_quad, "shape_l2 with a floor still flips has_quad")
+        for _, p in pairs(l2.primals) do
+            if VIOLATION[p.kind] then
+                harness.assert_near(p.cost, 2 ^ -8, 1e-12, "violation carries the linear floor")
+                harness.assert_near(p.quad or 0, 2, 1e-12, "violation still carries the quad")
+            elseif p.kind == "initial_source" or p.kind == "final_sink" then
+                harness.assert_near(p.cost, 0, 1e-12, "the floor does not touch the free ports")
+            end
+        end
+    end,
+})
+
+table.insert(cases, {
     name = "L2 builds a buildable chain instead of importing it (the cheat guard)",
     run = function()
         -- raw -> ore -> widget, raw a legitimate initial ingredient (no producer).
