@@ -485,10 +485,27 @@ function M.linf_step(solution)
     local linf = solution.linf
     if linf and linf.phase == "done" then return end
 
+    -- Each L-infinity stage is solved COLD -- the warm seed (the prior stage's
+    -- solution.raw_variables) is dropped so the IPM restarts from the cold
+    -- Mehrotra central path. Same rationale as the cascade (M.arm_cascade_build):
+    -- the min-max and capped builds carry a DIFFERENT objective than the build
+    -- they follow (the baseline's L1 cost, then the min-max peak cost), so the
+    -- previous stage's optimum is a boundary point OFF this build's central path,
+    -- and warm-starting an interior-point method from it walks the duality measure
+    -- the wrong way. Measured on the explorer corpus: warm-starting the min-max
+    -- stage diverged (mu climbing, a free import column running to ~4e11, hitting
+    -- the iterate limit) on seed_121 / seed_131 tnetneg cycles -- and did so only
+    -- under the pairs-order one headless VM happened to assemble the LP in, so it
+    -- read as a flaky 2/1678 non-convergence. Cold-starting converges them in
+    -- 23-25 iterations, identically across VMs, AND is faster than the warm solves
+    -- that did limp through (32-34 iterations). The baseline + target-rescue
+    -- stages are NOT cold-started here (they run before linf_step and keep their
+    -- iteration-saving warm-start; they share the L1 objective across edits).
     local function restart()
         solution.lf_restart = true
         solution.solver_state = "ready"
         solution.solver_iteration = nil
+        solution.raw_variables = nil
     end
 
     if not linf then
