@@ -92,6 +92,7 @@ local case_files = {
     "lp_material_kinds",
     "lp_constraint_types",
     "lp_material_classification",
+    "lp_class_cost",
     "material_cycles",
     "problem_dump",
     "lp_fuel_burnt_result",

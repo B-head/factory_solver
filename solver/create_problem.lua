@@ -27,6 +27,24 @@ local source_cost_heat = 100 / 10e6
 local elastic_cost = 2 ^ 10
 local target_cost = 2 ^ 20
 
+-- Default base LINEAR objective cost per steerable variable class (PrimalKind) --
+-- the single source of truth for the flat tiers of the cost ladder. The
+-- `class_cost` option (CreateProblemOptions) overrides any entry per build. Two
+-- classes are NOT flat and are resolved at their emission site from the same
+-- override map instead, with a special fallback: `recipe` keeps the
+-- recipe_epsilon tier (plus the per-key jitter and, on a source line, the
+-- product's source_cost), and `initial_source` is per-material (source_cost_of).
+-- The structural slacks (`slack`, the research `linf_peak`) carry no steering
+-- cost and are not configurable here.
+local default_class_cost = {
+    bridge = slack_cost,
+    final_sink = slack_cost,
+    surplus_sink = elastic_cost,
+    shortage_source = elastic_cost,
+    elastic = target_cost,
+    headroom = target_cost,
+}
+
 -- Tiny tie-break cost on every non-bridge recipe variable. It collapses the
 -- degenerate optima the three boundary costs (source / sink / target) cannot
 -- see: net-zero futile cycles (barrel fill <-> empty, temperature-bridge
@@ -153,6 +171,33 @@ local function bare_fluid_limit_of(value)
         return vk.limit(vk.material({ type = "fluid", name = value.name, quality = "normal" }))
     end
     return nil
+end
+
+---Base LINEAR objective cost of a variable class for this build. A
+---`class_cost[kind]` override (CreateProblemOptions) wins; otherwise `fallback`
+---when given (the special recipe tier / per-material initial_source default),
+---else the flat default_class_cost tier for that class.
+---@param class_cost table<string, number>
+---@param kind PrimalKind
+---@param fallback number?
+---@return number
+local function resolve_class_cost(class_cost, kind, fallback)
+    local c = class_cost[kind]
+    if c ~= nil then return c end
+    if fallback ~= nil then return fallback end
+    return default_class_cost[kind]
+end
+
+---Apply the per-class diagonal quadratic (class_quad[kind], CreateProblemOptions)
+---to a just-added variable when one is configured. No-op otherwise, so the
+---pure-LP path is untouched unless a class explicitly asks for curvature.
+---@param problem Problem
+---@param class_quad table<string, number>
+---@param key string
+---@param kind PrimalKind
+local function apply_class_quad(problem, class_quad, key, kind)
+    local q = class_quad[kind]
+    if q and q ~= 0 then problem:set_quad(key, q) end
 end
 
 local M = {}
@@ -757,7 +802,9 @@ end
 ---@field target_budget number?  Target-rescue lock (manage/pre_solve.lua M.target_rescue_step): add one upper-limit row capping the summed target elastics at this value, so the solve keeps the stage-1 target optimum no matter how expensive the violations the chain forces. This fixes the all-zero target collapse: a single weighted LP trades the target against violations at the finite exchange rate target_cost / elastic_cost = 2^10, so any problem needing > 1024 violation units per target unit was rationally abandoned (T relaxed in full -- the trade is linear, hence all-or-nothing). 30/1678 corpus problems before the rescue, 0 after. nil adds no row.
 ---@field recipe_epsilon number?  Override the flat recipe/bridge cost tier (the futile-loop tie-break; shipped default 2^-6). Used by the cascade stages indirectly (they overwrite recipe costs anyway) and by the machine-polish-vs-plain-epsilon research comparison. The per-key jitter scales as a fraction of this. nil keeps the shipped tier.
 ---@field hatch_exclude table<string, true>?  Cascade deletion final (solver/cascade.lua, also probe_vp_rescue): materials whose import hatches (intermediate |initial_source| / |shortage_source|) are omitted from the build entirely. Only sound once a stage solve has PROVEN the material's import can be ~zero (that solution witnesses feasibility, so elastic necessity is not violated) -- the deletion encodes the ~zero face structurally, where a ~zero budget row over live hatch variables is numerically hostile to the IPM interior. Deficit seeds still count for reachability; only the hatch variables disappear. nil omits nothing.
----@field import_quad number?  Research probe (project_import_fabricate_convex, the QP route): a diagonal convex quadratic coefficient placed on every |shortage_source| import column via problem:set_quad, so the material's marginal import cost becomes (linear shortage cost) + import_quad * x -- it RISES with import quantity. The crossover where crafting beats importing self-selects per material as the marginal import cost climbs to meet the marginal craft cost. Combine with shortage_cost_fn to set a cheap linear floor (cheap top-up) under the rising curve. nil / 0 = pure linear (LP) import. Flips problem.has_quad, switching linear_programming to the QP Newton path. (Measured negative for import-vs-fabricate -- the lever is the cost level, not its shape -- but the set_quad/has_quad machinery is a general IPM-native QP capability.)
+---@field import_quad number?  Legacy shorthand for class_quad.shortage_source (below): a diagonal convex quadratic on every |shortage_source| import column, so the material's marginal import cost becomes (linear shortage cost) + import_quad * x -- it RISES with import quantity (project_import_fabricate_convex, the QP route). Folded into class_quad at build time; an explicit class_quad.shortage_source wins. nil / 0 = pure linear (LP) import. (Measured negative for import-vs-fabricate -- the lever is the cost level, not its shape -- but the set_quad/has_quad machinery is a general IPM-native QP capability.)
+---@field class_cost table<PrimalKind, number>?  Override the base LINEAR objective cost of an entire variable class, keyed by Primal.kind: "recipe" / "bridge" / "initial_source" / "final_sink" / "surplus_sink" / "shortage_source" / "elastic" / "headroom" (see default_class_cost for the defaults this replaces). The value REPLACES that class's base tier; the structural extras still layer on top of it -- the per-recipe jitter and a source line's product source_cost (recipe), and the per-material shortage/surplus mechanisms (soft gate, overrides, callbacks), which now scale the class base rather than the hardcoded tier. `recipe`'s fallback is the recipe_epsilon option; `initial_source`'s is the per-material source_cost_of. The structural slacks ("slack" / "linf_peak") are not steerable and ignore this. nil leaves every default.
+---@field class_quad table<PrimalKind, number>?  Diagonal convex quadratic coefficient (the ½·q·x² curvature) placed on EVERY variable of a class, keyed by Primal.kind (same keys as class_cost). q must be >= 0 to stay convex; the first nonzero flips problem.has_quad (the QP Newton path). import_quad is the shortage_source shorthand and is merged in here. nil leaves every class purely linear.
 
 ---Create linear programming problems.
 ---@param solution_name string
@@ -811,6 +858,23 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- quadratic on every |shortage_source| import column, so its marginal cost
     -- rises with quantity. Set via problem:set_quad; nil/0 = pure linear (LP).
     local opt_import_quad = options.import_quad
+
+    -- Per-class cost overrides (CreateProblemOptions). class_cost replaces a
+    -- class's base linear tier (see resolve_class_cost / default_class_cost);
+    -- class_quad puts a diagonal convex quadratic on every variable of a class
+    -- (see apply_class_quad). Both are keyed by Primal.kind. import_quad is the
+    -- legacy shortage_source-only quad shorthand: fold it into a private copy of
+    -- class_quad so there is ONE quad code path (an explicit class_quad entry for
+    -- shortage_source wins). Empty tables when unset, so the resolvers below stay
+    -- branch-free and the no-options build is byte-identical to before.
+    local opt_class_cost = options.class_cost or {}
+    local opt_class_quad = {}
+    if options.class_quad then
+        for k, v in pairs(options.class_quad) do opt_class_quad[k] = v end
+    end
+    if opt_import_quad and opt_import_quad ~= 0 and opt_class_quad.shortage_source == nil then
+        opt_class_quad.shortage_source = opt_import_quad
+    end
 
     -- The constraints + normalized lines are the minimal data needed to replay
     -- this in-game solve as a headless fixture, so they log at debug (the bulky
@@ -987,8 +1051,10 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- infinitesimal cost in [0, 2^-14) that picks one canonical routing
             -- without pricing the hop. Still ~four orders below source_cost, so it
             -- never tips a real decision or makes the LP skip a bridge.
-            local bridge_cost = slack_cost + opt_recipe_epsilon * jitter_strength * key_unit_hash(objective_name)
+            local bridge_base = resolve_class_cost(opt_class_cost, "bridge")
+            local bridge_cost = bridge_base + opt_recipe_epsilon * jitter_strength * key_unit_hash(objective_name)
             problem:add_objective(objective_name, bridge_cost, true, "bridge")
+            apply_class_quad(problem, opt_class_quad, objective_name, "bridge")
         else
             -- A user source recipe is priced at source_cost on its product so
             -- the LP treats it like a declared external input rather than a
@@ -997,12 +1063,14 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- Flat epsilon plus a per-recipe hash jitter (both inside the
             -- recipe_epsilon tier) so genuinely tied recipes resolve to one
             -- canonical vertex instead of an analytic-centre split.
-            local recipe_cost = opt_recipe_epsilon * (1 + jitter_strength * key_unit_hash(objective_name))
+            local recipe_tier = resolve_class_cost(opt_class_cost, "recipe", opt_recipe_epsilon)
+            local recipe_cost = recipe_tier * (1 + jitter_strength * key_unit_hash(objective_name))
             if is_source_line(line) and line.products[1] then
                 recipe_cost = source_cost_of(line.products[1]) + recipe_cost
             end
             problem:add_objective(objective_name, recipe_cost, true, "recipe")
             problem:add_subject_term(objective_name, vk.limit(objective_name), 1)
+            apply_class_quad(problem, opt_class_quad, objective_name, "recipe")
         end
         ::continue_line::
     end
@@ -1030,12 +1098,13 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         if not bridge_target_variables[constraint_name]
             and not (opt_surplus_sink_gating and drainable[constraint_name]) then
             local elastic_name = vk.surplus_sink(constraint_name)
-            local surplus_cost = elastic_cost
+            local surplus_cost = resolve_class_cost(opt_class_cost, "surplus_sink")
             if opt_surplus_cost_fn then
                 surplus_cost = opt_surplus_cost_fn(constraint_name)
             end
             problem:add_objective(elastic_name, surplus_cost, false, "surplus_sink", constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, -1)
+            apply_class_quad(problem, opt_class_quad, elastic_name, "surplus_sink")
         end
         -- Cycle entry points identified by find_deficit_materials get a
         -- |initial_source| at source_cost: they are the natural external
@@ -1051,7 +1120,8 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             intermediate -- see opt_hatch_exclude above. ]]
         elseif deficits[constraint_name] then
             local slack_name = vk.initial_source(constraint_name)
-            problem:add_objective(slack_name, source_cost_of(value), false, "initial_source", constraint_name)
+            local source_cost = resolve_class_cost(opt_class_cost, "initial_source", source_cost_of(value))
+            problem:add_objective(slack_name, source_cost, false, "initial_source", constraint_name)
             problem:add_subject_term(slack_name, constraint_name, 1)
             problem:add_subject_term(slack_name, vk.limit(constraint_name), 1)
 
@@ -1059,6 +1129,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             if bare_limit then
                 problem:add_subject_term(slack_name, bare_limit, 1)
             end
+            apply_class_quad(problem, opt_class_quad, slack_name, "initial_source")
         elseif not (opt_reachability_gating and reachable[constraint_name]) then
             -- |shortage_source| is the import-vs-fabricate escape. Reachable
             -- materials (reachable from raw inputs or promoted deficits) must run
@@ -1074,14 +1145,19 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- per material through shortage_cost_overrides.
             local elastic_name = vk.shortage_source(constraint_name)
             local is_reachable = reachable[constraint_name] == true
-            local shortage_cost = elastic_cost
+            -- The base tier (class_cost override, else elastic_cost). The soft
+            -- gate and the per-material override scale THIS base, so they compose
+            -- with a class_cost.shortage_source override (identical to the old
+            -- elastic_cost when none is set).
+            local shortage_base = resolve_class_cost(opt_class_cost, "shortage_source")
+            local shortage_cost = shortage_base
             if opt_soft_gate_k and is_reachable then
-                shortage_cost = elastic_cost * opt_soft_gate_k
+                shortage_cost = shortage_base * opt_soft_gate_k
             end
             -- Per-material override (observe_price) takes precedence over the gate.
             if opt_shortage_cost_overrides then
                 local mult = opt_shortage_cost_overrides[constraint_name]
-                if mult then shortage_cost = elastic_cost * mult end
+                if mult then shortage_cost = shortage_base * mult end
             end
             -- Research-only callback, authoritative when set (headless ablation).
             if opt_shortage_cost_fn then
@@ -1096,13 +1172,11 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
                 problem:add_subject_term(elastic_name, bare_limit, 1)
             end
 
-            -- Research probe (import_quad, QP route): convex curvature on this
-            -- import column so its marginal cost rises with import quantity (the
-            -- artifact-free "curve"; no cap row, so no IPM-convergence tax). The
-            -- L2 norm uses M.shape_l2 (a post-pass) instead, not this option.
-            if opt_import_quad and opt_import_quad ~= 0 then
-                problem:set_quad(elastic_name, opt_import_quad)
-            end
+            -- Convex curvature on this import column so its marginal cost rises
+            -- with import quantity (class_quad.shortage_source, or the import_quad
+            -- shorthand folded into it). No cap row, so no IPM-convergence tax;
+            -- the L2 norm uses M.shape_l2 (a post-pass) instead.
+            apply_class_quad(problem, opt_class_quad, elastic_name, "shortage_source")
         end
         ::continue::
     end
@@ -1111,15 +1185,17 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         problem:add_equivalence_constraint(constraint_name, 0)
 
         local slack_name = vk.final_sink(constraint_name)
-        problem:add_objective(slack_name, slack_cost, false, "final_sink", constraint_name)
+        problem:add_objective(slack_name, resolve_class_cost(opt_class_cost, "final_sink"), false, "final_sink", constraint_name)
         problem:add_subject_term(slack_name, constraint_name, -1)
+        apply_class_quad(problem, opt_class_quad, slack_name, "final_sink")
     end
 
     for constraint_name, value in pairs(included_ingresients) do
         problem:add_equivalence_constraint(constraint_name, 0)
 
         local slack_name = vk.initial_source(constraint_name)
-        problem:add_objective(slack_name, source_cost_of(value), false, "initial_source", constraint_name)
+        local source_cost = resolve_class_cost(opt_class_cost, "initial_source", source_cost_of(value))
+        problem:add_objective(slack_name, source_cost, false, "initial_source", constraint_name)
         problem:add_subject_term(slack_name, constraint_name, 1)
         problem:add_subject_term(slack_name, vk.limit(constraint_name), 1)
 
@@ -1127,6 +1203,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         if bare_limit then
             problem:add_subject_term(slack_name, bare_limit, 1)
         end
+        apply_class_quad(problem, opt_class_quad, slack_name, "initial_source")
     end
 
     for _, constraint in ipairs(constraints) do
@@ -1143,10 +1220,11 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- "headroom" kind, with .material set, so target readers count it
             -- alongside elastic and map it back to the constrained material.
             local slack_name = problem:add_upper_limit_constraint(constraint_name, limit)
-            problem:update_objective_cost(slack_name, target_cost)
+            problem:update_objective_cost(slack_name, resolve_class_cost(opt_class_cost, "headroom"))
             local pull = problem.primals[slack_name]
             pull.kind = "headroom"
             pull.material = constraint_material
+            apply_class_quad(problem, opt_class_quad, slack_name, "headroom")
         elseif constraint.limit_type == "lower" then
             problem:add_lower_limit_constraint(constraint_name, limit)
 
@@ -1159,14 +1237,16 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- at zero (observed on Fulgora with electromagnetic-science-
             -- pack lower=0.5). Mirrors the target_cost slack on `upper`.
             local elastic_name = vk.elastic(constraint_name)
-            problem:add_objective(elastic_name, target_cost, false, "elastic", constraint_material)
+            problem:add_objective(elastic_name, resolve_class_cost(opt_class_cost, "elastic"), false, "elastic", constraint_material)
             problem:add_subject_term(elastic_name, constraint_name, 1)
+            apply_class_quad(problem, opt_class_quad, elastic_name, "elastic")
         elseif constraint.limit_type == "equal" then
             problem:add_equivalence_constraint(constraint_name, limit)
 
             local elastic_name = vk.elastic(constraint_name)
-            problem:add_objective(elastic_name, target_cost, false, "elastic", constraint_material)
+            problem:add_objective(elastic_name, resolve_class_cost(opt_class_cost, "elastic"), false, "elastic", constraint_material)
             problem:add_subject_term(elastic_name, constraint_name, 1)
+            apply_class_quad(problem, opt_class_quad, elastic_name, "elastic")
         else
             assert()
         end
