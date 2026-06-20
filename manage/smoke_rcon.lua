@@ -2983,6 +2983,7 @@ local BUNDLE16_NORM_XFAIL = {
         ["Begining"] = true, -- L2's even spread differs from cascade even with the chain run
         ["Fulgora bottom up"] = true,
         ["Fulgora top down"] = true,
+        ["Gleba loop"] = true, -- L2 spreads the (now slot-unit) fluid surplus differently
         ["Quality loop"] = true,
         ["SpacePlatform"] = true,
     },
@@ -2990,8 +2991,10 @@ local BUNDLE16_NORM_XFAIL = {
         ["Asteroid up cycleing"] = true,
         ["Fulgora bottom up"] = true,
         ["Fulgora top down"] = true,
-        ["Fusion"] = true, -- does not converge (budget-lock face)
+        -- Fusion now converges to the baseline under the per-kind amount
+        -- normalization (was pinned: did not converge on the budget-lock face).
         ["Gleba circuit"] = true,
+        ["Gleba loop"] = true, -- L-infinity levels the (now slot-unit) fluid surplus differently
         ["Quality loop"] = true,
         ["SpacePlatform"] = true,
     },

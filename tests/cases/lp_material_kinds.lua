@@ -51,22 +51,25 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "<heat> initial_source uses the heat-scaled source_cost so a heat-fed chain does not collapse",
-    -- create_problem.source_cost_for prices |initial_source| per material kind:
-    -- item = 1, fluid = 0.1, <heat> = 100/10e6 (heat is in joules at ~10 MW
-    -- scale). The scaling is load-bearing: the code comment warns that an
-    -- item-scale source_cost on <heat> "would dominate the objective by seven
-    -- orders of magnitude and the LP collapses to the all-zero solution
-    -- whenever heat is sourced externally."
+    name = "<heat> initial_source uses the heat-scaled amount_weight so a heat-fed chain does not collapse",
+    -- create_problem.amount_weight_of scales an |initial_source| (and every other
+    -- escape / elastic variable) per material kind ON ITS COEFFICIENT: item = 1,
+    -- fluid = 10, <heat> = 10e6/100 = 1e5 (heat is in joules at ~10 MW scale).
+    -- The variable is denominated in normalized slot-units (physical flow =
+    -- amount_weight * x), so a uniform per-class cost weighs one slot-unit equally
+    -- across kinds. The scaling is load-bearing: without it an item-scale weight on
+    -- <heat> would dominate the objective by seven orders of magnitude and the LP
+    -- would collapse to the all-zero solution whenever heat is sourced externally.
     --
     -- This fixture is chosen so item-scale pricing WOULD collapse it: a recipe
-    -- consumes 1e7 heat to make 1 hot-item, demanded at 1/s. Sourcing 1e7 heat
-    -- costs only 1e7 * (100/10e6) = 100 at heat scale (far below the 2^20
-    -- elastic on the demand, so the LP produces), but would cost 1e7 at item
-    -- scale -- above the ~1.05e6 elastic, so the LP would rather drop the
-    -- demand and park the recipe at zero. Asserting the recipe RUNS pins the
-    -- heat scaling: regress source_cost_heat to the item default and this
-    -- fails with recipe ~ 0 / elastic ~ 1.
+    -- consumes 1e7 heat to make 1 hot-item, demanded at 1/s. With the heat
+    -- amount_weight the source variable carries 1e7/1e5 = 100 slot-units at cost
+    -- 1 = objective 100 (far below the 2^20 elastic on the demand, so the LP
+    -- produces); at item scale (weight 1) it would carry 1e7 slot-units = objective
+    -- 1e7 -- above the ~1.05e6 elastic, so the LP would rather drop the demand and
+    -- park the recipe at zero. Asserting the recipe RUNS pins the heat scaling:
+    -- regress amount_weight_heat to the item default and this fails with
+    -- recipe ~ 0 / elastic ~ 1.
     run = function()
         local function heat(amount)
             return { type = "virtual_material", name = "<heat>", quality = "normal",
@@ -93,8 +96,10 @@ table.insert(cases, {
         -- The chain runs rather than collapsing to the elastic.
         harness.assert_near(vars.x["recipe/heat-exchanger/normal"], 1, 0.01,
             "heat-exchanger runs (heat-scaled source_cost keeps it viable)")
-        harness.assert_near(vars.x["|initial_source|virtual_material/<heat>/normal"], 1e7, 1e3,
-            "heat sourced at the recipe's draw")
+        -- The variable is in normalized slot-units: 1e7 physical / amount_weight
+        -- 1e5 = 100. Physical heat sourced = amount_weight_heat * x = 1e7.
+        harness.assert_near(vars.x["|initial_source|virtual_material/<heat>/normal"], 100, 0.1,
+            "heat sourced at the recipe's draw (100 slot-units = 1e7 physical)")
         harness.assert_near(vars.x["|elastic||limit|item/hot-item/normal"] or 0, 0, 1e-3,
             "demand met by production, not absorbed by the elastic (no collapse)")
     end,

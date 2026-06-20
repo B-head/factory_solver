@@ -132,12 +132,16 @@ end
 ---Add inequality the constraint of equal or less.
 ---@param dual_variable string
 ---@param limit number
+---@param coefficient number? Subject-term coefficient of the pos_slack in the
+---constraint row (default 1). create_problem passes the per-kind amount_weight
+---when the slack becomes a `headroom` pull, so the headroom is denominated in the
+---same normalized slot-units as the other escape / elastic variables.
 ---@return string
-function M:add_upper_limit_constraint(dual_variable, limit)
+function M:add_upper_limit_constraint(dual_variable, limit, coefficient)
     local slack_key = vk.pos_slack(dual_variable)
     M.add_equivalence_constraint(self, dual_variable, limit)
     M.add_objective(self, slack_key, 0, false, "slack")
-    M.add_subject_term(self, slack_key, dual_variable, 1)
+    M.add_subject_term(self, slack_key, dual_variable, coefficient or 1)
     return slack_key
 end
 

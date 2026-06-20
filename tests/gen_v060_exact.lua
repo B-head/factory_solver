@@ -12,6 +12,11 @@ local tn = require "manage/typed_name"
 
 local bundle = assert(loadfile(arg[1]))()
 local out_path = arg[2]
+-- The baseline is the 0.6.0 HARDGATE solver. create_problem now defaults to the
+-- PLAIN problem, so the gating must be requested explicitly -- without it the
+-- un-gated exact solve collapses the recycling problems (Asteroid 221 -> 3,
+-- Quality loop 19 -> 0.25) by importing the target instead of building the chain.
+local GATED = { reachability_gating = true, deficit_seeding = true, catalyst_closure = true }
 local names = {}; for n in pairs(bundle) do names[#names+1]=n end; table.sort(names)
 local function nf(x) if x==math.floor(x) then return string.format("%d",x) end; return string.format("%.10g",x) end
 
@@ -32,7 +37,7 @@ for _, name in ipairs(names) do
   end
   local placed = {}
   for _, ln in ipairs(b.lines) do placed[tn.typed_name_to_variable_name(ln.recipe_typed_name)] = true end
-  local ok, problem = pcall(create_problem.create_problem, name, cons, b.lines)
+  local ok, problem = pcall(create_problem.create_problem, name, cons, b.lines, nil, GATED)
   local state, vars = "create_problem-error", nil
   if ok then state, vars = harness.solve_to_completion(lp, problem, { tolerance = 1e-7, iterate_limit = 800 }) end
   local M, imp, sur, T = 0, 0, 0, 0

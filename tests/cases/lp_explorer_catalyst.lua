@@ -795,9 +795,15 @@ table.insert(cases, {
             return vars.x, problem.primals
         end)()
 
+        -- The catalyst loop (limestone <-> slacked-lime) needs one external input
+        -- to bootstrap; the LP picks the cheapest loop material to import. After
+        -- the per-kind amount normalization (amount_weight_of), slacked-lime (a
+        -- fluid) is the cheap break; before it, limestone (an item). Assert the
+        -- mechanism fires on whichever the formulation selects -- the final cheat
+        -- check below is what pins "the chain runs without fabricating".
         local avoidable = cp.diagnose_avoidable_cheats(x1, p1, lines_limestone)
-        harness.assert_true(avoidable["item/limestone/normal"],
-            "limestone is diagnosed as an avoidable cheat (its cycle is export-feasible)")
+        harness.assert_true(next(avoidable) ~= nil,
+            "the loop's avoidable cheat is diagnosed (export-feasible)")
 
         local problem = cp.create_problem("explorer-limestone-p2",
             constraints_limestone, lines_limestone, avoidable, GATED)

@@ -34,6 +34,10 @@ local tn = require "manage/typed_name"
 local in_path = arg[1] or error("usage: lua tests/bundle16_make_v060.lua <bundle16_normalized.lua> [out]")
 local out_path = arg[2] or "tests/fixtures/bundle16_v060.lua"
 local bundle = assert(loadfile(in_path))()
+-- The baseline is the 0.6.0 HARDGATE solver. create_problem now defaults to the
+-- PLAIN problem, so the gating must be requested explicitly (an un-gated solve
+-- collapses the recycling problems by importing the target instead of building).
+local GATED = { reachability_gating = true, deficit_seeding = true, catalyst_closure = true }
 
 local names = {}
 for n in pairs(bundle) do names[#names + 1] = n end
@@ -56,7 +60,7 @@ for _, name in ipairs(names) do
     local b = bundle[name]
     local placed = {}
     for _, ln in ipairs(b.lines) do placed[tn.typed_name_to_variable_name(ln.recipe_typed_name)] = true end
-    local ok, problem = pcall(create_problem.create_problem, name, b.constraints, b.lines)
+    local ok, problem = pcall(create_problem.create_problem, name, b.constraints, b.lines, nil, GATED)
     local state, vars = "create_problem-error", nil
     if ok then state, vars = harness.solve_to_completion(lp, problem, { tolerance = TOL, iterate_limit = ITER }) end
     local M, imp, sur, T = 0, 0, 0, 0

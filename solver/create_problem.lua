@@ -7,37 +7,50 @@ local fs_log = require "fs_log"
 local log = fs_log.for_module("solver.create_problem")
 
 local slack_cost = 0
--- Small per-unit cost on |initial_source| (external material supply). It sits
--- well below elastic_cost, so it never competes with the shortage/surplus
--- penalties or changes reachability gating, but it breaks ties between
--- recipes that produce the same product at different material efficiency:
--- the LP now prefers the chain that draws less raw input. Without it those
--- optima are degenerate and the IPM splits the flow arbitrarily.
---
--- The per-unit cost is scaled by material kind so the LP weight matches the
--- natural magnitude of one "unit": items are 1 piece, fluids are conventionally
--- 10x denser per recipe slot (vanilla writes 10 water per 1 plate), and <heat>
--- is in joules at ~10 MW scale (a heat exchanger turns 10 MJ/s of heat into
--- ~100 steam/s). Without this scaling, source_cost on <heat> alone would
--- dominate the objective by seven orders of magnitude and the LP collapses
--- to the all-zero solution whenever heat is sourced externally.
+-- Per-kind price of one unit of a material. A "unit" differs in natural magnitude
+-- by kind: items count in pieces, fluids are conventionally ~10x denser per recipe
+-- slot (vanilla writes 10 water per 1 plate), and <heat> is in joules at ~10 MW
+-- scale (a heat exchanger turns 10 MJ/s of heat into ~100 steam/s). This is used
+-- as a small COST on a user source recipe's product -- it sits well below
+-- elastic_cost, so it only breaks material-efficiency ties (the LP prefers the
+-- chain that draws less raw input) without competing with the penalties. The
+-- escape / elastic variables get the SAME per-kind normalization, but folded into
+-- their subject-term COEFFICIENT (amount_weight_of below) instead of their cost.
 local source_cost_item = 1
 local source_cost_fluid = 0.1
 local source_cost_heat = 100 / 10e6
+
+-- Per-kind amount_per_second COEFFICIENT weight on the escape / elastic variables
+-- (|initial_source| / |final_sink| / |shortage_source| / |surplus_sink| /
+-- |elastic| / headroom). The reciprocal of source_cost above: it denominates each
+-- such variable in normalized "slot units" by making its material-row coefficient
+-- amount_weight_of(kind) instead of 1, so the physical flow is amount_weight * x.
+-- A uniform per-class cost then weighs one slot-unit equally across kinds, so
+-- fluids and <heat> no longer carry an item-scaled penalty per physical unit (and
+-- <heat>, in joules, no longer dominates the objective by seven orders of
+-- magnitude). This REPLACES the old per-kind cost that sat on |initial_source|:
+-- that variable's objective is unchanged (cost * x = source_cost * physical), while
+-- the other five classes gain the same magnitude normalization. The cost side of
+-- the cost ladder stays uniform per class (default_class_cost / class_cost).
+local amount_weight_item = 1
+local amount_weight_fluid = 10
+local amount_weight_heat = 10e6 / 100
+
 local elastic_cost = 2 ^ 10
 local target_cost = 2 ^ 20
 
 -- Default base LINEAR objective cost per steerable variable class (PrimalKind) --
 -- the single source of truth for the flat tiers of the cost ladder. The
--- `class_cost` option (CreateProblemOptions) overrides any entry per build. Two
--- classes are NOT flat and are resolved at their emission site from the same
--- override map instead, with a special fallback: `recipe` keeps the
--- recipe_epsilon tier (plus the per-key jitter and, on a source line, the
--- product's source_cost), and `initial_source` is per-material (source_cost_of).
--- The structural slacks (`slack`, the research `linf_peak`) carry no steering
--- cost and are not configurable here.
+-- `class_cost` option (CreateProblemOptions) overrides any entry per build. The
+-- per-kind magnitude difference is NOT in these costs: it rides the subject-term
+-- coefficient (amount_weight_of) instead, so every entry here is a flat per-class
+-- tier. `recipe` is the one class resolved at its emission site with a special
+-- fallback (the recipe_epsilon tier plus the per-key jitter and, on a source
+-- line, the product's source_cost). The structural slacks (`slack`, the research
+-- `linf_peak`) carry no steering cost and are not configurable here.
 local default_class_cost = {
     bridge = slack_cost,
+    initial_source = source_cost_item,
     final_sink = slack_cost,
     surplus_sink = elastic_cost,
     shortage_source = elastic_cost,
@@ -156,6 +169,26 @@ local function source_cost_of(value)
         return source_cost_fluid
     else
         return source_cost_item
+    end
+end
+
+---Per-kind amount_per_second coefficient weight for an escape / elastic variable,
+---read from the value's own fields (no name parse). The reciprocal of
+---source_cost_of: a fluid unit is ~10x denser per recipe slot and <heat> is in
+---joules at ~10 MW scale, so denominating the variable in normalized slot-units
+---(coefficient = amount_weight) lets a uniform per-class cost weigh one slot-unit
+---equally across kinds. The physical flow the variable carries is amount_weight * x.
+---Works on a NormalizedAmount, a TypedName, or a Constraint (all expose type/name);
+---a recipe-typed Constraint falls through to the item weight (1).
+---@param value NormalizedAmount|TypedName|Constraint
+---@return number
+local function amount_weight_of(value)
+    if value.type == "virtual_material" and value.name == "<heat>" then
+        return amount_weight_heat
+    elseif value.type == "fluid" then
+        return amount_weight_fluid
+    else
+        return amount_weight_item
     end
 end
 
@@ -1103,7 +1136,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
                 surplus_cost = opt_surplus_cost_fn(constraint_name)
             end
             problem:add_objective(elastic_name, surplus_cost, false, "surplus_sink", constraint_name)
-            problem:add_subject_term(elastic_name, constraint_name, -1)
+            problem:add_subject_term(elastic_name, constraint_name, -amount_weight_of(value))
             apply_class_quad(problem, opt_class_quad, elastic_name, "surplus_sink")
         end
         -- Cycle entry points identified by find_deficit_materials get a
@@ -1120,14 +1153,14 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             intermediate -- see opt_hatch_exclude above. ]]
         elseif deficits[constraint_name] then
             local slack_name = vk.initial_source(constraint_name)
-            local source_cost = resolve_class_cost(opt_class_cost, "initial_source", source_cost_of(value))
-            problem:add_objective(slack_name, source_cost, false, "initial_source", constraint_name)
-            problem:add_subject_term(slack_name, constraint_name, 1)
-            problem:add_subject_term(slack_name, vk.limit(constraint_name), 1)
+            local w = amount_weight_of(value)
+            problem:add_objective(slack_name, resolve_class_cost(opt_class_cost, "initial_source"), false, "initial_source", constraint_name)
+            problem:add_subject_term(slack_name, constraint_name, w)
+            problem:add_subject_term(slack_name, vk.limit(constraint_name), w)
 
             local bare_limit = bare_fluid_limit_of(value)
             if bare_limit then
-                problem:add_subject_term(slack_name, bare_limit, 1)
+                problem:add_subject_term(slack_name, bare_limit, w)
             end
             apply_class_quad(problem, opt_class_quad, slack_name, "initial_source")
         elseif not (opt_reachability_gating and reachable[constraint_name]) then
@@ -1163,13 +1196,14 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             if opt_shortage_cost_fn then
                 shortage_cost = opt_shortage_cost_fn(constraint_name, is_reachable)
             end
+            local w = amount_weight_of(value)
             problem:add_objective(elastic_name, shortage_cost, false, "shortage_source", constraint_name)
-            problem:add_subject_term(elastic_name, constraint_name, 1)
-            problem:add_subject_term(elastic_name, vk.limit(constraint_name), 1)
+            problem:add_subject_term(elastic_name, constraint_name, w)
+            problem:add_subject_term(elastic_name, vk.limit(constraint_name), w)
 
             local bare_limit = bare_fluid_limit_of(value)
             if bare_limit then
-                problem:add_subject_term(elastic_name, bare_limit, 1)
+                problem:add_subject_term(elastic_name, bare_limit, w)
             end
 
             -- Convex curvature on this import column so its marginal cost rises
@@ -1181,12 +1215,12 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         ::continue::
     end
 
-    for constraint_name, _ in pairs(included_products) do
+    for constraint_name, value in pairs(included_products) do
         problem:add_equivalence_constraint(constraint_name, 0)
 
         local slack_name = vk.final_sink(constraint_name)
         problem:add_objective(slack_name, resolve_class_cost(opt_class_cost, "final_sink"), false, "final_sink", constraint_name)
-        problem:add_subject_term(slack_name, constraint_name, -1)
+        problem:add_subject_term(slack_name, constraint_name, -amount_weight_of(value))
         apply_class_quad(problem, opt_class_quad, slack_name, "final_sink")
     end
 
@@ -1194,14 +1228,14 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         problem:add_equivalence_constraint(constraint_name, 0)
 
         local slack_name = vk.initial_source(constraint_name)
-        local source_cost = resolve_class_cost(opt_class_cost, "initial_source", source_cost_of(value))
-        problem:add_objective(slack_name, source_cost, false, "initial_source", constraint_name)
-        problem:add_subject_term(slack_name, constraint_name, 1)
-        problem:add_subject_term(slack_name, vk.limit(constraint_name), 1)
+        local w = amount_weight_of(value)
+        problem:add_objective(slack_name, resolve_class_cost(opt_class_cost, "initial_source"), false, "initial_source", constraint_name)
+        problem:add_subject_term(slack_name, constraint_name, w)
+        problem:add_subject_term(slack_name, vk.limit(constraint_name), w)
 
         local bare_limit = bare_fluid_limit_of(value)
         if bare_limit then
-            problem:add_subject_term(slack_name, bare_limit, 1)
+            problem:add_subject_term(slack_name, bare_limit, w)
         end
         apply_class_quad(problem, opt_class_quad, slack_name, "initial_source")
     end
@@ -1219,7 +1253,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- (it fills a ceiling instead of relaxing a demand), so it gets its own
             -- "headroom" kind, with .material set, so target readers count it
             -- alongside elastic and map it back to the constrained material.
-            local slack_name = problem:add_upper_limit_constraint(constraint_name, limit)
+            local slack_name = problem:add_upper_limit_constraint(constraint_name, limit, amount_weight_of(constraint))
             problem:update_objective_cost(slack_name, resolve_class_cost(opt_class_cost, "headroom"))
             local pull = problem.primals[slack_name]
             pull.kind = "headroom"
@@ -1238,14 +1272,14 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             -- pack lower=0.5). Mirrors the target_cost slack on `upper`.
             local elastic_name = vk.elastic(constraint_name)
             problem:add_objective(elastic_name, resolve_class_cost(opt_class_cost, "elastic"), false, "elastic", constraint_material)
-            problem:add_subject_term(elastic_name, constraint_name, 1)
+            problem:add_subject_term(elastic_name, constraint_name, amount_weight_of(constraint))
             apply_class_quad(problem, opt_class_quad, elastic_name, "elastic")
         elseif constraint.limit_type == "equal" then
             problem:add_equivalence_constraint(constraint_name, limit)
 
             local elastic_name = vk.elastic(constraint_name)
             problem:add_objective(elastic_name, resolve_class_cost(opt_class_cost, "elastic"), false, "elastic", constraint_material)
-            problem:add_subject_term(elastic_name, constraint_name, 1)
+            problem:add_subject_term(elastic_name, constraint_name, amount_weight_of(constraint))
             apply_class_quad(problem, opt_class_quad, elastic_name, "elastic")
         else
             assert()

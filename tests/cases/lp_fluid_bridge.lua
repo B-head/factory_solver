@@ -133,8 +133,11 @@ table.insert(cases, {
 
         -- Behavioral: the surplus steam lands on the point, and the bridge
         -- carries exactly the generator's draw (the range never overproduces).
-        harness.assert_near(vars.x["|surplus_sink|fluid/steam@[165,165]"], 1, 0.05,
-            "surplus on the point variable")
+        -- The surplus_sink is a fluid escape, so it is denominated in slot-units:
+        -- 1 physical surplus / amount_weight_fluid 10 = 0.1. The bridge is a recipe
+        -- (not an escape), so its coefficient is unscaled and it still reads 1.
+        harness.assert_near(vars.x["|surplus_sink|fluid/steam@[165,165]"], 0.1, 0.05,
+            "surplus on the point variable (0.1 slot-units = 1 physical)")
         harness.assert_near(vars.x[bridge_primal_key("steam", 165, 15, 1000)], 1, 0.05,
             "bridge carries only the consumed amount")
     end,
