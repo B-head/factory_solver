@@ -1,40 +1,63 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.6.6
+Version: 0.7.0
 Date: ????
   Features:
     - The default layout now follows Factorio's ingredient-to-product order:
-      ingredients are shown before products, the production line rows are ordered
-      so newly added lines surface at the top, and the results panel shows Initial
-      ingredients above Final products. Two per-player mod settings, "Classic
-      Product / Ingredient placement" and "Classic top-to-bottom order", restore
-      the previous layout. Existing saves get a one-time chat notice on update.
-    - Import and export YAFC (Yet Another Factorio Calculator) share strings, in
-      addition to the existing Factory Planner and Helmod formats. The import
-      format is detected automatically; export adds a YAFC option to the export
-      dialog. Real recipes round-trip faithfully; special "Mechanics" recipes are
-      mapped best-effort and anything unmapped is reported.
-    - Clicking a constraint amount field now opens a quick-set popup below it: a
-      slider for fine per-second adjustment, plus one-click buttons that set the
-      amount to a belt's throughput (for item constraints) or a pump's throughput
-      (for fluid constraints).
-  Changes:
-    - The solver now produces more practical solutions on recipe loops and
-      byproduct chains. Rather than outsourcing a material the placed recipes can
-      actually make, or trashing a byproduct a placed recipe could consume, it
-      runs the loop and consumes the byproduct, importing or dumping only what the
-      recipes genuinely cannot balance internally. A requested target is also met
-      whenever the recipes allow it, even when meeting it needs a large but
-      legitimate external input. Already-balanced factories are unchanged.
-    - The solver now drives redundant machines out of solutions more reliably. On
-      tightly-coupled recipe loops it could leave a working solution running well
-      more machines than necessary (up to several times the minimum); these are
-      now collapsed, so production lines list closer to the fewest machines that
-      meet the targets. Throughput results are unchanged.
+      ingredients are shown before products, the production line rows are
+      ordered so newly added lines surface at the top, and the results panel
+      shows Initial ingredients above Final products. Two per-player mod
+      settings, "Classic Product / Ingredient placement" and "Classic
+      top-to-bottom order", restore the previous layout. Existing saves get a
+      one-time chat notice on update.
+    - Import and export YAFC (Yet Another Factorio Calculator) share strings,
+      in addition to the existing Factory Planner and Helmod formats. The
+      import format is detected automatically; export adds a YAFC option to
+      the export dialog. Real recipes round-trip faithfully; special
+      "Mechanics" recipes are mapped best-effort and anything unmapped is
+      reported.
+    - Clicking a constraint amount field now opens a quick-set popup below
+      it: a slider that scales the amount by a multiplier (0.5x-10x, in 0.5
+      steps) of a base value, plus one-click buttons that set that base to a
+      belt's throughput (for item constraints) or a pump's throughput (for
+      fluid constraints).
   Gui:
-    - The machine and fuel pickers in the machine setup window, and every table in
-      the machine presets window, now carry the same "show / hide unresearched" and
-      "show / hide hidden" filter switches as the recipe and item pickers. Preset
-      rows left empty by the active filter are hidden.
+    - The machine and fuel pickers in the machine setup window, and every
+      table in the machine presets window, now carry the same "show / hide
+      unresearched" and "show / hide hidden" filter switches as the recipe
+      and item pickers. Preset rows left empty by the active filter are
+      hidden.
+    - Add a name filter to the constraint and production-line pickers: a
+      search button in the title bar reveals a text box that filters the
+      list by substring, matching both the internal name and the displayed
+      name. The box is hidden by default and its text does not persist
+      between openings.
+    - Add the same name filter to the main window's title bar; instead of
+      filtering a list, it highlights every matching slot across the editor,
+      constraints, and results panels.
+    - Hovering any material, machine, module, or recipe slot now highlights
+      every other slot of the same kind across the editor, constraints, and
+      results panels (fluids match when their temperature ranges overlap).
+    - Stretch the main window to fill the whole screen instead of a fixed
+      size, refitting live if display resolution or UI scale changes while
+      it's open. The right panel and results section now stretch to fill the
+      extra height, and per-line ingredient/product tables widen from 4 to 8
+      columns.
+    - Tidy up the solution export/import dialog's layout.
+    - Fix remaining multi-second freezes when opening a large recipe picker,
+      the constraint/virtual picker, or the machine-presets dialog, and when
+      moving the mouse over a picker full of entries -- by building these
+      dialogs progressively across several frames instead of all at once,
+      and by no longer repainting the entire grid on every single icon
+      hover. How much this helps depends on your PC and mod set, but it
+      scales with how many candidates the picker holds, so it matters most
+      on large modpacks.
+    - Fix a freeze when researching a technology that unlocks many recipes,
+      caused by the mod rebuilding its entire internal recipe index from
+      scratch on every research completion; it now updates only the recipes
+      the finished technology actually touched. Also fix the one-time
+      freeze the first time that index was built (e.g. on first opening a
+      recipe picker after loading a large modpack), by building it
+      gradually across several frames instead of in one long stall.
 ---------------------------------------------------------------------------------------------------
 Version: 0.6.5
 Date: 2026-06-17
