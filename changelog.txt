@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.7.0
-Date: ????
+Date: 2026-07-04
   Features:
     - The default layout now follows Factorio's ingredient-to-product order:
       ingredients are shown before products, the production line rows are
