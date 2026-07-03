@@ -717,10 +717,12 @@ return {
         {
             type = "label",
             style = "caption_label",
+            visible = false,
             caption = { "factory-solver-solver-norm" },
         },
         {
             type = "drop-down",
+            visible = false,
             items = {
                 { "factory-solver-solver-norm-l1" },
                 { "factory-solver-solver-norm-l2" },
