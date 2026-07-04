@@ -1170,6 +1170,58 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     })
 end
 
+-- 8h. Multi-category recipe (2.0's `additional_categories` forward-compat field --
+--     the same union/OR semantics Factorio 2.1 generalizes to every recipe via
+--     `.categories`). Two isolated categories, each with its own dedicated
+--     general machine; both machines share the vanilla "nuclear" fuel category
+--     (uranium-fuel-cell, burnt_result depleted-uranium-fuel-cell) so the SAME
+--     burnable fuel appears in BOTH categories' fuel lists -- exercising the
+--     union-across-categories dedup in manage/relation.lua's process_real_recipe
+--     (a naive per-category registration would double-register the recipe's
+--     depleted-uranium-fuel-cell burnt-result contribution). Expected:
+--     get_machines_for_recipe(fs-test-multi-cat-recipe) returns BOTH machines;
+--     storage.virtuals.recipe_categories_dictionary carries a
+--     "fs-test-multi-cat-a|fs-test-multi-cat-b" combination row whose machine
+--     preset can select either machine; the recipe's burnt-result contribution
+--     for depleted-uranium-fuel-cell is registered exactly once. Asserted by
+--     smoke check_multi_category_recipe.
+if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"]
+    and raw.item and raw.item["uranium-fuel-cell"] then
+    local function multi_cat_machine(name, category)
+        local e = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+        e.name = name
+        e.localised_name = name
+        e.minable = nil
+        e.next_upgrade = nil
+        e.placeable_by = nil
+        e.crafting_categories = { category }
+        e.energy_source = {
+            type = "burner",
+            fuel_categories = { "nuclear" },
+            fuel_inventory_size = 1,
+            effectivity = 1,
+        }
+        return e
+    end
+
+    extend_test({
+        { type = "recipe-category", name = "fs-test-multi-cat-a" },
+        { type = "recipe-category", name = "fs-test-multi-cat-b" },
+        multi_cat_machine("fs-test-multi-cat-machine-a", "fs-test-multi-cat-a"),
+        multi_cat_machine("fs-test-multi-cat-machine-b", "fs-test-multi-cat-b"),
+        {
+            type = "recipe",
+            name = "fs-test-multi-cat-recipe",
+            category = "fs-test-multi-cat-a",
+            additional_categories = { "fs-test-multi-cat-b" },
+            enabled = true,
+            energy_required = 1,
+            ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
+            results = { { type = "item", name = "copper-plate", amount = 1 } },
+        },
+    })
+end
+
 -- A crafting machine that opts into Factorio 2.0.77+ quality-scaled module slots
 -- (quality_affects_module_slots). No vanilla entity sets this flag, so it is the
 -- only way to exercise acc.get_machine_module_inventory_size's scaling branch.

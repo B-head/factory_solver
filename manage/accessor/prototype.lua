@@ -70,6 +70,73 @@ function M.get_machines_in_category(category_name)
     return machines
 end
 
+---Plural of get_machines_in_category: the union of machines across every
+---category in `categories`. The engine ORs multiple filter entries of the same
+---filter type together, so one call with N `crafting-category` entries already
+---returns the union -- mirrors the idiom manage/virtual.lua's
+---create_rocket_silo_virtual uses for a rocket silo's multiple
+---crafting_categories (N `{filter="category", ...}` entries into one
+---get_recipe_filtered call).
+---@param categories string[]
+---@return LuaEntityPrototype[]
+function M.get_machines_in_categories(categories)
+    local filters = {}
+    for _, name in ipairs(categories) do
+        filters[#filters + 1] = { filter = "crafting-category", crafting_category = name }
+    end
+    local machines = prototypes.get_entity_filtered(filters)
+    machines = fs_util.sort_prototypes(fs_util.to_list(machines))
+    return machines
+end
+
+---Normalize a real recipe's crafting categories into a canonical, sorted,
+---deduplicated array. Feature-detects the engine's field shape: 2.1+ exposes
+---`.categories` (array, OR/union semantics against a machine's
+---crafting_categories, replacing the singular `.category`); 2.0 exposes a
+---singular `.category` plus an optional `.additional_categories` (array,
+---2.0.49+ -- unused by vanilla/SA/pyanodon as of the 2.1 beta but already
+---live). Both probes go through pcall: indexing a key a LuaRecipePrototype /
+---LuaRecipe doesn't have at all (not merely nil-valued) throws rather than
+---returning nil (confirmed on real Factorio 2.0.77 -- `.categories` errors
+---"LuaRecipePrototype doesn't contain key categories"), so a plain `if
+---recipe.categories then` would crash on 2.0 instead of falling through.
+---Sorting makes the result a canonical set: safe to use as a
+---`table.concat(cats, "|")` cache/preset key regardless of declaration order,
+---and independent of Lua's pairs() iteration order (relevant for the headless
+---suite's per-process hash-seed nondeterminism -- see CLAUDE.md).
+---@param recipe LuaRecipePrototype | LuaRecipe
+---@return string[]
+function M.recipe_categories(recipe)
+    local cats
+    local ok, categories_field = pcall(function() return recipe.categories end)
+    if ok and categories_field then
+        cats = {}
+        for _, name in ipairs(categories_field) do
+            cats[#cats + 1] = name
+        end
+    else
+        cats = { recipe.category }
+        local additional_ok, additional_field = pcall(function() return recipe.additional_categories end)
+        if additional_ok and additional_field then
+            for _, name in ipairs(additional_field) do
+                cats[#cats + 1] = name
+            end
+        end
+    end
+
+    table.sort(cats)
+    -- Dedupe adjacent equal entries: categories can't repeat within `.categories`
+    -- / `.additional_categories` alone, but `.category` could in theory coincide
+    -- with an `.additional_categories` entry.
+    local deduped = {}
+    for i, name in ipairs(cats) do
+        if cats[i - 1] ~= name then
+            deduped[#deduped + 1] = name
+        end
+    end
+    return deduped
+end
+
 ---A crafting machine's engine-side `fixed_recipe` locks it to exactly one
 ---recipe; an unset (nil) lock means it can run any recipe in its categories.
 ---Reading `.fixed_recipe` is safe here because every caller passes a crafting
@@ -121,6 +188,21 @@ end
 function M.get_general_machines_in_category(category_name)
     local ret = {}
     for _, machine in ipairs(M.get_machines_in_category(category_name)) do
+        if machine.fixed_recipe == nil then
+            ret[#ret + 1] = machine
+        end
+    end
+    return ret
+end
+
+---Plural of get_general_machines_in_category: general (lock-free) machines
+---across the union of `categories`. Used as a category-combination-wide
+---default machine set (manage/preset.lua machine_preset_tiers).
+---@param categories string[]
+---@return LuaEntityPrototype[]
+function M.get_general_machines_in_categories(categories)
+    local ret = {}
+    for _, machine in ipairs(M.get_machines_in_categories(categories)) do
         if machine.fixed_recipe == nil then
             ret[#ret + 1] = machine
         end
@@ -234,8 +316,11 @@ function M.get_machines_for_recipe(recipe)
         -- Honour each machine's engine-side `fixed_recipe` lock (no lock, or locked
         -- to this recipe) and its `ingredient_count` cap (the recipe's item
         -- ingredients must fit). Both narrow the category's machine list per recipe.
+        -- The source list is the union of machines across every category this
+        -- recipe belongs to (recipe_categories normalizes both the 2.0
+        -- category+additional_categories shape and the 2.1 categories array).
         local ret = {}
-        for _, machine in ipairs(M.get_machines_in_category(recipe.category)) do
+        for _, machine in ipairs(M.get_machines_in_categories(M.recipe_categories(recipe))) do
             if M.machine_allows_recipe(machine, recipe.name)
                 and M.machine_within_ingredient_count(machine, recipe)
             then

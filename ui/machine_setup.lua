@@ -59,7 +59,16 @@ function handlers.on_make_machine_table(event)
     local no_machine_label = elem.parent.parent.no_machine_label
     no_machine_label.visible = #machines == 0
     if #machines == 0 then
-        local category = recipe.category or recipe.resource_category or recipe.pumped_fluid_name
+        -- Real recipes always carry >=1 category (recipe_categories normalizes
+        -- 2.0's category+additional_categories and 2.1's categories array alike);
+        -- a VirtualRecipe has neither field, so it falls to its own dedicated
+        -- fields instead.
+        local category
+        if recipe.object_name then
+            category = table.concat(acc.recipe_categories(recipe), ", ")
+        else
+            category = recipe.resource_category or recipe.pumped_fluid_name
+        end
         if category then
             no_machine_label.caption = { "factory-solver-no-machine-for-recipe-with-category", category }
         else

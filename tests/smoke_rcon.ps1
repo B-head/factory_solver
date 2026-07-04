@@ -212,6 +212,22 @@ try {
         $allPass = $false
     }
 
+    # A recipe with more than one crafting category (2.0's additional_categories,
+    # the same union/OR semantics Factorio 2.1 generalizes to every recipe via
+    # `.categories`) is offered the union of both categories' machines, gets its
+    # own combination-keyed preset row spanning both, registers under both
+    # categories' recipes_by_category buckets, and does not double-count its
+    # burnt-fuel registration when the categories' fuel lists overlap.
+    # Solution-independent, driven off data_test.lua, so it runs once up front too.
+    $multiCategory = Invoke-RconCommand -Stream $stream `
+        -Command "/silent-command rcon.print(remote.call('$iface','check_multi_category_recipe'))"
+    if ($multiCategory -eq "OK") {
+        Write-Host "SMOKE PASS: [multi_category] combination row spans both categories' machines"
+    } else {
+        Write-Host "SMOKE FAIL: [multi_category] $multiCategory"
+        $allPass = $false
+    }
+
     # A recipe craftable only by >=2 fixed_recipe machines has no general machine to
     # anchor a category preset, so it gets a recipe-keyed fixed_recipe preset that
     # persists the machine choice across new lines.

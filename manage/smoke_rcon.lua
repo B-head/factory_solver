@@ -1649,13 +1649,22 @@ function M.check_force_caches()
         end
         assert(external_total > 0, "no source/sink recipes landed in the External bucket")
 
-        -- preset (1): every recipe_category resolves to a non-nil machine
-        -- preset (validated craft or the unknown-entity sentinel). This is the
-        -- invariant preset.get_machine_preset's assert relies on.
+        -- preset (1): every recipe-category *combination* some real recipe
+        -- actually has (storage.virtuals.recipe_categories_dictionary -- a
+        -- single-category recipe's combination key is just its bare category
+        -- name) resolves to a non-nil machine preset (validated craft or the
+        -- unknown-entity sentinel). This is the invariant
+        -- preset.get_machine_preset's assert relies on: get_machine_preset only
+        -- ever looks up the querying recipe's OWN combination key, which is by
+        -- construction one of this dictionary's keys -- unlike the pre-multi-
+        -- category design, a bare prototypes.recipe_category entry that no real
+        -- recipe actually uses is not required to resolve (and, since
+        -- create_machine_presets no longer enumerates the bare category
+        -- namespace, does not).
         local machine_presets = preset.create_machine_presets()
-        for category in pairs(prototypes.recipe_category) do
-            assert(machine_presets[category],
-                "create_machine_presets left category '" .. category .. "' unresolved")
+        for key in pairs(storage.virtuals.recipe_categories_dictionary) do
+            assert(machine_presets[key],
+                "create_machine_presets left category combination '" .. key .. "' unresolved")
         end
 
         -- preset (2): get_fuel_preset dispatches by energy source. Seed a
@@ -2157,7 +2166,8 @@ function M.check_ingredient_count_machine()
         -- three machines and a ">2" tier listing the two that can craft over-cap
         -- recipes. The dialog renders exactly the tiers with >1 machine, so the ">2"
         -- tier having two machines is what makes it a visible second row.
-        local tiers = preset.machine_preset_tiers("fs-test-ing-cap")
+        local tiers = preset.machine_preset_tiers("fs-test-ing-cap",
+            storage.virtuals.recipe_categories_dictionary["fs-test-ing-cap"])
         local base_tier, over_tier
         for _, tier in ipairs(tiers) do
             if tier.key == "fs-test-ing-cap" then base_tier = tier end
@@ -2178,6 +2188,109 @@ function M.check_ingredient_count_machine()
     end)
     if not ok then
         return "ERROR: ingredient_count machine check raised: " .. tostring(err)
+    end
+    return "OK"
+end
+
+---A recipe carrying more than one crafting category (data_test 8h, via 2.0's
+---additional_categories -- the same union/OR semantics Factorio 2.1 generalizes to
+---every recipe via `.categories`). Asserts: acc.recipe_categories normalizes and
+---sorts both categories into one joined combination key; get_machines_for_recipe
+---returns the UNION of both categories' machines (not just one); the combination
+---gets its own row in storage.virtuals.recipe_categories_dictionary /
+---preset.machine_preset_tiers spanning both machines (so a machine preset for this
+---combination can be set to EITHER machine, not just whichever one a single-
+---category-only design might have been limited to); the recipe registers into
+---BOTH categories' recipes_by_category buckets; and -- since both fixture machines
+---share the vanilla "nuclear" fuel category (uranium-fuel-cell, burnt_result
+---depleted-uranium-fuel-cell) -- the recipe's burnt-result contribution is not
+---double-counted by relation.process_real_recipe when the union of the fuel lists
+---across its categories overlaps. Guarded on presence so a stripped build skips
+---instead of failing.
+---@return string
+function M.check_multi_category_recipe()
+    local machine_a = prototypes.entity["fs-test-multi-cat-machine-a"]
+    local machine_b = prototypes.entity["fs-test-multi-cat-machine-b"]
+    local recipe = prototypes.recipe["fs-test-multi-cat-recipe"]
+    if not (machine_a and machine_b and recipe) then
+        log.info("check_multi_category_recipe: data_test fixtures absent, skipped")
+        return "OK"
+    end
+
+    local function has_machine(list, name)
+        for _, m in ipairs(list) do
+            if m.name == name then return true end
+        end
+        return false
+    end
+
+    local function has_name(list, name)
+        for _, n in ipairs(list) do
+            if n == name then return true end
+        end
+        return false
+    end
+
+    local ok, err = pcall(function()
+        -- recipe_categories normalizes category + additional_categories into a
+        -- sorted array, safe to join into a canonical combination key.
+        local categories = acc.recipe_categories(recipe)
+        assert(#categories == 2 and categories[1] == "fs-test-multi-cat-a"
+            and categories[2] == "fs-test-multi-cat-b",
+            "recipe_categories did not normalize category + additional_categories")
+        local combo_key = table.concat(categories, "|")
+        assert(combo_key == "fs-test-multi-cat-a|fs-test-multi-cat-b", "unexpected combination key")
+
+        -- get_machines_for_recipe returns the union across both categories.
+        local machines = acc.get_machines_for_recipe(recipe)
+        assert(#machines == 2
+            and has_machine(machines, "fs-test-multi-cat-machine-a")
+            and has_machine(machines, "fs-test-multi-cat-machine-b"),
+            "multi-category recipe did not offer both categories' machines")
+
+        -- recipe_categories_dictionary carries the combination, and its preset
+        -- tier spans the same union of machines -- so the machine-presets dialog
+        -- can set the combination's default to EITHER machine, not just one that
+        -- happens to already be each single category's own default.
+        local combo_categories = storage.virtuals.recipe_categories_dictionary[combo_key]
+        assert(combo_categories and #combo_categories == 2,
+            "recipe_categories_dictionary is missing the multi-category combination")
+        local tiers = preset.machine_preset_tiers(combo_key, combo_categories)
+        assert(#tiers == 1 and tiers[1].key == combo_key and #tiers[1].machines == 2
+            and has_machine(tiers[1].machines, "fs-test-multi-cat-machine-a")
+            and has_machine(tiers[1].machines, "fs-test-multi-cat-machine-b"),
+            "combination preset tier did not span both machines")
+
+        local presets = preset.create_machine_presets()
+        assert(presets[combo_key]
+            and (presets[combo_key].name == "fs-test-multi-cat-machine-a"
+                or presets[combo_key].name == "fs-test-multi-cat-machine-b"),
+            "combination preset row did not resolve to one of its eligible machines")
+
+        -- recipes_by_category registers the recipe under EVERY one of its
+        -- categories, not just the first.
+        local rel = relation.create_relation_to_recipes(FORCE_INDEX)
+        assert(has_name(rel.recipes_by_category["fs-test-multi-cat-a"] or {}, recipe.name),
+            "recipe missing from its first category's recipes_by_category bucket")
+        assert(has_name(rel.recipes_by_category["fs-test-multi-cat-b"] or {}, recipe.name),
+            "recipe missing from its second category's recipes_by_category bucket")
+
+        -- Burnt-fuel registration: both categories share the vanilla "nuclear"
+        -- fuel category (uranium-fuel-cell -> depleted-uranium-fuel-cell), so a
+        -- naive per-category registration would double-count this recipe's
+        -- burnt-result contribution.
+        local burnt_info = rel.item["depleted-uranium-fuel-cell"]
+        if burnt_info then
+            local count = 0
+            for _, name in ipairs(burnt_info.recipe_for_burnt_result) do
+                if name == recipe.name then count = count + 1 end
+            end
+            assert(count <= 1, "multi-category recipe's burnt-result contribution was "
+                .. "registered " .. count .. " times (expected <=1)")
+        end
+    end)
+    if not ok then
+        return "ERROR: multi-category recipe check raised: " .. tostring(err)
     end
     return "OK"
 end
@@ -3399,6 +3512,7 @@ function M.register()
         check_fluid_fuel_temperature_variants = M.check_fluid_fuel_temperature_variants,
         check_fixed_recipe_machine = M.check_fixed_recipe_machine,
         check_ingredient_count_machine = M.check_ingredient_count_machine,
+        check_multi_category_recipe = M.check_multi_category_recipe,
         check_shared_fixed_recipe_machine = M.check_shared_fixed_recipe_machine,
         check_required_fluid_mining = M.check_required_fluid_mining,
         check_quality_module_slots = M.check_quality_module_slots,

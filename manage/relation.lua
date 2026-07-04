@@ -239,24 +239,30 @@ local function create_empty_rel()
     }
 end
 
----Add one real recipe's recipe-set contributions to rel: group it by category,
----record its products / ingredients on the materials' recipe_for_* lists, build its
----`contributes` entry, and register the spent-fuel residues of the fuels its
----category can burn. recipe-set-dependent only -- no enabled state is touched.
+---Add one real recipe's recipe-set contributions to rel: group it by every
+---category in its combination, record its products / ingredients on the
+---materials' recipe_for_* lists, build its `contributes` entry, and register the
+---spent-fuel residues of the fuels any of its categories can burn.
+---recipe-set-dependent only -- no enabled state is touched.
 ---@param rel RelationToRecipes
 ---@param recipe LuaRecipe
 ---@param fuel RelationBuildFuelCache
 ---@param burnt_result_names table<string, string>
 local function process_real_recipe(rel, recipe, fuel, burnt_result_names)
-    -- Group real recipes by category so a fuel's consumers expand lazily
-    -- (category -> recipes) instead of being flattened per (recipe, fuel).
+    -- Group real recipes by every category in their combination so a fuel's
+    -- consumers expand lazily (category -> recipes) instead of being flattened
+    -- per (recipe, fuel). A recipe with more than one category (2.1 `.categories`
+    -- / 2.0 `additional_categories`) registers into every one of its buckets.
     local recipes_by_category = rel.recipes_by_category
-    local cat_recipes = recipes_by_category[recipe.category]
-    if not cat_recipes then
-        cat_recipes = {}
-        recipes_by_category[recipe.category] = cat_recipes
+    local categories = acc.recipe_categories(recipe)
+    for _, category in ipairs(categories) do
+        local cat_recipes = recipes_by_category[category]
+        if not cat_recipes then
+            cat_recipes = {}
+            recipes_by_category[category] = cat_recipes
+        end
+        cat_recipes[#cat_recipes + 1] = recipe.name
     end
-    cat_recipes[#cat_recipes + 1] = recipe.name
 
     local contrib = {}
     rel.contributes[recipe.name] = contrib
@@ -268,8 +274,22 @@ local function process_real_recipe(rel, recipe, fuel, burnt_result_names)
     for _, value in ipairs(recipe.ingredients) do
         flib_table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
     end
-    for _, value in ipairs(fuel.crafting_fuels[recipe.category]) do
-        register_burnt_result(rel, burnt_result_names, value, recipe.name)
+
+    -- Union the burnable-fuel lists across every category in the combination:
+    -- the recipe can run on a machine from any of its categories, so every fuel
+    -- any of them can burn is a possible spent-result contribution. Dedupe by
+    -- fuel item name first -- register_burnt_result appends unconditionally, so
+    -- a fuel burnable in more than one of the recipe's categories must only be
+    -- registered once, or the recipe's burnt-result contribution would be
+    -- double-counted in the LP's material relations.
+    local seen_fuel = {}
+    for _, category in ipairs(categories) do
+        for _, value in ipairs(fuel.crafting_fuels[category]) do
+            if not seen_fuel[value] then
+                seen_fuel[value] = true
+                register_burnt_result(rel, burnt_result_names, value, recipe.name)
+            end
+        end
     end
 end
 

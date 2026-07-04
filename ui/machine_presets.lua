@@ -22,7 +22,12 @@ local function preset_rows(preset_type)
     elseif preset_type == "resource" then
         categories = prototypes.resource_category
     elseif preset_type == "machine" then
-        categories = prototypes.recipe_category
+        -- One row per distinct recipe-category *combination* actually used by some
+        -- real recipe (a single-category recipe's combination key is just its bare
+        -- category name), not per entry of prototypes.recipe_category -- mirrors
+        -- how the "fuel" branch above enumerates fuel_categories_dictionary rather
+        -- than a bare fuel-category namespace.
+        categories = storage.virtuals.recipe_categories_dictionary
     elseif preset_type == "fixed_recipe" then
         categories = storage.virtuals.shared_fixed_recipes
     else
@@ -45,7 +50,9 @@ local function preset_rows(preset_type)
                 out[#out + 1] = { key = category_name, caption = category_name,
                     crafts = acc.get_machines_in_resource_category(category_name) }
             elseif preset_type == "machine" then
-                for _, tier in ipairs(preset.machine_preset_tiers(category_name)) do
+                -- `value` is the combination's category array (recipe_categories_-
+                -- dictionary[category_name]); category_name here is the joined key.
+                for _, tier in ipairs(preset.machine_preset_tiers(category_name, value --[[@as string[] ]])) do
                     local caption = tier.threshold
                         and { "factory-solver-machine-preset-tier", category_name, tostring(tier.threshold) }
                         or category_name

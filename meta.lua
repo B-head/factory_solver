@@ -427,7 +427,8 @@ __factory_solver__storage = {}
 ---@field material table<string, VirtualMaterial>
 ---@field recipe table<string, VirtualRecipe>
 ---@field fuel_categories_dictionary table<string, { [string]: true }>
----@field machine_ingredient_tiers table<string, integer[]>
+---@field recipe_categories_dictionary table<string, string[]> Every distinct recipe-category *combination* actually used by some real recipe (accessor.recipe_categories' sorted output, joined with "|"), mapping the joined key back to its category array -- same pattern as fuel_categories_dictionary, but for a recipe's (possibly multiple, 2.1 `.categories` / 2.0 `additional_categories`) crafting categories rather than a machine's fuel categories. A single-category recipe's key is just its bare category name, so this is a superset of the pre-multi-category `prototypes.recipe_category` enumeration.
+---@field machine_ingredient_tiers table<string, integer[]> Keyed by the same joined combination key as recipe_categories_dictionary (a single-category combination's key is the bare category name, matching prior behaviour).
 ---@field shared_fixed_recipes table<string, true>
 
 ---@class VirtualMaterial

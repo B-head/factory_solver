@@ -200,28 +200,32 @@ function M.create_fixed_recipe_presets(origin)
     return ret
 end
 
----A recipe category is split into ingredient_count tiers because a single
----category-wide default machine cannot serve recipes whose item-ingredient count
----exceeds a low-`ingredient_count` machine in the same category. Each tier is one
----preset row keyed like the fuel presets' synthesized keys:
---- * base tier `category` -- every general (lock-free) machine is eligible (the
----   recipe fits even the smallest one). Same key the category used before tiers,
----   so existing presets keep working.
---- * tier `category|>ci` -- recipes needing more than ci item ingredients; only
+---A recipe-category *combination* (storage.virtuals.recipe_categories_dictionary
+----- every distinct set of categories some real recipe actually has, a
+---single-category recipe's combination being just that one category) is split
+---into ingredient_count tiers because a single combination-wide default machine
+---cannot serve recipes whose item-ingredient count exceeds a low-`ingredient_count`
+---machine in the same combination. Each tier is one preset row keyed like the fuel
+---presets' synthesized keys:
+--- * base tier `key` -- every general (lock-free) machine across the combination's
+---   categories is eligible (the recipe fits even the smallest one). Same key the
+---   combination used before tiers, so existing presets keep working.
+--- * tier `key|>ci` -- recipes needing more than ci item ingredients; only
 ---   machines whose cap exceeds ci are eligible.
 ---The number of tiers equals the count of distinct ingredient_count caps among the
----category's general machines (storage.virtuals.machine_ingredient_tiers), so a
----category whose machines share one cap (the common case) stays a single base tier.
----Exceeding the top cap leaves no machine, so it gets no tier (the recipe falls to
----the unknown-entity sentinel via get_machine_preset's fallback).
----@param category_name string
+---combination's general machines (storage.virtuals.machine_ingredient_tiers), so a
+---combination whose machines share one cap (the common case) stays a single base
+---tier. Exceeding the top cap leaves no machine, so it gets no tier (the recipe
+---falls to the unknown-entity sentinel via get_machine_preset's fallback).
+---@param key string joined recipe_categories_dictionary key (a bare category name for a single-category combination)
+---@param categories string[] the combination's category set (recipe_categories_dictionary[key])
 ---@return { key: string, threshold: integer?, machines: LuaEntityPrototype[] }[]
-function M.machine_preset_tiers(category_name)
-    local machines = acc.get_general_machines_in_category(category_name)
-    local caps = storage.virtuals.machine_ingredient_tiers[category_name] or {}
+function M.machine_preset_tiers(key, categories)
+    local machines = acc.get_general_machines_in_categories(categories)
+    local caps = storage.virtuals.machine_ingredient_tiers[key] or {}
 
     local tiers = {
-        { key = category_name, threshold = nil, machines = machines },
+        { key = key, threshold = nil, machines = machines },
     }
     for i = 1, #caps - 1 do
         local threshold = caps[i]
@@ -233,7 +237,7 @@ function M.machine_preset_tiers(category_name)
             end
         end
         tiers[#tiers + 1] = {
-            key = category_name .. "|>" .. threshold,
+            key = key .. "|>" .. threshold,
             threshold = threshold,
             machines = eligible,
         }
@@ -241,15 +245,16 @@ function M.machine_preset_tiers(category_name)
     return tiers
 end
 
----The machine preset key for a recipe's (category, item-ingredient count): the
----tier whose eligible set matches the recipe. Mirrors machine_preset_tiers' keys.
----@param category_name string
+---The machine preset key for a recipe's (category combination, item-ingredient
+---count): the tier whose eligible set matches the recipe. Mirrors
+---machine_preset_tiers' keys.
+---@param key string joined recipe_categories_dictionary key
 ---@param item_count integer
 ---@return string
-function M.machine_preset_key(category_name, item_count)
-    local caps = storage.virtuals.machine_ingredient_tiers[category_name]
+function M.machine_preset_key(key, item_count)
+    local caps = storage.virtuals.machine_ingredient_tiers[key]
     if not caps then
-        return category_name
+        return key
     end
     -- The largest cap the recipe outgrows is the tier threshold; below the
     -- smallest cap (or no restrictive cap at all) the recipe uses the base key.
@@ -261,7 +266,7 @@ function M.machine_preset_key(category_name, item_count)
             break
         end
     end
-    return threshold and (category_name .. "|>" .. threshold) or category_name
+    return threshold and (key .. "|>" .. threshold) or key
 end
 
 ---comment
@@ -273,11 +278,11 @@ function M.create_machine_presets(origin)
         ret = flib_table.deep_copy(origin)
     end
 
-    -- One preset per (category, ingredient_count tier). Tier machine lists already
-    -- exclude fixed_recipe machines (those are offered per-recipe by
-    -- get_machines_for_recipe, never as a category default).
-    for category_name, _ in pairs(prototypes.recipe_category) do
-        for _, tier in ipairs(M.machine_preset_tiers(category_name)) do
+    -- One preset per (category combination, ingredient_count tier). Tier machine
+    -- lists already exclude fixed_recipe machines (those are offered per-recipe by
+    -- get_machines_for_recipe, never as a combination default).
+    for key, categories in pairs(storage.virtuals.recipe_categories_dictionary) do
+        for _, tier in ipairs(M.machine_preset_tiers(key, categories)) do
             tn.typed_name_migration(ret[tier.key])
             if tn.validate_typed_name(ret[tier.key]) then
                 goto continue
@@ -345,9 +350,12 @@ function M.get_machine_preset(player_index, recipe_typed_name)
             -- vacuous; its default lives in the recipe-keyed fixed_recipe preset.
             preset = player_data.presets.fixed_recipe[recipe.name]
         else
-            -- Machine presets split each category by ingredient_count tier; pick the
-            -- tier key whose eligible machines cover this recipe's item count.
-            local key = M.machine_preset_key(recipe.category, acc.count_item_ingredients(recipe))
+            -- Machine presets split each category *combination* (the recipe's own
+            -- set of categories, joined -- see recipe_categories_dictionary) by
+            -- ingredient_count tier; pick the tier key whose eligible machines
+            -- cover this recipe's item count.
+            local combo_key = table.concat(acc.recipe_categories(recipe), "|")
+            local key = M.machine_preset_key(combo_key, acc.count_item_ingredients(recipe))
             preset = player_data.presets.machine[key]
         end
         -- Honour the stored default only if it can actually craft this recipe: a

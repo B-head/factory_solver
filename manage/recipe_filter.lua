@@ -112,22 +112,26 @@ local function recipe_temperature_compatible(recipe, reference, kind, category_f
         -- the field reads: a real LuaRecipePrototype (userdata) throws on unknown
         -- keys, while a VirtualRecipe is a plain table (object_name nil).
         --
-        -- The per-category verdict is memoised — a fluid-fuel machine in a common
-        -- category (e.g. "crafting") would otherwise re-scan the same machine list
-        -- for every recipe in it. The cache covers only machines usable by *every*
-        -- recipe in the category (no fixed_recipe lock); resource recipes never
-        -- have locks, so that is their whole answer. A real recipe whose general
-        -- machines all reject the fuel can still be served by a machine the engine
-        -- locks to *this* recipe, so those are checked separately (rare, unmemoised).
+        -- The per-category-combination verdict is memoised — a fluid-fuel machine
+        -- in a common combination (e.g. "crafting") would otherwise re-scan the
+        -- same machine list for every recipe in it. The cache covers only machines
+        -- usable by *every* recipe in the combination (no fixed_recipe lock);
+        -- resource recipes never have locks, so that is their whole answer. A real
+        -- recipe whose general machines all reject the fuel can still be served by
+        -- a machine the engine locks to *this* recipe, so those are checked
+        -- separately (rare, unmemoised).
         if recipe.object_name == nil and recipe.fixed_crafting_machine then
             local machine = tn.typed_name_to_machine(recipe.fixed_crafting_machine)
             return any_machine_burns_fluid_at({ machine }, fluid_name, ref_lo, ref_hi)
         end
 
         local is_real = recipe.object_name ~= nil
+        -- recipe_categories normalizes the recipe's (possibly several) crafting
+        -- categories into a sorted array, safe to table.concat into a cache key.
+        local categories = is_real and acc.recipe_categories(recipe) or nil
         local cache_key
         if is_real then
-            cache_key = "crafting/" .. recipe.category
+            cache_key = "crafting/" .. table.concat(categories, "|")
         elseif recipe.resource_category then
             cache_key = "resource/" .. recipe.resource_category
         else
@@ -138,7 +142,7 @@ local function recipe_temperature_compatible(recipe, reference, kind, category_f
         if cached == nil then
             local machines
             if is_real then
-                machines = acc.get_general_machines_in_category(recipe.category)
+                machines = acc.get_general_machines_in_categories(categories)
             else
                 machines = acc.get_machines_in_resource_category(recipe.resource_category)
             end
@@ -148,7 +152,7 @@ local function recipe_temperature_compatible(recipe, reference, kind, category_f
         if cached then return true end
 
         if is_real then
-            for _, machine in ipairs(acc.get_machines_in_category(recipe.category)) do
+            for _, machine in ipairs(acc.get_machines_in_categories(categories)) do
                 if machine.fixed_recipe == recipe.name
                     and any_machine_burns_fluid_at({ machine }, fluid_name, ref_lo, ref_hi) then
                     return true

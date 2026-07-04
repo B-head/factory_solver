@@ -173,17 +173,34 @@ function M.create_virtuals()
 
     M.create_source_sink_virtuals(materials, recipes)
 
-    -- Distinct ingredient_count caps among each recipe category's general
-    -- (lock-free) machines, sorted ascending. Drives the per-tier machine presets
-    -- (manage/preset.lua machine_preset_tiers / machine_preset_key): a category
-    -- whose machines disagree on the item-ingredient cap splits into one default
-    -- machine per tier. A category with a single distinct cap yields a one-element
-    -- list and so keeps its single bare-category preset key, unchanged.
+    -- Every distinct recipe-category *combination* actually used by some real
+    -- recipe (acc.recipe_categories' sorted output, joined with "|"), mapping the
+    -- joined key back to its category array. A single-category recipe's key is
+    -- just its bare category name, so this generalizes (and is a superset of) the
+    -- old bare-category enumeration over prototypes.recipe_category. Same pattern
+    -- as fuel_categories_dictionary above (join_categories), applied to a
+    -- recipe's crafting categories instead of a machine's fuel categories -- see
+    -- manage/preset.lua machine_preset_tiers / ui/machine_presets.lua for the
+    -- consumer side (one preset row per combination, not per single category).
+    ---@type table<string, string[]>
+    local recipe_categories_dictionary = {}
+    for _, recipe in pairs(prototypes.recipe) do
+        local categories = acc.recipe_categories(recipe)
+        recipe_categories_dictionary[table.concat(categories, "|")] = categories
+    end
+
+    -- Distinct ingredient_count caps among each recipe-category-combination's
+    -- general (lock-free) machines, sorted ascending. Drives the per-tier machine
+    -- presets (manage/preset.lua machine_preset_tiers / machine_preset_key): a
+    -- combination whose machines disagree on the item-ingredient cap splits into
+    -- one default machine per tier. A combination with a single distinct cap
+    -- yields a one-element list and so keeps its single bare-key preset,
+    -- unchanged.
     ---@type table<string, integer[]>
     local machine_ingredient_tiers = {}
-    for category_name, _ in pairs(prototypes.recipe_category) do
+    for key, categories in pairs(recipe_categories_dictionary) do
         local seen = {}
-        for _, machine in ipairs(acc.get_general_machines_in_category(category_name)) do
+        for _, machine in ipairs(acc.get_general_machines_in_categories(categories)) do
             local cap = machine.ingredient_count
             if cap then
                 seen[cap] = true
@@ -194,25 +211,30 @@ function M.create_virtuals()
             caps[#caps + 1] = cap
         end
         table.sort(caps)
-        machine_ingredient_tiers[category_name] = caps
+        machine_ingredient_tiers[key] = caps
     end
 
-    -- Real recipes craftable ONLY by >=2 fixed_recipe machines (their category has
-    -- no general lock-free machine). A category machine preset excludes fixed_recipe
-    -- machines, so these recipes have nothing to anchor a default on; they get a
-    -- recipe-keyed preset instead (manage/preset.lua create_fixed_recipe_presets).
-    -- Built from the same per-category machine lists get_machines_for_recipe uses, so
-    -- the trigger matches the picker. Reading `.fixed_recipe` is safe for every
-    -- crafting machine (furnaces read back nil and count as general), the same
-    -- contract machine_allows_recipe relies on.
+    -- Real recipes craftable ONLY by >=2 fixed_recipe machines (their category
+    -- combination has no general lock-free machine). A combination's machine
+    -- preset excludes fixed_recipe machines, so these recipes have nothing to
+    -- anchor a default on; they get a recipe-keyed preset instead
+    -- (manage/preset.lua create_fixed_recipe_presets). Built from the same
+    -- per-combination machine lists get_machines_for_recipe uses, so the trigger
+    -- matches the picker. Reading `.fixed_recipe` is safe for every crafting
+    -- machine (furnaces read back nil and count as general), the same contract
+    -- machine_allows_recipe relies on. combination_machines is memoized per
+    -- distinct combination (not per recipe): a modpack where every recipe stays
+    -- single-category still pays exactly one get_entity_filtered call per
+    -- category, same as before this generalization.
     ---@type table<string, true>
     local shared_fixed_recipes = {}
-    local category_machines = {}
-    for category_name, _ in pairs(prototypes.recipe_category) do
-        category_machines[category_name] = acc.get_machines_in_category(category_name)
+    local combination_machines = {}
+    for key, categories in pairs(recipe_categories_dictionary) do
+        combination_machines[key] = acc.get_machines_in_categories(categories)
     end
     for _, recipe in pairs(prototypes.recipe) do
-        local machines = category_machines[recipe.category]
+        local key = table.concat(acc.recipe_categories(recipe), "|")
+        local machines = combination_machines[key]
         if machines then
             local fixed_count, has_general = 0, false
             for _, machine in ipairs(machines) do
@@ -233,6 +255,7 @@ function M.create_virtuals()
         material = materials,
         recipe = recipes,
         fuel_categories_dictionary = fuel_categories_dictionary,
+        recipe_categories_dictionary = recipe_categories_dictionary,
         machine_ingredient_tiers = machine_ingredient_tiers,
         shared_fixed_recipes = shared_fixed_recipes,
     }
