@@ -133,7 +133,7 @@ function M.create_virtuals()
                 if not pack_to_labs[pack_name] then
                     pack_to_labs[pack_name] = {}
                 end
-                flib_table.insert(pack_to_labs[pack_name], entity)
+                table.insert(pack_to_labs[pack_name], entity)
             end
         end
     end
@@ -556,7 +556,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
     else
         local filters = {}
         for key, _ in pairs(rocket_silo_prototype.crafting_categories) do
-            flib_table.insert(filters, { filter = "category", category = key })
+            table.insert(filters, { filter = "category", category = key })
         end
         rocket_parts = prototypes.get_recipe_filtered(filters)
     end
@@ -569,7 +569,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
         local ingredients = {}
         for _, value in ipairs(rocket_part.ingredients) do
             local amount = M.modify_product_or_ingredient(value, energy)
-            flib_table.insert(ingredients, amount)
+            table.insert(ingredients, amount)
         end
 
         if rocket_silo_prototype.launch_to_space_platforms then
@@ -596,7 +596,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                 hidden = rocket_silo_prototype.hidden,
                 source_entity_name = rocket_silo_prototype.name,
             }
-            flib_table.insert(crafts, space_rocket)
+            table.insert(crafts, space_rocket)
 
             -- Power ends up computed as full draw across the whole launch cycle,
             -- but the silo toggles full / no draw through the launch animation
@@ -626,13 +626,13 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                 hidden = rocket_silo_prototype.hidden,
                 source_entity_name = rocket_silo_prototype.name,
             }
-            flib_table.insert(crafts, recipe)
+            table.insert(crafts, recipe)
         else
             for _, has_rocket_launch_product in pairs(has_rocket_launch_products) do
                 local products = {}
                 for _, value in ipairs(has_rocket_launch_product.rocket_launch_products) do
                     local amount = M.modify_product_or_ingredient(value, energy * rocket_parts_required)
-                    flib_table.insert(products, amount)
+                    table.insert(products, amount)
                 end
 
                 ---@type ItemProduct
@@ -643,7 +643,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     probability = 1,
                 }
                 local modify_ingredients = flib_table.deep_copy(ingredients)
-                flib_table.insert(modify_ingredients, payload)
+                table.insert(modify_ingredients, payload)
 
                 -- Power ends up computed as full draw across the whole launch cycle,
                 -- but the silo toggles full / no draw through the launch animation
@@ -667,7 +667,7 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
                     hidden = rocket_silo_prototype.hidden,
                     source_entity_name = rocket_silo_prototype.name,
                 }
-                flib_table.insert(crafts, recipe)
+                table.insert(crafts, recipe)
             end
         end
     end
@@ -685,11 +685,11 @@ function M.create_boiler_virtual(boiler_prototype)
     ---@type LuaFluidPrototype[]
     local candidates = {}
     if input_filter then
-        flib_table.insert(candidates, input_filter)
+        table.insert(candidates, input_filter)
     else
         for _, fluid_prototype in pairs(prototypes.fluid) do
             if not fluid_prototype.parameter then
-                flib_table.insert(candidates, fluid_prototype)
+                table.insert(candidates, fluid_prototype)
             end
         end
     end
@@ -761,7 +761,7 @@ function M.create_boiler_virtual(boiler_prototype)
             hidden = boiler_prototype.hidden,
             source_entity_name = boiler_prototype.name,
         }
-        flib_table.insert(crafts, recipe)
+        table.insert(crafts, recipe)
     end
 
     return crafts
@@ -1110,7 +1110,7 @@ function M.collect_planets_for_prototype(name, autoplace_specification, name_to_
 
     local sorted = {}
     for planet_name, _ in pairs(union) do
-        flib_table.insert(sorted, planet_name)
+        table.insert(sorted, planet_name)
     end
     if #sorted == 0 then return nil end
     table.sort(sorted)
@@ -1126,7 +1126,7 @@ function M.create_resource_virtual(resource_prototype, planet_index)
     local products = {}
     for _, value in ipairs(mineable.products or {}) do
         local amount = M.modify_product_or_ingredient(value, mineable.mining_time)
-        flib_table.insert(products, amount)
+        table.insert(products, amount)
     end
 
     local ingredients = {}
@@ -1142,7 +1142,7 @@ function M.create_resource_virtual(resource_prototype, planet_index)
         -- mining_time too. Without routing it through modify_product_or_ingredient
         -- (as the product loop does) the per-second fluid draw was over-counted by
         -- a factor of mining_time (e.g. 2x on vanilla uranium-ore, mining_time=2).
-        flib_table.insert(ingredients, M.modify_product_or_ingredient(raw_fluid, mineable.mining_time))
+        table.insert(ingredients, M.modify_product_or_ingredient(raw_fluid, mineable.mining_time))
     end
 
     ---@type VirtualRecipe
@@ -1209,7 +1209,7 @@ function M.create_plant_virtual(plant_prototype, planet_index)
     }
     local seeds = {}
     for _, seed in pairs(seed_items) do
-        flib_table.insert(seeds, seed)
+        table.insert(seeds, seed)
     end
     if #seeds == 0 then
         return {}
@@ -1220,7 +1220,7 @@ function M.create_plant_virtual(plant_prototype, planet_index)
     local products = {}
     for _, value in ipairs(mineable.products or {}) do
         local amount = M.modify_product_or_ingredient(value, growth_seconds)
-        flib_table.insert(products, amount)
+        table.insert(products, amount)
     end
 
     -- harvest_emissions["pollution"] is per-harvest (emitted once on each
@@ -1271,7 +1271,7 @@ function M.create_plant_virtual(plant_prototype, planet_index)
             source_entity_name = plant_prototype.name,
             source_planet_names = source_planet_names,
         }
-        flib_table.insert(crafts, recipe)
+        table.insert(crafts, recipe)
     end
 
     return crafts

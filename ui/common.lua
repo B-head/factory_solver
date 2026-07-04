@@ -174,7 +174,7 @@ function M.create_decorated_sprite_button(data)
     local children = {}
 
     if temperature ~= nil then
-        flib_table.insert(children, {
+        table.insert(children, {
             type = "flow",
             direction = "vertical",
             style = "factory_solver_slot_temperature_flow",
@@ -218,7 +218,7 @@ function M.create_decorated_sprite_button(data)
                 },
             }
         end
-        flib_table.insert(children, {
+        table.insert(children, {
             type = "flow",
             direction = "vertical",
             style = "factory_solver_slot_temperature_flow",
@@ -233,7 +233,7 @@ function M.create_decorated_sprite_button(data)
     -- sprite path. Tooltip extension is left to the caller because the
     -- meaning of the indicator is caller-specific.
     if top_right_sprite then
-        flib_table.insert(children, {
+        table.insert(children, {
             type = "sprite",
             style = "factory_solver_slot_image_top_right",
             sprite = top_right_sprite,
@@ -627,13 +627,13 @@ function M.open_gui(player_index, is_dialog, gui_def, append_data)
             },
         }
         fs_util.add_gui(screen, sentinel_def)
-        flib_table.insert(opened_gui, sentinel_name)
+        table.insert(opened_gui, sentinel_name)
     end
 
     local elems, added = fs_util.add_gui(screen, gui_def, append_data)
     added.force_auto_center()
     player.opened = added
-    flib_table.insert(opened_gui, name)
+    table.insert(opened_gui, name)
 
     return elems, added
 end
@@ -715,7 +715,7 @@ function M.on_close_self(event)
 
     if elem.name == opened_gui[#opened_gui] then
         fs_util.dispatch_to_subtree(elem, "on_close")
-        flib_table.remove(opened_gui)
+        table.remove(opened_gui)
         elem.destroy()
         if opened_gui[#opened_gui] then
             local target = assert(M.find_root_element(event.player_index, opened_gui[#opened_gui]))

@@ -660,7 +660,7 @@ function handlers.on_add_beacon_click(event)
         beacon_quantity = 1,
         module_typed_names = {},
     }
-    flib_table.insert(affected_by_beacons, add_data)
+    table.insert(affected_by_beacons, add_data)
 
     dialog.tags = dialog_tags
     fs_util.dispatch_to_subtree(dialog, "on_beacon_changed")
@@ -708,7 +708,7 @@ function handlers.on_remove_beacon_click(event)
 
     local beacon_index = elem.tags.beacon_index --[[@as integer]]
     local affected_by_beacons = dialog_tags.affected_by_beacons --[[@as (AffectedByBeacon[])]]
-    flib_table.remove(affected_by_beacons, beacon_index)
+    table.remove(affected_by_beacons, beacon_index)
 
     dialog.tags = dialog_tags
     fs_util.dispatch_to_subtree(dialog, "on_beacon_changed")

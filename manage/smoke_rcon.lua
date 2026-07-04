@@ -43,7 +43,6 @@
 -- quality / elevated-rails). The only names you may omit are factory_solver's
 -- hard info.json dependencies (base, flib), which are always present.
 
-local flib_table = require "__flib__/table"
 local fs_log = require "fs_log"
 local fs_util = require "fs_util"
 local acc = require "manage/accessor"
@@ -118,7 +117,7 @@ local function build_iron_plate_demand(solution)
         module_typed_names = {},
         affected_by_beacons = {},
     }
-    flib_table.insert(solution.production_lines, line)
+    table.insert(solution.production_lines, line)
 
     ---@type Constraint
     local constraint = {
@@ -128,7 +127,7 @@ local function build_iron_plate_demand(solution)
         limit_type = "lower",
         limit_amount_per_second = 1,
     }
-    flib_table.insert(solution.constraints, constraint)
+    table.insert(solution.constraints, constraint)
 end
 
 ---True when a payload's production_lines contain an iron-plate recipe line.
@@ -161,7 +160,7 @@ fixtures.iron_plate = {
             module_typed_names = {},
             affected_by_beacons = {},
         }
-        flib_table.insert(solution.production_lines, line)
+        table.insert(solution.production_lines, line)
 
         save.new_constraint(solution, tn.create_typed_name("item", "iron-plate"))
     end,
@@ -183,7 +182,7 @@ fixtures.missing_prototype = {
             affected_by_beacons = {},
             fuel_typed_name = { type = "item", name = "fs-missing-fuel", quality = "normal" },
         }
-        flib_table.insert(solution.production_lines, line)
+        table.insert(solution.production_lines, line)
 
         ---@type Constraint
         local constraint = {
@@ -193,7 +192,7 @@ fixtures.missing_prototype = {
             limit_type = "upper",
             limit_amount_per_second = 0.5,
         }
-        flib_table.insert(solution.constraints, constraint)
+        table.insert(solution.constraints, constraint)
     end,
 }
 
@@ -233,7 +232,7 @@ fixtures.boiler_steam = {
             -- required; coal exercises the solid-fuel ingredient path.
             fuel_typed_name = tn.create_typed_name("item", "coal"),
         }
-        flib_table.insert(solution.production_lines, line)
+        table.insert(solution.production_lines, line)
 
         -- Lower-bound the boiler recipe itself (its machine-count variable),
         -- not the steam output, so the demand is independent of the boiler's
@@ -246,7 +245,7 @@ fixtures.boiler_steam = {
             limit_type = "lower",
             limit_amount_per_second = 1,
         }
-        flib_table.insert(solution.constraints, constraint)
+        table.insert(solution.constraints, constraint)
     end,
 }
 
@@ -290,7 +289,7 @@ fixtures.migration_legacy_shape = {
                 { beacon_name = "beacon", beacon_quantity = 2, module_names = { "speed-module" } },
             },
         }
-        flib_table.insert(solution.production_lines, line)
+        table.insert(solution.production_lines, line)
 
         -- Legacy offshore-pump line: the pre-machine-picker recipe key carried
         -- both the pump and the tile (<pump>{pump}:{tile}); reinit splits the
@@ -302,7 +301,7 @@ fixtures.migration_legacy_shape = {
             module_typed_names = {},
             affected_by_beacons = {},
         }
-        flib_table.insert(solution.production_lines, pump_line)
+        table.insert(solution.production_lines, pump_line)
 
         -- Legacy fluid constraint: the LP dropped the scalar `temperature`
         -- field for a [min,max] range; migration must lift T to [T,T]. Upper
@@ -316,7 +315,7 @@ fixtures.migration_legacy_shape = {
             limit_type = "upper",
             limit_amount_per_second = 10,
         }
-        flib_table.insert(solution.constraints, steam_constraint)
+        table.insert(solution.constraints, steam_constraint)
 
         -- A real demand so the migrated solution has something to solve.
         ---@type Constraint
@@ -327,7 +326,7 @@ fixtures.migration_legacy_shape = {
             limit_type = "lower",
             limit_amount_per_second = 1,
         }
-        flib_table.insert(solution.constraints, iron_constraint)
+        table.insert(solution.constraints, iron_constraint)
 
         -- A legacy save predates the per-solution norm field; clear it so the
         -- migration's backfill (asserted below) is genuinely exercised.
@@ -554,7 +553,7 @@ fixtures.codec_helmod_import_order = {
         -- iron-plate line and trip the add_objective same-name assert).
         solution.constraints = payload.constraints
         solution.production_lines = payload.production_lines
-        flib_table.insert(solution.constraints, {
+        table.insert(solution.constraints, {
             type = "item",
             name = "iron-plate",
             quality = "normal",
@@ -586,7 +585,7 @@ fixtures.codec_yafc_roundtrip = {
 
         -- A temperatured fluid constraint must export as "Fluid.steam@500" and
         -- decode back with its temperature (YAFC keys fluid variants by @temp).
-        flib_table.insert(solution.constraints,
+        table.insert(solution.constraints,
             tn.create_typed_name("fluid", "steam", nil, 500, 500) --[[@as Constraint]])
         solution.constraints[#solution.constraints].limit_type = "lower"
         solution.constraints[#solution.constraints].limit_amount_per_second = 10
@@ -941,7 +940,7 @@ fixtures.reactor_burnt_fuel = {
             affected_by_beacons = {},
             fuel_typed_name = tn.create_typed_name("item", "uranium-fuel-cell"),
         }
-        flib_table.insert(solution.production_lines, line)
+        table.insert(solution.production_lines, line)
 
         -- Directly assert the non-obvious accessor wiring: a burning machine
         -- emits its fuel's burnt_result 1:1 as a dedicated normalized product.
@@ -965,7 +964,7 @@ fixtures.reactor_burnt_fuel = {
             limit_type = "lower",
             limit_amount_per_second = 1,
         }
-        flib_table.insert(solution.constraints, constraint)
+        table.insert(solution.constraints, constraint)
     end,
 }
 
@@ -1011,7 +1010,7 @@ fixtures.catalyst_reclassify = {
                 module_typed_names = {},
                 affected_by_beacons = {},
             }
-            flib_table.insert(solution.production_lines, line)
+            table.insert(solution.production_lines, line)
         end
 
         -- Demand 1 copper-cable (the terminal). Making it needs copper-plate from
@@ -1026,7 +1025,7 @@ fixtures.catalyst_reclassify = {
             limit_type = "equal",
             limit_amount_per_second = 1,
         }
-        flib_table.insert(solution.constraints, constraint)
+        table.insert(solution.constraints, constraint)
     end,
 }
 
@@ -1060,7 +1059,7 @@ fixtures.cascade_vp = {
                 module_typed_names = {},
                 affected_by_beacons = {},
             }
-            flib_table.insert(solution.production_lines, line)
+            table.insert(solution.production_lines, line)
         end
 
         ---@type Constraint
@@ -1071,7 +1070,7 @@ fixtures.cascade_vp = {
             limit_type = "equal",
             limit_amount_per_second = 1,
         }
-        flib_table.insert(solution.constraints, constraint)
+        table.insert(solution.constraints, constraint)
     end,
 }
 
@@ -1104,7 +1103,7 @@ fixtures.cascade_vc = {
                 module_typed_names = {},
                 affected_by_beacons = {},
             }
-            flib_table.insert(solution.production_lines, line)
+            table.insert(solution.production_lines, line)
         end
 
         ---@type Constraint
@@ -1115,7 +1114,7 @@ fixtures.cascade_vc = {
             limit_type = "equal",
             limit_amount_per_second = 1,
         }
-        flib_table.insert(solution.constraints, constraint)
+        table.insert(solution.constraints, constraint)
     end,
 }
 
@@ -1148,7 +1147,7 @@ fixtures.target_rescue = {
                 module_typed_names = {},
                 affected_by_beacons = {},
             }
-            flib_table.insert(solution.production_lines, line)
+            table.insert(solution.production_lines, line)
         end
 
         ---@type Constraint
@@ -1159,7 +1158,7 @@ fixtures.target_rescue = {
             limit_type = "equal",
             limit_amount_per_second = 1,
         }
-        flib_table.insert(solution.constraints, constraint)
+        table.insert(solution.constraints, constraint)
     end,
 }
 
@@ -2690,7 +2689,7 @@ function M.profile_picker_prep(kind, reps)
         local function build_prep()
             local recipe_names = recipe_filter.pickable_recipe_names(
                 reference, candidates_for(rel.fluid[best_name]), kind)
-            local used_recipes = flib_table.map(recipe_names, function(name)
+            local used_recipes = fs_util.map(recipe_names, function(name)
                 return assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
             end)
             local grouped = fs_util.group_by(used_recipes, function(value)

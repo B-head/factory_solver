@@ -756,12 +756,12 @@ function M.to_normalized_production_lines(production_lines, bonuses)
         for _, product in ipairs(normalized_line.products) do
             local unlocked = bonuses and bonuses.unlocked_qualities or nil
             for _, value in ipairs(M.quality_decomposition(product, effectivity.quality, unlocked)) do
-                flib_table.insert(decomposed, value)
+                table.insert(decomposed, value)
             end
         end
         normalized_line.products = decomposed
 
-        flib_table.insert(normalized_production_lines, normalized_line)
+        table.insert(normalized_production_lines, normalized_line)
     end
     M.resolve_bare_fluids(normalized_production_lines)
     return normalized_production_lines
@@ -872,7 +872,7 @@ function M.quality_decomposition(normalized_amount, effectivity_quality, unlocke
             minimum_temperature = normalized_amount.minimum_temperature,
             maximum_temperature = normalized_amount.maximum_temperature,
         }
-        flib_table.insert(ret, add_value)
+        table.insert(ret, add_value)
 
         current_quality = next_quality
         current_probability = next_probability

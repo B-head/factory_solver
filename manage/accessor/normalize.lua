@@ -64,7 +64,7 @@ function M.normalize_production_line(line, bonuses)
     for _, product in ipairs(recipe.products) do
         local amount = amount_acc.raw_product_to_amount(
             product, recipe_quality, crafting_energy, crafting_speed, effectivity.productivity)
-        flib_table.insert(products, amount)
+        table.insert(products, amount)
     end
 
     ---@type NormalizedAmount[]
@@ -73,7 +73,7 @@ function M.normalize_production_line(line, bonuses)
         local amount = amount_acc.raw_ingredient_to_amount(
             ingredient, recipe_quality, crafting_energy, crafting_speed)
         amount_acc.apply_lab_input_productivity_to_ingredient(amount, machine)
-        flib_table.insert(ingredients, amount)
+        table.insert(ingredients, amount)
     end
 
     ---@type NormalizedAmount?

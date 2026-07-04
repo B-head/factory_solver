@@ -1,4 +1,4 @@
-local flib_table = require "__flib__/table"
+local fs_util = require "fs_util"
 local acc = require "manage/accessor"
 local tn = require "manage/typed_name"
 
@@ -51,7 +51,7 @@ local function compute_category_fuels(machines, any_fluid_fuels)
             end
         end
     end
-    local fuels = flib_table.map(acc.get_fuels_in_categories(fuel_categories), function(value)
+    local fuels = fs_util.map(acc.get_fuels_in_categories(fuel_categories), function(value)
         return value.name
     end)
     return fuels, collect_fluid_fuels(machines, any_fluid_fuels)
@@ -82,7 +82,7 @@ end
 
 ---@return string[]
 local function get_any_fluid_fuel_names()
-    return flib_table.map(acc.get_any_fluid_fuels(), function(value)
+    return fs_util.map(acc.get_any_fluid_fuels(), function(value)
         return value.name
     end)
 end
@@ -176,7 +176,7 @@ end
 local function register_burnt_result(rel, burnt_result_names, fuel_item_name, recipe_name)
     local burnt_name = burnt_result_names[fuel_item_name]
     if burnt_name then
-        flib_table.insert(rel.item[burnt_name].recipe_for_burnt_result, recipe_name)
+        table.insert(rel.item[burnt_name].recipe_for_burnt_result, recipe_name)
         -- The consuming recipe makes the spent item craftable when it runs, so
         -- the residue is one of the recipe's contributions (see RelationContribution).
         local contrib = rel.contributes[recipe_name]
@@ -268,11 +268,11 @@ local function process_real_recipe(rel, recipe, fuel, burnt_result_names)
     rel.contributes[recipe.name] = contrib
 
     for _, value in ipairs(recipe.products) do
-        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
+        table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
         contrib[#contrib + 1] = { type = value.type, name = value.name }
     end
     for _, value in ipairs(recipe.ingredients) do
-        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
+        table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
     end
 
     -- Union the burnable-fuel lists across every category in the combination:
@@ -330,11 +330,11 @@ local function process_virtual_recipe(rel, recipe, fuel, burnt_result_names)
     rel.contributes[recipe.name] = contrib
 
     for _, value in pairs(recipe.products) do
-        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
+        table.insert(get_info(rel, value.type, value.name).recipe_for_product, recipe.name)
         contrib[#contrib + 1] = { type = value.type, name = value.name }
     end
     for _, value in pairs(recipe.ingredients) do
-        flib_table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
+        table.insert(get_info(rel, value.type, value.name).recipe_for_ingredient, recipe.name)
     end
 
     if recipe.fixed_crafting_machine then
@@ -342,7 +342,7 @@ local function process_virtual_recipe(rel, recipe, fuel, burnt_result_names)
 
         local fixed_fuel = acc.try_get_fixed_fuel(machine)
         if fixed_fuel then
-            flib_table.insert(get_info(rel, fixed_fuel.type, fixed_fuel.name).fuel_consumer_virtual_recipes, recipe.name)
+            table.insert(get_info(rel, fixed_fuel.type, fixed_fuel.name).fuel_consumer_virtual_recipes, recipe.name)
             if fixed_fuel.type == "item" then
                 register_burnt_result(rel, burnt_result_names, fixed_fuel.name, recipe.name)
             end
@@ -350,7 +350,7 @@ local function process_virtual_recipe(rel, recipe, fuel, burnt_result_names)
 
         if acc.is_use_any_fluid_fuel(machine) then
             for _, value in ipairs(fuel.any_fluid_fuels) do
-                flib_table.insert(get_info(rel, "fluid", value).fuel_consumer_virtual_recipes, recipe.name)
+                table.insert(get_info(rel, "fluid", value).fuel_consumer_virtual_recipes, recipe.name)
             end
         end
 
@@ -358,7 +358,7 @@ local function process_virtual_recipe(rel, recipe, fuel, burnt_result_names)
         if fuel_categories then
             local fuels = acc.get_fuels_in_categories(fuel_categories)
             for _, value in ipairs(fuels) do
-                flib_table.insert(get_info(rel, "item", value.name).fuel_consumer_virtual_recipes, recipe.name)
+                table.insert(get_info(rel, "item", value.name).fuel_consumer_virtual_recipes, recipe.name)
                 register_burnt_result(rel, burnt_result_names, value.name, recipe.name)
             end
         end
@@ -366,11 +366,11 @@ local function process_virtual_recipe(rel, recipe, fuel, burnt_result_names)
 
     if recipe.resource_category then
         for _, value in ipairs(fuel.resource_fuels[recipe.resource_category]) do
-            flib_table.insert(get_info(rel, "item", value).fuel_consumer_virtual_recipes, recipe.name)
+            table.insert(get_info(rel, "item", value).fuel_consumer_virtual_recipes, recipe.name)
             register_burnt_result(rel, burnt_result_names, value, recipe.name)
         end
         for _, value in ipairs(fuel.resource_fluid_fuels[recipe.resource_category]) do
-            flib_table.insert(get_info(rel, "fluid", value).fuel_consumer_virtual_recipes, recipe.name)
+            table.insert(get_info(rel, "fluid", value).fuel_consumer_virtual_recipes, recipe.name)
         end
     end
 end

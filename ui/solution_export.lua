@@ -1,4 +1,3 @@
-local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
 local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
@@ -14,10 +13,10 @@ local handlers = {}
 ---@param player_index integer
 ---@return string[]
 local function sorted_solution_names(player_index)
-    local names = flib_table.map(
+    local names = fs_util.map(
         fs_util.to_list(save.get_solutions(player_index)),
         function(value) return value.name end)
-    flib_table.sort(names)
+    table.sort(names)
     return names
 end
 

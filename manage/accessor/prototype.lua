@@ -4,7 +4,6 @@
 -- Pure read-side lookups over `prototypes` (no energy / quality math). Part of
 -- the manage/accessor.lua family; reached through the accessor facade.
 
-local flib_table = require "__flib__/table"
 local fs_util = require "fs_util"
 local tn = require "manage/typed_name"
 
@@ -16,11 +15,11 @@ local M = {}
 function M.join_categories(categories)
     local name_list = {}
     for name, _ in pairs(categories) do
-        flib_table.insert(name_list, name)
+        table.insert(name_list, name)
     end
 
-    flib_table.sort(name_list)
-    return flib_table.concat(name_list, "|")
+    table.sort(name_list)
+    return table.concat(name_list, "|")
 end
 
 ---comment
@@ -200,8 +199,8 @@ end
 ---Machines in a category usable as a *category-wide* default: those without a
 ---`fixed_recipe` lock. A fixed-recipe machine is recipe-specific and is offered
 ---only through `get_machines_for_recipe` for its own recipe, never as a category
----preset. Input is already sorted, so rebuild the sequence by hand (avoid
----`flib_table.filter`, which preserves keys and would leave gaps).
+---preset. Input is already sorted, so rebuild the sequence by hand rather than
+---re-filtering and re-sorting.
 ---@param category_name string
 ---@return LuaEntityPrototype[]
 function M.get_general_machines_in_category(category_name)
@@ -236,10 +235,10 @@ function M.get_machines_in_resource_category(category_name)
     local machines = prototypes.get_entity_filtered {
         { filter = "type", type = "mining-drill" },
     }
-    machines = flib_table.filter(machines, function(value)
+    machines = fs_util.filter(machines, function(value)
         return value.resource_categories[category_name]
     end)
-    machines = fs_util.sort_prototypes(fs_util.to_list(machines))
+    machines = fs_util.sort_prototypes(machines)
     return machines
 end
 
@@ -276,7 +275,7 @@ function M.get_offshore_filter_only_fluids()
             and not M.fluid_has_offshore_tile(filter.name)
         then
             seen[filter.name] = true
-            flib_table.insert(ret, filter)
+            table.insert(ret, filter)
         end
     end
     return fs_util.sort_prototypes(ret)
@@ -294,14 +293,14 @@ function M.get_offshore_pumps_for_fluid(fluid_name)
     local pumps = prototypes.get_entity_filtered {
         { filter = "type", type = "offshore-pump" },
     }
-    pumps = flib_table.filter(pumps, function(value)
+    pumps = fs_util.filter(pumps, function(value)
         local filter = M.get_fluidbox_filter_prototype(value, 1)
         if filter then
             return filter.name == fluid_name
         end
         return has_tile
     end)
-    pumps = fs_util.sort_prototypes(fs_util.to_list(pumps))
+    pumps = fs_util.sort_prototypes(pumps)
     return pumps
 end
 
@@ -314,7 +313,7 @@ function M.get_labs_for_pack(pack_name)
     local labs = prototypes.get_entity_filtered {
         { filter = "type", type = "lab" },
     }
-    labs = flib_table.filter(labs, function(value)
+    labs = fs_util.filter(labs, function(value)
         for _, input in ipairs(value.lab_inputs or {}) do
             if input == pack_name then
                 return true
@@ -322,7 +321,7 @@ function M.get_labs_for_pack(pack_name)
         end
         return false
     end)
-    labs = fs_util.sort_prototypes(fs_util.to_list(labs))
+    labs = fs_util.sort_prototypes(labs)
     return labs
 end
 
@@ -374,7 +373,7 @@ function M.get_fuels_in_categories(fuel_categories)
         local f = prototypes.get_item_filtered {
             { filter = "fuel-category", ["fuel-category"] = name },
         }
-        fuels = flib_table.array_merge { fuels, fs_util.to_list(f) }
+        fuels = fs_util.array_merge { fuels, fs_util.to_list(f) }
     end
 
     fuels = fs_util.sort_prototypes(fuels)
@@ -490,11 +489,11 @@ function M.get_plant_substrate_tiles(machine)
     for _, r in ipairs(ap.tile_restriction) do
         if r.first and not seen[r.first] then
             seen[r.first] = true
-            flib_table.insert(list, r.first)
+            table.insert(list, r.first)
         end
         if r.second and not seen[r.second] then
             seen[r.second] = true
-            flib_table.insert(list, r.second)
+            table.insert(list, r.second)
         end
     end
     table.sort(list)

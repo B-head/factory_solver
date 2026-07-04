@@ -360,7 +360,7 @@ picker_build.register_spec {
             local value = resolve_constraint_value(filter_type, name, m)
             keyed[#keyed + 1] = { order = value.order, name = name, m = m }
         end
-        flib_table.sort(keyed, function(a, b)
+        table.sort(keyed, function(a, b)
             if a.order ~= b.order then return a.order < b.order else return a.name < b.name end
         end)
         for k = 1, #keyed do

@@ -84,10 +84,10 @@ function handlers.on_make_solution_list(event)
     local solutions = save.get_solutions(event.player_index)
     local names = fs_util.to_list(solutions)
 
-    names = flib_table.map(names, function(value)
+    names = fs_util.map(names, function(value)
         return value.name
     end)
-    flib_table.sort(names)
+    table.sort(names)
 
     event.element.items = names
     event.element.selected_index = flib_table.find(names, player_data.selected_solution) or 0

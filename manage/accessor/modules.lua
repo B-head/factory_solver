@@ -261,7 +261,7 @@ function M.get_total_modules(machine, machine_quality, module_typed_names, affec
                 for _, typed_name in pairs(beacon_module_names) do
                     count(modules, typed_name, effectivity)
                 end
-                flib_table.insert(beacon_groups, { beacon = beacon, modules = modules })
+                table.insert(beacon_groups, { beacon = beacon, modules = modules })
             end
         end
     end

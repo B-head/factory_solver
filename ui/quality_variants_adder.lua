@@ -127,11 +127,11 @@ function handlers.on_confirm(event)
             -- The source quality was already correct; for any other restored
             -- line the quality matches the snapshot key by construction.
             restored.recipe_typed_name.quality = q.name
-            flib_table.insert(solution.production_lines, li, restored)
+            table.insert(solution.production_lines, li, restored)
         elseif source_template then
             local cloned = flib_table.deep_copy(source_template)
             cloned.recipe_typed_name.quality = q.name
-            flib_table.insert(solution.production_lines, li, cloned)
+            table.insert(solution.production_lines, li, cloned)
         else
             local new_tn = flib_table.deep_copy(recipe_typed_name)
             new_tn.quality = q.name

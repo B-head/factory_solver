@@ -1086,7 +1086,7 @@ local function build_problem(args_str)
     for _, recipe_name in ipairs(order or {}) do
         local ok, line = pcall(make_line, recipe_name, use_quality)
         if ok and line then
-            flib_table.insert(solution.production_lines, line)
+            table.insert(solution.production_lines, line)
             built = built + 1
             built_names[#built_names + 1] = recipe_name
         end
@@ -1128,7 +1128,7 @@ local function build_problem(args_str)
         end
         if item_product then
             ---@type Constraint
-            flib_table.insert(solution.constraints, {
+            table.insert(solution.constraints, {
                 type = "item",
                 name = item_product.name,
                 quality = target_quality,
@@ -1137,7 +1137,7 @@ local function build_problem(args_str)
             })
             target_label = item_product.name .. "@" .. target_quality
         else
-            flib_table.insert(solution.constraints, {
+            table.insert(solution.constraints, {
                 type = "recipe",
                 name = seed_recipe,
                 quality = "normal",
@@ -1158,7 +1158,7 @@ local function build_problem(args_str)
         -- bootstraps the traps away), so this mode pairs with closure=off.
         local neg_item = pick_net_negative_item(built_names, to_set(closure.trapped_items))
         ---@type Constraint
-        flib_table.insert(solution.constraints, {
+        table.insert(solution.constraints, {
             type = "item",
             name = neg_item,
             quality = "normal",
@@ -1177,7 +1177,7 @@ local function build_problem(args_str)
         -- to netneg's DEGEN (fabricate the trap directly, build nothing).
         local down_item = pick_trap_consumer_target(built_names, to_set(closure.trapped_items))
         ---@type Constraint
-        flib_table.insert(solution.constraints, {
+        table.insert(solution.constraints, {
             type = "item",
             name = down_item,
             quality = "normal",
@@ -1213,7 +1213,7 @@ local function build_problem(args_str)
         if #pin_names == 0 then pin_names[1] = built_names[1] end
         for _, pn in ipairs(pin_names) do
             ---@type Constraint
-            flib_table.insert(solution.constraints, {
+            table.insert(solution.constraints, {
                 type = "recipe",
                 name = pn,
                 quality = "normal",
@@ -1655,7 +1655,7 @@ function M.solve_explicit(spec)
             if spec.machines and spec.machines[rn] then
                 line.machine_typed_name = tn.create_typed_name("machine", spec.machines[rn])
             end
-            flib_table.insert(solution.production_lines, line)
+            table.insert(solution.production_lines, line)
             built[#built + 1] = rn
         else
             skipped[#skipped + 1] = rn
@@ -1667,7 +1667,7 @@ function M.solve_explicit(spec)
 
     local t = spec.target
     ---@type Constraint
-    flib_table.insert(solution.constraints, {
+    table.insert(solution.constraints, {
         type = t.type or "item",
         name = t.name,
         quality = t.quality or "normal",

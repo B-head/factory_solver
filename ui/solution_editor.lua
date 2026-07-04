@@ -216,7 +216,7 @@ function handlers.make_production_line_table(event)
                     },
                 }
                 common.append_tooltip_line(def, common.op_hints.machine_icon())
-                flib_table.insert(buttons, def)
+                table.insert(buttons, def)
             end
 
             local total_modules = acc.get_total_modules(machine, line.machine_typed_name.quality, line
@@ -241,7 +241,7 @@ function handlers.make_production_line_table(event)
                             },
                         }
                         common.append_tooltip_line(def, common.op_hints.module_aggregate())
-                        flib_table.insert(buttons, def)
+                        table.insert(buttons, def)
                     end
                     if counts.ineffective > 0 then
                         local def = common.create_decorated_sprite_button {
@@ -255,7 +255,7 @@ function handlers.make_production_line_table(event)
                         }
                         common.append_tooltip_line(def, { "factory-solver-module-no-effect-here" })
                         common.append_tooltip_line(def, common.op_hints.module_aggregate())
-                        flib_table.insert(buttons, def)
+                        table.insert(buttons, def)
                     end
                 end
             end
@@ -277,7 +277,7 @@ function handlers.make_production_line_table(event)
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                     },
                 }
-                flib_table.insert(buttons, def)
+                table.insert(buttons, def)
             end
 
             if is_spoilage_recipe then
@@ -297,7 +297,7 @@ function handlers.make_production_line_table(event)
                         [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
                     },
                 }
-                flib_table.insert(buttons, def)
+                table.insert(buttons, def)
             end
 
             local def = {
@@ -343,7 +343,7 @@ function handlers.make_production_line_table(event)
                         },
                     }
                     common.append_tooltip_line(def, common.op_hints.inout())
-                    flib_table.insert(buttons, def)
+                    table.insert(buttons, def)
                 end
             end
 
@@ -378,7 +378,7 @@ function handlers.make_production_line_table(event)
                     },
                 }
                 common.append_tooltip_line(def, common.op_hints.inout())
-                flib_table.insert(buttons, def)
+                table.insert(buttons, def)
             end
 
             local def = {
@@ -418,7 +418,7 @@ function handlers.make_production_line_table(event)
                     },
                 }
                 common.append_tooltip_line(def, common.op_hints.inout())
-                flib_table.insert(buttons, def)
+                table.insert(buttons, def)
             end
 
             local def = {
@@ -460,7 +460,7 @@ function handlers.make_production_line_table(event)
                         on_calculation_changed = handlers.update_power,
                     },
                 }
-                flib_table.insert(children, def)
+                table.insert(children, def)
             end
 
             if n.fuel_ingredient then
@@ -488,7 +488,7 @@ function handlers.make_production_line_table(event)
                     },
                 }
                 common.append_tooltip_line(def, common.op_hints.inout())
-                flib_table.insert(children, def)
+                table.insert(children, def)
             end
 
             local def = {

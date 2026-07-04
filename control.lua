@@ -1,6 +1,5 @@
 local flib_dictionary = require "__flib__/dictionary"
 local flib_gui = require "__flib__/gui"
-local flib_table = require "__flib__/table"
 
 local fs_log = require "fs_log"
 local fs_util = require "fs_util"
@@ -187,7 +186,7 @@ script.on_event(defines.events.on_forces_merged, function(event)
     local destination_force_data = storage.forces[event.destination.index]
     local source_force_data = storage.forces[event.source_index]
 
-    destination_force_data.solutions = flib_table.array_merge {
+    destination_force_data.solutions = fs_util.array_merge {
         destination_force_data.solutions,
         source_force_data.solutions
     }

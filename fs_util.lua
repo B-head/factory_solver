@@ -58,6 +58,60 @@ function M.find(tbl, fun)
     return nil
 end
 
+---Returns a new table with each value transformed by `mapper`, same keys.
+---Non-mutating (flib_table.map mutates its input in 0.17+ and returns a new
+---table in 0.16.x; every caller here wants the latter, so this is a
+---flib-version-independent replacement rather than a call to either).
+---@generic K, V, N
+---@param tbl table<K, V>
+---@param mapper fun(value: V, key: K): N
+---@return table<K, N>
+function M.map(tbl, mapper)
+    local output = {}
+    for key, value in pairs(tbl) do
+        output[key] = mapper(value, key)
+    end
+    return output
+end
+
+---Returns a compact array of the values for which `predicate(value, key)` is
+---truthy (flib_table.filter's array_insert=true mode, which flib 0.17 dropped
+---with no replacement). Callers can feed the result straight to code that
+---expects an array; no separate to_list step needed.
+---@generic K, V
+---@param tbl table<K, V>
+---@param predicate fun(value: V, key: K): boolean
+---@return V[]
+function M.filter(tbl, predicate)
+    local output = {}
+    for key, value in pairs(tbl) do
+        if predicate(value, key) then
+            output[#output + 1] = value
+        end
+    end
+    return output
+end
+
+---Flattens a list of arrays into a single array (flib_table.array_merge in
+---0.16.x, moved to flib_array.flatten in 0.17+ -- neither module is safe to
+---depend on for this across both flib versions, so this is a plain-Lua copy
+---of the same ~8-line algorithm both had).
+---@generic V
+---@param arrays V[][]
+---@return V[]
+function M.array_merge(arrays)
+    local output = {}
+    local i = 0
+    for j = 1, #arrays do
+        local arr = arrays[j]
+        for k = 1, #arr do
+            i = i + 1
+            output[i] = arr[k]
+        end
+    end
+    return output
+end
+
 ---Returns a table containing arrays with elements grouped
 ---according to values returned by the callback function.
 ---@generic K, V, R
@@ -71,7 +125,7 @@ function M.group_by(tbl, fun)
         if not grouping[group_key] then
             grouping[group_key] = {}
         end
-        flib_table.insert(grouping[group_key], value)
+        table.insert(grouping[group_key], value)
     end
     return grouping
 end
@@ -83,7 +137,7 @@ end
 function M.to_list(tbl)
     local list = {}
     for _, value in pairs(tbl) do
-        flib_table.insert(list, value)
+        table.insert(list, value)
     end
     return list
 end
@@ -93,7 +147,7 @@ end
 ---@param list (V | { order: string, name: string })[]
 ---@return V[]
 function M.sort_prototypes(list)
-    flib_table.sort(list, function(a, b)
+    table.sort(list, function(a, b)
         if a.order ~= b.order then
             return a.order < b.order
         else
@@ -169,7 +223,7 @@ end
 function M.dispatch_to_subtree(root_element, event_name, append_data)
     local elements = {}
     for e in M.dfs_lower(root_element) do
-        flib_table.insert(elements, e)
+        table.insert(elements, e)
     end
 
     for _, e in ipairs(elements) do

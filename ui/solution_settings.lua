@@ -110,7 +110,7 @@ local function get_belt_throughputs()
     local belts = prototypes.get_entity_filtered { { filter = "type", type = "transport-belt" } }
     for name, proto in pairs(belts) do
         if helpers.is_valid_sprite_path("entity/" .. name) then
-            flib_table.insert(list, {
+            table.insert(list, {
                 name = name,
                 order = proto.order,
                 localised_name = proto.localised_name,
@@ -131,7 +131,7 @@ local function get_pump_throughputs()
     local pumps = prototypes.get_entity_filtered { { filter = "type", type = "pump" } }
     for name, proto in pairs(pumps) do
         if helpers.is_valid_sprite_path("entity/" .. name) then
-            flib_table.insert(list, {
+            table.insert(list, {
                 name = name,
                 order = proto.order,
                 localised_name = proto.localised_name,
@@ -235,7 +235,7 @@ local function build_throughput_buttons(filter_type, identity)
         entries = get_pump_throughputs()
     end
     for _, entry in ipairs(entries or {}) do
-        flib_table.insert(flow, {
+        table.insert(flow, {
             type = "sprite-button",
             style = "flib_slot_button_default",
             sprite = "entity/" .. entry.name,
@@ -304,7 +304,7 @@ local function build_amount_popup(index, data, is_expanded)
 
     local throughput = build_throughput_buttons(data.type, identity)
     if throughput then
-        flib_table.insert(popup, throughput)
+        table.insert(popup, throughput)
     end
 
     return popup

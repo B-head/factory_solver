@@ -211,7 +211,7 @@ function M.reinit_force_data(force_index)
                     local module_typed_names = {}
                     for _, name in pairs(line.module_names) do
                         local typed_name = tn.create_typed_name("item", name)
-                        flib_table.insert(module_typed_names, typed_name)
+                        table.insert(module_typed_names, typed_name)
                     end
                     line.module_typed_names = module_typed_names
                     line.module_names = nil
@@ -233,7 +233,7 @@ function M.reinit_force_data(force_index)
                         local module_typed_names = {}
                         for _, name in pairs(affected.module_names) do
                             local typed_name = tn.create_typed_name("item", name)
-                            flib_table.insert(module_typed_names, typed_name)
+                            table.insert(module_typed_names, typed_name)
                         end
                         affected.module_typed_names = module_typed_names
                         affected.module_names = nil
@@ -353,12 +353,12 @@ function M.list_productivity_research_recipes()
             if effect.type == "change-recipe-productivity" and effect.recipe then
                 if not seen[effect.recipe] then
                     seen[effect.recipe] = true
-                    flib_table.insert(result, effect.recipe)
+                    table.insert(result, effect.recipe)
                 end
             end
         end
     end
-    flib_table.sort(result)
+    table.sort(result)
     return result
 end
 
@@ -753,7 +753,7 @@ function M.new_constraint(solution, typed_name)
         limit_type = "upper",
         limit_amount_per_second = amount,
     }
-    flib_table.insert(constraints, add_data)
+    table.insert(constraints, add_data)
 
     solution.solver_state = "ready"
 end
@@ -763,7 +763,7 @@ end
 ---@param constraint_index integer
 function M.delete_constraint(solution, constraint_index)
     local constraints = solution.constraints
-    flib_table.remove(constraints, constraint_index)
+    table.remove(constraints, constraint_index)
 
     solution.solver_state = "ready"
 end
@@ -856,7 +856,7 @@ function M.new_production_line(player_index, solution, recipe_typed_name, fuel_t
         fuel_typed_name = fuel_typed_name,
         substrate_tile_name = substrate_tile_name,
     }
-    flib_table.insert(production_lines, line_index, line)
+    table.insert(production_lines, line_index, line)
 
     solution.solver_state = "ready"
 end
@@ -866,7 +866,7 @@ end
 ---@param line_index integer?
 function M.delete_production_line(solution, line_index)
     local production_lines = solution.production_lines
-    flib_table.remove(production_lines, line_index)
+    table.remove(production_lines, line_index)
 
     solution.solver_state = "ready"
 end
@@ -1047,8 +1047,8 @@ function M.move_production_line(solution, from_line_index, to_line_index)
     from_line_index = flib_math.clamp(from_line_index, 1, tail)
     to_line_index = flib_math.clamp(to_line_index, 1, tail)
 
-    local temp = flib_table.remove(production_lines, from_line_index)
-    flib_table.insert(production_lines, to_line_index, temp)
+    local temp = table.remove(production_lines, from_line_index)
+    table.insert(production_lines, to_line_index, temp)
 end
 
 ---comment
@@ -1062,8 +1062,8 @@ function M.move_constraint(solution, from_constraint_index, to_constraint_index)
     from_constraint_index = flib_math.clamp(from_constraint_index, 1, tail)
     to_constraint_index = flib_math.clamp(to_constraint_index, 1, tail)
 
-    local temp = flib_table.remove(constraints, from_constraint_index)
-    flib_table.insert(constraints, to_constraint_index, temp)
+    local temp = table.remove(constraints, from_constraint_index)
+    table.insert(constraints, to_constraint_index, temp)
 end
 
 return M

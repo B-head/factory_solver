@@ -23,7 +23,7 @@ function handlers.on_make_beacon_grid(event)
     for _, beacon in pairs(all_beacons) do
         local sg = beacon.subgroup and beacon.subgroup.name or ""
         if not by_subgroup[sg] then by_subgroup[sg] = {} end
-        flib_table.insert(by_subgroup[sg], beacon)
+        table.insert(by_subgroup[sg], beacon)
     end
 
     local groups = fs_util.sort_prototypes(fs_util.to_list(prototypes.item_group))

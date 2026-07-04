@@ -354,7 +354,7 @@ picker_build.register_spec {
         end
         recipe_names = recipe_filter.pickable_recipe_names(reference, recipe_names, kind)
 
-        local used_recipes = flib_table.map(recipe_names, function(name)
+        local used_recipes = fs_util.map(recipe_names, function(name)
             return assert(storage.virtuals.recipe[name] or prototypes.recipe[name])
         end) --[=[@as (LuaRecipePrototype | VirtualRecipe)[]]=]
 
@@ -399,7 +399,7 @@ picker_build.register_spec {
             local recipe = storage.virtuals.recipe[name] or prototypes.recipe[name]
             keyed[#keyed + 1] = { order = recipe.order, name = name }
         end
-        flib_table.sort(keyed, function(a, b)
+        table.sort(keyed, function(a, b)
             if a.order ~= b.order then return a.order < b.order else return a.name < b.name end
         end)
         for k = 1, #keyed do
