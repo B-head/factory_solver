@@ -40,6 +40,34 @@ local beneficial_effect_sign = {
     pollution = -1,
 }
 
+---Return this module's effects at the given quality tier, delegating to the
+---engine's own scaling instead of reimplementing it: LuaItemPrototype.
+---get_module_effects(quality) already blends the quality tier's per-effect
+---multiplier (QualityPrototype.module_speed_multiplier etc.) with each
+---module's own per-effect scaling factor (ModulePrototype.speed_quality_
+---multiplier etc.) -- verified bit-exact against vanilla speed-module-3 /
+---productivity-module-3 / quality-module-3 at the legendary tier on
+---Factorio 2.1.9 (2026-07-04) against a hand-rolled equivalent of this
+---same formula.
+---get_module_effects is a bound function (like get_durability -- see
+---CLAUDE.md's "Runtime API gotchas"): call it with `.`, not `:`, or the
+---quality argument silently lands in the wrong slot ("Invalid QualityID",
+---confirmed in-game). pcall-guarded because the method's minimum supported
+---Factorio version is unverified (this mod's declared floor is base >=
+---2.0.56); on failure (or a nil/false result), falls back to the module's
+---unscaled base effects rather than attempting to reproduce the engine's
+---blend by hand.
+---@param module LuaItemPrototype
+---@param quality QualityID
+---@return ModuleEffects
+local function get_effective_module_effects(module, quality)
+    local ok, effects = pcall(function() return module.get_module_effects(quality) end)
+    if ok and effects then
+        return effects
+    end
+    return assert(module.module_effects)
+end
+
 ---True iff `module` would actually do something useful under the given
 ---allow masks. Returns false when the module's category is excluded from
 ---`allowed_module_categories` (when it's non-nil), OR when every
@@ -348,25 +376,6 @@ function M.get_total_effectivity(recipe, total_modules, effect_receiver, recipe_
         quality = 0,
     }
 
-    ---@param effect number?
-    ---@param count number
-    ---@param multiplier number
-    ---@param is_negative boolean
-    ---@return number
-    local function modify(effect, count, multiplier, is_negative)
-        effect = effect or 0
-        if is_negative then
-            if effect < 0 then
-                effect = effect * multiplier
-            end
-        else
-            if effect > 0 then
-                effect = effect * multiplier
-            end
-        end
-        return effect * count
-    end
-
     ---@param modules table<string, table<string, number>>
     ---@param allowed table<string, boolean>
     ---@param allowed_categories table<string, true>?
@@ -377,27 +386,25 @@ function M.get_total_effectivity(recipe, total_modules, effect_receiver, recipe_
                 if module
                     and (allowed_categories == nil or allowed_categories[module.category])
                 then
-                    local effects = assert(module.module_effects)
-                    -- Quality scaling on module effects: default_multiplier is the
-                    -- engine-side per-tier multiplier (vanilla: 1, 1.3, 1.6, 1.9, 2.5
-                    -- for normal..legendary). Reading it through the QualityPrototype
-                    -- replaces the previous hardcoded (1 + quality_level * 0.3) so
-                    -- modded quality tiers are honored.
-                    local multiplier = quality_acc.get_module_quality_multiplier(quality)
+                    -- Quality scaling on module effects is the engine's own job:
+                    -- get_effective_module_effects(module, quality) already blends the
+                    -- quality tier's per-effect multiplier with this module's own
+                    -- per-effect scaling factor (see its doc comment).
+                    local effects = get_effective_module_effects(module, quality)
                     if allowed.speed then
-                        ret.speed = ret.speed + modify(effects.speed, count, multiplier, false)
+                        ret.speed = ret.speed + (effects.speed or 0) * count
                     end
                     if allowed.consumption then
-                        ret.consumption = ret.consumption + modify(effects.consumption, count, multiplier, true)
+                        ret.consumption = ret.consumption + (effects.consumption or 0) * count
                     end
                     if allowed.productivity then
-                        ret.productivity = ret.productivity + modify(effects.productivity, count, multiplier, false)
+                        ret.productivity = ret.productivity + (effects.productivity or 0) * count
                     end
                     if allowed.pollution then
-                        ret.pollution = ret.pollution + modify(effects.pollution, count, multiplier, true)
+                        ret.pollution = ret.pollution + (effects.pollution or 0) * count
                     end
                     if allowed.quality then
-                        ret.quality = ret.quality + modify(effects.quality, count, multiplier, false)
+                        ret.quality = ret.quality + (effects.quality or 0) * count
                     end
                 end
             end

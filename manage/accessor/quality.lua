@@ -1,6 +1,6 @@
 -- Quality-tier scaling helpers. Translates a QualityID (string name or
 -- LuaQualityPrototype) into the engine's level / multiplier values that the
--- rest of the accessor layer applies to machine throughput and module effects.
+-- rest of the accessor layer applies to machine throughput.
 -- Part of the manage/accessor.lua family; consumers reach these through the
 -- accessor facade, not by requiring this module directly.
 
@@ -31,16 +31,6 @@ function M.get_quality_default_multiplier(quality)
         return 1 + quality_prototype.level * 0.3
     end
     return 1
-end
-
----Return the quality multiplier applied to module effects.
----Uses the quality tier's default_multiplier (matches the engine's own
----quality scaling of module effects). Used to replace the hardcoded
----`(1 + quality_level * 0.3)` inside `get_total_effectivity`'s `modify()`.
----@param quality QualityID
----@return number
-function M.get_module_quality_multiplier(quality)
-    return M.get_quality_default_multiplier(quality)
 end
 
 return M

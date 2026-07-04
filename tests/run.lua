@@ -70,6 +70,7 @@ local case_files = {
     "lp_quality_cascade",
     "lp_quality_recycling_loop",
     "quality_decomposition",
+    "module_effect_quality_scaling",
     "fs_log",
     "typed_name_format",
     "number_format",

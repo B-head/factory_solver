@@ -86,7 +86,6 @@ M.get_plant_substrate_tiles = prototype_acc.get_plant_substrate_tiles
 -- Quality scaling -- manage/accessor/quality.lua
 M.get_quality_level = quality_acc.get_quality_level
 M.get_quality_default_multiplier = quality_acc.get_quality_default_multiplier
-M.get_module_quality_multiplier = quality_acc.get_module_quality_multiplier
 
 -- Amount normalization / fluid-temperature widening -- manage/accessor/amount.lua
 M.raw_product_to_amount = amount_acc.raw_product_to_amount
