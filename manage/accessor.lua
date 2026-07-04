@@ -63,6 +63,7 @@ M.get_beacon = prototype_acc.get_beacon
 M.get_machines_in_category = prototype_acc.get_machines_in_category
 M.get_machines_in_categories = prototype_acc.get_machines_in_categories
 M.recipe_categories = prototype_acc.recipe_categories
+M.resolve_fixed_recipe = prototype_acc.resolve_fixed_recipe
 M.machine_allows_recipe = prototype_acc.machine_allows_recipe
 M.count_item_ingredients = prototype_acc.count_item_ingredients
 M.machine_within_ingredient_count = prototype_acc.machine_within_ingredient_count

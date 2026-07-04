@@ -137,16 +137,35 @@ function M.recipe_categories(recipe)
     return deduped
 end
 
+---Normalize a `LuaEntityPrototype.fixed_recipe` read to a `LuaRecipePrototype`,
+---absorbing the engine's return-type change across versions: 2.0 returns a
+---plain recipe-name string (or nil for no lock); 2.1 returns the
+---`LuaRecipePrototype` object directly (or nil). No pcall is needed --
+---`type(x)` never throws, and reading `.fixed_recipe` itself is always valid on
+---a crafting-machine prototype in every supported engine version; only the
+---VALUE's Lua type varies. Callers that just need the name for a string
+---comparison can do `acc.resolve_fixed_recipe(x).name` (guard nil first).
+---@param fixed_recipe LuaRecipePrototype|string|nil
+---@return LuaRecipePrototype?
+function M.resolve_fixed_recipe(fixed_recipe)
+    if fixed_recipe == nil then return nil end
+    if type(fixed_recipe) == "string" then return prototypes.recipe[fixed_recipe] end
+    return fixed_recipe
+end
+
 ---A crafting machine's engine-side `fixed_recipe` locks it to exactly one
 ---recipe; an unset (nil) lock means it can run any recipe in its categories.
 ---Reading `.fixed_recipe` is safe here because every caller passes a crafting
 ---machine (the `crafting-category` entity filter guarantees the subtype, and it
----reads back as nil on a machine without a lock).
+---reads back as nil on a machine without a lock). Routed through
+---resolve_fixed_recipe so the comparison holds whether the engine returns the
+---lock as a name string (2.0) or a LuaRecipePrototype (2.1).
 ---@param machine LuaEntityPrototype
 ---@param recipe_name string
 ---@return boolean
 function M.machine_allows_recipe(machine, recipe_name)
-    return machine.fixed_recipe == nil or machine.fixed_recipe == recipe_name
+    local fixed = M.resolve_fixed_recipe(machine.fixed_recipe)
+    return fixed == nil or fixed.name == recipe_name
 end
 
 ---Count of a recipe's *item* ingredients. Fluids are excluded because the engine's
@@ -188,7 +207,7 @@ end
 function M.get_general_machines_in_category(category_name)
     local ret = {}
     for _, machine in ipairs(M.get_machines_in_category(category_name)) do
-        if machine.fixed_recipe == nil then
+        if M.resolve_fixed_recipe(machine.fixed_recipe) == nil then
             ret[#ret + 1] = machine
         end
     end
@@ -203,7 +222,7 @@ end
 function M.get_general_machines_in_categories(categories)
     local ret = {}
     for _, machine in ipairs(M.get_machines_in_categories(categories)) do
-        if machine.fixed_recipe == nil then
+        if M.resolve_fixed_recipe(machine.fixed_recipe) == nil then
             ret[#ret + 1] = machine
         end
     end

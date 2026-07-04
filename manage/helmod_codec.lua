@@ -111,10 +111,8 @@ local function find_first_rocket_silo()
         { filter = "hidden", mode = "and",         invert = true },
     }
     for _, silo in pairs(prototypes.get_entity_filtered(filters)) do
-        if silo.fixed_recipe then
-            local part = prototypes.recipe[silo.fixed_recipe]
-            if part then return silo, part end
-        end
+        local part = acc.resolve_fixed_recipe(silo.fixed_recipe)
+        if part then return silo, part end
     end
     return nil, nil
 end

@@ -167,7 +167,8 @@ end
 ---@return string?
 local function best_effort_rocket_part(silo_proto)
     if not silo_proto then return nil end
-    if silo_proto.fixed_recipe then return silo_proto.fixed_recipe end
+    local fixed = acc.resolve_fixed_recipe(silo_proto.fixed_recipe)
+    if fixed then return fixed.name end
     local cats = silo_proto.crafting_categories
     if not cats then return nil end
     local filters = {}

@@ -2074,7 +2074,8 @@ function M.check_fixed_recipe_machine()
     end
 
     local ok, err = pcall(function()
-        assert(machine.fixed_recipe == "fs-test-fixed-recipe-a",
+        local fixed = acc.resolve_fixed_recipe(machine.fixed_recipe)
+        assert(fixed and fixed.name == "fs-test-fixed-recipe-a",
             "fixture machine is not locked to recipe A")
 
         assert(acc.machine_allows_recipe(machine, "fs-test-fixed-recipe-a"),
@@ -2319,8 +2320,10 @@ function M.check_shared_fixed_recipe_machine()
     end
 
     local ok, err = pcall(function()
-        assert(machine_a.fixed_recipe == "fs-test-shared-recipe"
-            and machine_b.fixed_recipe == "fs-test-shared-recipe",
+        local fixed_a = acc.resolve_fixed_recipe(machine_a.fixed_recipe)
+        local fixed_b = acc.resolve_fixed_recipe(machine_b.fixed_recipe)
+        assert(fixed_a and fixed_a.name == "fs-test-shared-recipe"
+            and fixed_b and fixed_b.name == "fs-test-shared-recipe",
             "fixture machines are not both locked to the shared recipe")
 
         -- Trigger set: a recipe craftable only by >=2 fixed machines qualifies; a

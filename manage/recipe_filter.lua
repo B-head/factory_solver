@@ -153,7 +153,8 @@ local function recipe_temperature_compatible(recipe, reference, kind, category_f
 
         if is_real then
             for _, machine in ipairs(acc.get_machines_in_categories(categories)) do
-                if machine.fixed_recipe == recipe.name
+                local fixed = acc.resolve_fixed_recipe(machine.fixed_recipe)
+                if fixed and fixed.name == recipe.name
                     and any_machine_burns_fluid_at({ machine }, fluid_name, ref_lo, ref_hi) then
                     return true
                 end

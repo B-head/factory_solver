@@ -222,10 +222,12 @@ function M.create_virtuals()
     -- per-combination machine lists get_machines_for_recipe uses, so the trigger
     -- matches the picker. Reading `.fixed_recipe` is safe for every crafting
     -- machine (furnaces read back nil and count as general), the same contract
-    -- machine_allows_recipe relies on. combination_machines is memoized per
-    -- distinct combination (not per recipe): a modpack where every recipe stays
-    -- single-category still pays exactly one get_entity_filtered call per
-    -- category, same as before this generalization.
+    -- machine_allows_recipe relies on; acc.resolve_fixed_recipe absorbs the
+    -- string (2.0) vs LuaRecipePrototype (2.1) return-type difference.
+    -- combination_machines is memoized per distinct combination (not per
+    -- recipe): a modpack where every recipe stays single-category still pays
+    -- exactly one get_entity_filtered call per category, same as before this
+    -- generalization.
     ---@type table<string, true>
     local shared_fixed_recipes = {}
     local combination_machines = {}
@@ -238,9 +240,10 @@ function M.create_virtuals()
         if machines then
             local fixed_count, has_general = 0, false
             for _, machine in ipairs(machines) do
-                if machine.fixed_recipe == nil then
+                local fixed = acc.resolve_fixed_recipe(machine.fixed_recipe)
+                if fixed == nil then
                     has_general = true
-                elseif machine.fixed_recipe == recipe.name then
+                elseif fixed.name == recipe.name then
                     fixed_count = fixed_count + 1
                 end
             end
@@ -547,8 +550,9 @@ function M.create_rocket_silo_virtual(rocket_silo_prototype)
     local time_to_quick_launch_per_tick = 1632
 
     local rocket_parts
-    if rocket_silo_prototype.fixed_recipe then
-        rocket_parts = { prototypes.recipe[rocket_silo_prototype.fixed_recipe] }
+    local fixed_rocket_part = acc.resolve_fixed_recipe(rocket_silo_prototype.fixed_recipe)
+    if fixed_rocket_part then
+        rocket_parts = { fixed_rocket_part }
     else
         local filters = {}
         for key, _ in pairs(rocket_silo_prototype.crafting_categories) do
