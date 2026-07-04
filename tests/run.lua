@@ -69,6 +69,7 @@ local case_files = {
     "lp_short_loop",
     "lp_quality_cascade",
     "lp_quality_recycling_loop",
+    "quality_decomposition",
     "fs_log",
     "typed_name_format",
     "number_format",

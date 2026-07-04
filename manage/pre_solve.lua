@@ -841,7 +841,22 @@ function M.quality_decomposition(normalized_amount, effectivity_quality, unlocke
             if quality_prototype.name == normalized_amount.quality then
                 next_probability = math.min(effectivity_quality * quality_prototype.next_probability, 1)
             else
-                next_probability = current_probability * quality_prototype.next_probability
+                -- Factorio 2.1 adds chain_probability, the probability of a
+                -- SECOND (and later) consecutive tier jump within one craft --
+                -- a different, typically much smaller number than
+                -- next_probability, which only governs the first jump. 2.0
+                -- has no such field at all, and indexing a nonexistent field
+                -- on a runtime prototype throws rather than returning nil, so
+                -- the read is pcall-guarded; failure or an actual nil value
+                -- both fall back to the pre-2.1 (next_probability) math. A
+                -- successful read of 0 (legendary, no further jump) is a real
+                -- value and must NOT be treated as "missing".
+                local ok, chain_probability = pcall(function() return quality_prototype.chain_probability end)
+                if ok and chain_probability ~= nil then
+                    next_probability = current_probability * chain_probability
+                else
+                    next_probability = current_probability * quality_prototype.next_probability
+                end
             end
         else
             next_quality = "unknown-quality"
