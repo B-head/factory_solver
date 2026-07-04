@@ -32,6 +32,34 @@
 
 local raw = data.raw
 
+-- Factorio 2.1 replaces a recipe's `category` + `additional_categories` fields
+-- with a single `categories` array (and hard-errors at the data stage if it
+-- sees the old fields at all); 2.0 has no `categories` field. `mods` is the
+-- data stage's version-mapping table (mods["base"] -> a version string like
+-- "2.1.9"), so branch on it here rather than picking one field shape and
+-- breaking the other engine.
+local base_version = mods["base"] or "0.0.0"
+local base_major, base_minor = base_version:match("^(%d+)%.(%d+)")
+local SUPPORTS_CATEGORIES_ARRAY = tonumber(base_major) > 2
+    or (tonumber(base_major) == 2 and tonumber(base_minor) >= 1)
+
+---Sets the right recipe-category field(s) for whichever engine is loading:
+---2.1+'s `categories` array, or 2.0's `category` + `additional_categories`.
+---@param recipe_def table
+---@param categories string[]
+---@return table
+local function with_categories(recipe_def, categories)
+    if SUPPORTS_CATEGORIES_ARRAY then
+        recipe_def.categories = categories
+    else
+        recipe_def.category = categories[1]
+        if categories[2] then
+            recipe_def.additional_categories = { table.unpack(categories, 2) }
+        end
+    end
+    return recipe_def
+end
+
 -- ============================================================================
 -- Dedicated display + crafting buckets.
 --
@@ -105,15 +133,14 @@ extend_test({
 -- recipe (which would drag the test machines into that recipe's machine list).
 if raw.item and raw.item["iron-plate"] and raw.item["copper-plate"] then
     extend_test({
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-machine-recipe",
-            category = "fs-test-machine",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 1 } },
-        },
+        }, { "fs-test-machine" }),
     })
 end
 
@@ -673,15 +700,14 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     extend_test({
         { type = "recipe-category", name = "fs-test-fuel-filter" },
         ffm,
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-fuel-filter-recipe",
-            category = "fs-test-fuel-filter",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "efficiency-module", amount = 1 } },
             results = { { type = "item", name = "speed-module", amount = 1 } },
-        },
+        }, { "fs-test-fuel-filter" }),
     })
 end
 
@@ -690,15 +716,14 @@ end
 --     the empty-machine-list path in the picker and machine resolution.
 extend_test({
     { type = "recipe-category", name = "fs-test-orphan-cat" },
-    {
+    with_categories({
         type = "recipe",
         name = "fs-test-orphan-recipe",
-        category = "fs-test-orphan-cat",
         enabled = true,
         energy_required = 1,
         ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
         results = { { type = "item", name = "copper-plate", amount = 1 } },
-    },
+    }, { "fs-test-orphan-cat" }),
 })
 
 -- A dedicated fluid-handling crafter for the §8c / §8d temperature recipes, so
@@ -722,17 +747,16 @@ end
 --     picker's exact-temperature slot handling.
 if raw.fluid and raw.fluid["steam"] then
     extend_test({
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-exact-temp-recipe",
-            category = "fs-test-crafting-with-fluid",
             enabled = true,
             energy_required = 1,
             ingredients = {
                 { type = "fluid", name = "steam", amount = 10, temperature = 500 },
             },
             results = { { type = "item", name = "iron-plate", amount = 1 } },
-        },
+        }, { "fs-test-crafting-with-fluid" }),
     })
 end
 
@@ -741,10 +765,9 @@ end
 --     the picker's "keep if ANY matching slot connects" branch is exercised.
 if raw.fluid and raw.fluid["steam"] then
     extend_test({
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-split-temp-recipe",
-            category = "fs-test-crafting-with-fluid",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
@@ -755,7 +778,7 @@ if raw.fluid and raw.fluid["steam"] then
             -- Two products -> no single auto-derivable icon; pin main_product so
             -- the recipe icon resolves to the steam fluid icon.
             main_product = "steam",
-        },
+        }, { "fs-test-crafting-with-fluid" }),
     })
 end
 
@@ -781,24 +804,22 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     extend_test({
         { type = "recipe-category", name = "fs-test-fixed-cat" },
         fixed_machine,
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-fixed-recipe-a",
-            category = "fs-test-fixed-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 1 } },
-        },
-        {
+        }, { "fs-test-fixed-cat" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-fixed-recipe-b",
-            category = "fs-test-fixed-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "copper-plate", amount = 1 } },
             results = { { type = "item", name = "iron-plate", amount = 1 } },
-        },
+        }, { "fs-test-fixed-cat" }),
     })
 end
 
@@ -838,10 +859,9 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     extend_test({
         { type = "recipe-category", name = "fs-test-catalyst-cat" },
         catalyst_machine,
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-catalyst-a",
-            category = "fs-test-catalyst-cat",
             enabled = true,
             energy_required = 1,
             ingredients = {
@@ -849,16 +869,15 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
                 { type = "item", name = "iron-plate", amount = 2000 },
             },
             results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
-        },
-        {
+        }, { "fs-test-catalyst-cat" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-catalyst-b",
-            category = "fs-test-catalyst-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 2 } },
-        },
+        }, { "fs-test-catalyst-cat" }),
         -- Conversion off the catalyst loop to a terminal product, so the smoke
         -- catalyst_reclassify fixture can target a non-cycle output: the cheat
         -- then lands on a cycle intermediate (iron-gear-wheel) rather than on the
@@ -868,15 +887,14 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         -- loop and dumped instead. See tests/cases/lp_two_pass_reclassify.lua for
         -- the same shape.) copper-cable is a vanilla item but extend_test stamps
         -- auto_recycle=false, so it does not clobber its quality-recycling recipe.
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-catalyst-c",
-            category = "fs-test-catalyst-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "copper-plate", amount = 1 } },
             results = { { type = "item", name = "copper-cable", amount = 1 } },
-        },
+        }, { "fs-test-catalyst-cat" }),
     })
 end
 
@@ -909,19 +927,17 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     extend_test({
         { type = "recipe-category", name = "fs-test-collapse-cat" },
         collapse_machine,
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-collapse-boot",
-            category = "fs-test-collapse-cat",
             enabled = true,
             energy_required = 1,
             ingredients = {},
             results = { { type = "item", name = "copper-plate", amount = 1 } },
-        },
-        {
+        }, { "fs-test-collapse-cat" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-collapse-a",
-            category = "fs-test-collapse-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "copper-plate", amount = 1 } },
@@ -930,16 +946,15 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
                 { type = "item", name = "stone", amount = 3000 },
             },
             main_product = "iron-gear-wheel",
-        },
-        {
+        }, { "fs-test-collapse-cat" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-collapse-b",
-            category = "fs-test-collapse-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "stone", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 1 } },
-        },
+        }, { "fs-test-collapse-cat" }),
     })
 end
 
@@ -973,24 +988,22 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     extend_test({
         { type = "recipe-category", name = "fs-test-vp-cat" },
         vp_machine,
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-vp-make",
-            category = "fs-test-vp-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "stone", amount = 2000 } },
             results = { { type = "item", name = "electronic-circuit", amount = 1 } },
-        },
-        {
+        }, { "fs-test-vp-cat" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-vp-use",
-            category = "fs-test-vp-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "electronic-circuit", amount = 1 } },
             results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
-        },
+        }, { "fs-test-vp-cat" }),
     })
 end
 
@@ -1032,10 +1045,9 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
     extend_test({
         { type = "recipe-category", name = "fs-test-vc-cat" },
         vc_machine,
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-vc-make",
-            category = "fs-test-vc-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "stone", amount = 1 } },
@@ -1044,11 +1056,10 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
                 { type = "item", name = "wood", amount = 1 },
             },
             main_product = "iron-gear-wheel",
-        },
-        {
+        }, { "fs-test-vc-cat" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-vc-useb",
-            category = "fs-test-vc-cat",
             enabled = true,
             energy_required = 1,
             ingredients = {
@@ -1056,7 +1067,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
                 { type = "item", name = "stone", amount = 2000 },
             },
             results = { { type = "item", name = "copper-cable", amount = 1 } },
-        },
+        }, { "fs-test-vc-cat" }),
     })
 end
 
@@ -1091,10 +1102,9 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         cap_machine("fs-test-ing-cap-2", 2, "a"),
         cap_machine("fs-test-ing-cap-4", 4, "b"),
         cap_machine("fs-test-ing-cap-10", 10, "c"),
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-ing-ok",
-            category = "fs-test-ing-cap",
             enabled = true,
             energy_required = 1,
             ingredients = {
@@ -1102,11 +1112,10 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
                 { type = "item", name = "copper-plate", amount = 1 },
             },
             results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
-        },
-        {
+        }, { "fs-test-ing-cap" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-ing-over",
-            category = "fs-test-ing-cap",
             enabled = true,
             energy_required = 1,
             ingredients = {
@@ -1115,11 +1124,10 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
                 { type = "item", name = "stone", amount = 1 },
             },
             results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
-        },
-        {
+        }, { "fs-test-ing-cap" }),
+        with_categories({
             type = "recipe",
             name = "fs-test-ing-fluid",
-            category = "fs-test-ing-cap",
             enabled = true,
             energy_required = 1,
             ingredients = {
@@ -1128,7 +1136,7 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
                 { type = "fluid", name = "water", amount = 10 },
             },
             results = { { type = "item", name = "iron-gear-wheel", amount = 1 } },
-        },
+        }, { "fs-test-ing-cap" }),
     })
 end
 
@@ -1157,22 +1165,22 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         { type = "recipe-category", name = "fs-test-shared-fixed-cat" },
         shared_machine("fs-test-shared-machine-a"),
         shared_machine("fs-test-shared-machine-b"),
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-shared-recipe",
             localised_name = "fs-test-shared-recipe",
-            category = "fs-test-shared-fixed-cat",
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 1 } },
-        },
+        }, { "fs-test-shared-fixed-cat" }),
     })
 end
 
--- 8h. Multi-category recipe (2.0's `additional_categories` forward-compat field --
---     the same union/OR semantics Factorio 2.1 generalizes to every recipe via
---     `.categories`). Two isolated categories, each with its own dedicated
+-- 8h. Multi-category recipe: `with_categories` picks 2.1's native `.categories`
+--     array or 2.0's `category` + `additional_categories`, both of which
+--     acc.recipe_categories normalizes identically into the same union/OR
+--     semantics. Two isolated categories, each with its own dedicated
 --     general machine; both machines share the vanilla "nuclear" fuel category
 --     (uranium-fuel-cell, burnt_result depleted-uranium-fuel-cell) so the SAME
 --     burnable fuel appears in BOTH categories' fuel lists -- exercising the
@@ -1209,16 +1217,14 @@ if raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2
         { type = "recipe-category", name = "fs-test-multi-cat-b" },
         multi_cat_machine("fs-test-multi-cat-machine-a", "fs-test-multi-cat-a"),
         multi_cat_machine("fs-test-multi-cat-machine-b", "fs-test-multi-cat-b"),
-        {
+        with_categories({
             type = "recipe",
             name = "fs-test-multi-cat-recipe",
-            category = "fs-test-multi-cat-a",
-            additional_categories = { "fs-test-multi-cat-b" },
             enabled = true,
             energy_required = 1,
             ingredients = { { type = "item", name = "iron-plate", amount = 1 } },
             results = { { type = "item", name = "copper-plate", amount = 1 } },
-        },
+        }, { "fs-test-multi-cat-a", "fs-test-multi-cat-b" }),
     })
 end
 
