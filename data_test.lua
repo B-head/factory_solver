@@ -179,7 +179,16 @@ if raw.fluid and raw.fluid["water"] then
     hot.default_temperature = 15
     hot.max_temperature = 1e7
 
-    extend_test({ fuel_gas, uncookable, hot })
+    -- The residue fluid for the §5c spent_fluid machine below (Factorio 2.1.9's
+    -- FluidEnergySource::spent_fluid / ::output_fluid_box). A plain fluid
+    -- prototype has no 2.1-only fields, so -- unlike the machine that emits it --
+    -- this is defined unconditionally; it is simply never produced on a 2.0
+    -- engine (no machine references it there).
+    local spent_fluid_residue = table.deepcopy(raw.fluid["water"])
+    spent_fluid_residue.name = "fs-test-spent-fluid"
+    spent_fluid_residue.localised_name = "fs-test-spent-fluid"
+
+    extend_test({ fuel_gas, uncookable, hot, spent_fluid_residue })
 end
 
 -- A launchable item (carries rocket_launch_products): required so the
@@ -624,6 +633,55 @@ if raw["offshore-pump"] and raw["offshore-pump"]["offshore-pump"] then
         pump_lubricant.fluid_box.filter = "lubricant"
         extend_test({ pump_lubricant })
     end
+end
+
+-- ============================================================================
+-- 5c. Fluid-fuel spent_fluid residue (Factorio 2.1.9). A FluidEnergySource
+--     crafting machine that burns a fluid fuel and emits a byproduct fluid
+--     through a dedicated output_fluid_box. FluidEnergySource::output_fluid_box
+--     and ::spent_fluid are new in 2.1.9 (unknown-field data-stage validation
+--     makes setting them on a 2.0 engine unsafe), so this whole section is
+--     gated on SUPPORTS_CATEGORIES_ARRAY, the same 2.1-detection flag used for
+--     recipe categories -- it produces NOTHING on a 2.0 engine, and the
+--     manage/smoke_rcon.lua fixture that uses it SKIPs itself accordingly.
+--     spent_fluid is set at the MACHINE level (overriding the fluid-level
+--     FluidPrototype::spent_fluid default, which this file leaves unset),
+--     exercising the override branch of accessor/energy.lua's
+--     try_get_spent_fluid. Sits on the isolated fs-test-machine category and
+--     crafts fs-test-machine-recipe, like the §2 FluidEnergySource variants.
+-- ============================================================================
+
+if SUPPORTS_CATEGORIES_ARRAY
+    and raw["assembling-machine"] and raw["assembling-machine"]["assembling-machine-2"]
+    and raw.fluid and raw.fluid["fs-test-fuel-gas"] and raw.fluid["fs-test-spent-fluid"] then
+    local spent_machine = table.deepcopy(raw["assembling-machine"]["assembling-machine-2"])
+    spent_machine.name = "fs-test-fes-spent-fluid"
+    spent_machine.localised_name = "fs-test-fes-spent-fluid"
+    spent_machine.minable = nil
+    spent_machine.next_upgrade = nil
+    spent_machine.placeable_by = nil
+    spent_machine.crafting_categories = { "fs-test-machine" }
+    spent_machine.energy_usage = "100kW"
+    spent_machine.energy_source = {
+        type = "fluid",
+        burns_fluid = true,
+        scale_fluid_usage = true,
+        destroy_non_fuel_fluid = true,
+        effectivity = 1,
+        fluid_box = {
+            volume = 200,
+            production_type = "input",
+            pipe_connections = {},
+            filter = "fs-test-fuel-gas",
+        },
+        output_fluid_box = {
+            volume = 200,
+            production_type = "output",
+            pipe_connections = {},
+        },
+        spent_fluid = { name = "fs-test-spent-fluid", amount = 1, temperature = 90 },
+    }
+    extend_test({ spent_machine })
 end
 
 -- ============================================================================

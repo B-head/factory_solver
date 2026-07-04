@@ -41,7 +41,11 @@
 -- failing. The smoke's mod set is variable (tests/smoke_rcon.ps1's -Mods), so
 -- guard every mod you touch this way -- including official ones (space-age /
 -- quality / elevated-rails). The only names you may omit are factory_solver's
--- hard info.json dependencies (base, flib), which are always present.
+-- hard info.json dependencies (base, flib), which are always present. A fixture
+-- gated on the ENGINE VERSION rather than a mod (e.g. data_test.lua prototypes
+-- that only exist on Factorio 2.1+) instead adds an optional `skip_if = function()
+-- return reason_or_nil end` field, checked the same SKIP-not-FAIL way after the
+-- requires loop (see the "spent_fluid" fixture).
 
 local fs_log = require "fs_log"
 local fs_util = require "fs_util"
@@ -968,6 +972,71 @@ fixtures.reactor_burnt_fuel = {
     end,
 }
 
+---Spent-fluid (spent_fluid, Factorio 2.1.9) crediting -- the fluid counterpart of
+---reactor_burnt_fuel above. Needs data_test.lua's fs-test-fes-spent-fluid machine
+---and fs-test-spent-fluid residue fluid, which only exist on a 2.1+ engine
+---(data_test.lua gates the machine on SUPPORTS_CATEGORIES_ARRAY -- setting
+---FluidEnergySource::output_fluid_box / ::spent_fluid, both new in 2.1.9, on a 2.0
+---engine is unsafe) -- so this fixture SKIPs itself via skip_if on a 2.0 engine
+---instead of erroring. build() asserts the normalized line credits the spent fluid
+---directly (so a regressed try_get_spent_fluid fails loudly here, not as a
+---silently-wrong total), then a lower bound forces the machine to run so the read
+---side folds the credit through report.
+fixtures.spent_fluid = {
+    requires = {},
+    skip_if = function()
+        if not prototypes.entity["fs-test-fes-spent-fluid"] then
+            return "needs Factorio 2.1+ (fs-test-fes-spent-fluid missing -- "
+                .. "data_test.lua gates it on SUPPORTS_CATEGORIES_ARRAY)"
+        end
+        return nil
+    end,
+    ---@param solution Solution
+    build = function(solution)
+        assert(prototypes.entity["fs-test-fes-spent-fluid"],
+            "fs-test-fes-spent-fluid machine missing -- fixture assumptions broken")
+        assert(prototypes.fluid["fs-test-spent-fluid"],
+            "fs-test-spent-fluid residue fluid missing -- fixture assumptions broken")
+
+        ---@type ProductionLine
+        local line = {
+            recipe_typed_name = tn.create_typed_name("recipe", "fs-test-machine-recipe"),
+            machine_typed_name = tn.create_typed_name("machine", "fs-test-fes-spent-fluid"),
+            module_typed_names = {},
+            affected_by_beacons = {},
+            fuel_typed_name = tn.create_typed_name("fluid", "fs-test-fuel-gas"),
+        }
+        table.insert(solution.production_lines, line)
+
+        -- Directly assert the non-obvious accessor wiring: a fluid-fuel-burning
+        -- machine with an output_fluid_box emits its spent_fluid 1:1 (scaled by
+        -- SpentFluidSpecification.amount) at its emitted temperature as a
+        -- dedicated normalized product. This runs pre-solve, so it pins the
+        -- construction independently of the LP.
+        local n = acc.normalize_production_line(line, nil)
+        assert(n.fuel_ingredient and n.fuel_ingredient.name == "fs-test-fuel-gas",
+            "fes-spent-fluid fuel ingredient not normalized")
+        assert(n.fuel_spent_fluid
+            and n.fuel_spent_fluid.name == "fs-test-spent-fluid"
+            and n.fuel_spent_fluid.minimum_temperature == 90
+            and n.fuel_spent_fluid.maximum_temperature == 90,
+            "spent fluid (spent_fluid) not credited as a normalized product")
+
+        -- Lower-bound the recipe so the LP actually runs it (pulling the fuel and
+        -- emitting the spent fluid), driving the report spent-fluid credit fold
+        -- under check_read_side.
+        ---@type Constraint
+        local constraint = {
+            type = "recipe",
+            name = "fs-test-machine-recipe",
+            quality = "normal",
+            limit_type = "lower",
+            limit_amount_per_second = 1,
+        }
+        table.insert(solution.constraints, constraint)
+    end,
+}
+
 ---Cascade staged rescue end-to-end through the incremental solver
 ---(manage/pre_solve.lua + solver/cascade.lua). Plant the data_test
 ---bootstrap-trapped catalyst loop
@@ -1180,6 +1249,17 @@ function M.setup(fixture_name)
     for _, mod_name in ipairs(fixture.requires) do
         if not script.active_mods[mod_name] then
             return "SKIP: fixture '" .. fixture_name .. "' requires mod '" .. mod_name .. "' (not loaded)"
+        end
+    end
+
+    -- Guard: a fixture that depends on an ENGINE version rather than a mod (e.g.
+    -- data_test.lua prototypes gated on SUPPORTS_CATEGORIES_ARRAY, present only on
+    -- Factorio 2.1+) declares an optional skip_if predicate instead of a fake mod
+    -- name. Same SKIP-not-FAIL contract as the requires loop above.
+    if fixture.skip_if then
+        local reason = fixture.skip_if()
+        if reason then
+            return "SKIP: fixture '" .. fixture_name .. "' " .. reason
         end
     end
 
@@ -1766,6 +1846,8 @@ function M.check_relation_split()
                         info.recipe_for_ingredient, oi.recipe_for_ingredient)
                     assert_lists_equal(tag .. " " .. kind .. " recipe_for_burnt_result " .. name,
                         info.recipe_for_burnt_result, oi.recipe_for_burnt_result)
+                    assert_lists_equal(tag .. " " .. kind .. " recipe_for_spent_fluid " .. name,
+                        info.recipe_for_spent_fluid, oi.recipe_for_spent_fluid)
                 end
             end
             for name, v in pairs(sync.enabled_recipe) do

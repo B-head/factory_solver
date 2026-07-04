@@ -44,7 +44,7 @@ param(
     # Seconds to wait for the server to open its RCON port after launch.
     [int] $RconStartupSeconds = 90,
     [string[]] $Fixtures = @("iron_plate", "missing_prototype", "boiler_steam", "reactor_burnt_fuel",
-        "catalyst_reclassify", "cascade_vp", "cascade_vc", "target_rescue",
+        "spent_fluid", "catalyst_reclassify", "cascade_vp", "cascade_vc", "target_rescue",
         "migration_legacy_shape", "codec_solution_roundtrip", "codec_frozen_import",
         "codec_fp_roundtrip", "codec_helmod_roundtrip", "codec_helmod_import_order",
         "codec_yafc_roundtrip", "yafc_real_sample", "codec_yafc_virtual", "codec_yafc_spoilage",
