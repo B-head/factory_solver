@@ -2772,7 +2772,7 @@ end
 ---it. Returns "OK", "SKIP: <detail>", or "ERROR: <detail>".
 ---@return string
 function M.check_bundle16_codecs()
-    if not script.active_mods["space-age"] then
+    if not (script.active_mods["space-age"] and script.active_mods["quality"]) then
         return "SKIP: bundle16 needs Space Age (most recipes are SA-only)"
     end
     local ok, result = pcall(M.check_bundle16_codecs_impl)
@@ -2921,7 +2921,7 @@ end
 ---lossless round-trip for that codec.
 ---@return string
 function M.bundle16_drop_report()
-    if not script.active_mods["space-age"] then return "SKIP: needs Space Age" end
+    if not (script.active_mods["space-age"] and script.active_mods["quality"]) then return "SKIP: needs Space Age" end
     save.init_player_data(PLAYER_INDEX)
     local payloads = assert(solution_codec.decode(bundle16_shared), "decode failed")
 
@@ -2995,7 +2995,7 @@ function M.bundle16_research_bonuses()
 end
 
 function M.dump_bundle16_normalized()
-    if not script.active_mods["space-age"] then return "SKIP: needs Space Age" end
+    if not (script.active_mods["space-age"] and script.active_mods["quality"]) then return "SKIP: needs Space Age" end
     save.init_force_data(FORCE_INDEX)
     local bonuses = M.bundle16_research_bonuses()
     local payloads = assert(solution_codec.decode(bundle16_shared), "decode failed")
@@ -3141,7 +3141,7 @@ local BUNDLE16_NORM_XFAIL = {
 ---(-KeepRun). Solution-independent of storage. SKIPs without Space Age.
 ---@return string
 function M.check_bundle16_v060()
-    if not script.active_mods["space-age"] then
+    if not (script.active_mods["space-age"] and script.active_mods["quality"]) then
         return "SKIP: bundle16 needs Space Age (most recipes are SA-only)"
     end
     local ok, result = pcall(M.check_bundle16_v060_impl)
@@ -3277,7 +3277,7 @@ end
 ---without Space Age.
 ---@return string
 function M.check_bundle16_norms()
-    if not script.active_mods["space-age"] then
+    if not (script.active_mods["space-age"] and script.active_mods["quality"]) then
         return "SKIP: bundle16 needs Space Age (most recipes are SA-only)"
     end
     local ok, result = pcall(M.check_bundle16_norms_impl)
@@ -3397,7 +3397,7 @@ end
 ---machine count than the cold solve. SKIPs without Space Age.
 ---@return string
 function M.check_qp_warmstart()
-    if not script.active_mods["space-age"] then
+    if not (script.active_mods["space-age"] and script.active_mods["quality"]) then
         return "SKIP: qp_warmstart needs Space Age (most recipes are SA-only)"
     end
     local ok, result = pcall(M.check_qp_warmstart_impl)
