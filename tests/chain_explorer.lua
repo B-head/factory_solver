@@ -1751,8 +1751,8 @@ function M.profile_solve(args_str)
     assert(mt and mt.__mul, "csr_matrix metatable / __mul not found")
 
     -- Accumulators start stopped (zero); .add sums each wrapped call's duration.
-    local chol_acc = game.create_profiler(true)
-    local mul_acc = game.create_profiler(true)
+    local chol_acc = helpers.create_profiler(true)
+    local mul_acc = helpers.create_profiler(true)
     local chol_calls, mul_calls = 0, 0
 
     -- Wrap BOTH cholesky variants: solve_step dispatches to the memoized one when
@@ -1761,7 +1761,7 @@ function M.profile_solve(args_str)
     local orig_chol = csr.cholesky_decomposition
     local orig_chol_memo = csr.cholesky_decomposition_memo
     csr.cholesky_decomposition = function(...)
-        local p = game.create_profiler()
+        local p = helpers.create_profiler()
         local a, b = orig_chol(...)
         p.stop()
         chol_acc.add(p)
@@ -1769,7 +1769,7 @@ function M.profile_solve(args_str)
         return a, b
     end
     csr.cholesky_decomposition_memo = function(...)
-        local p = game.create_profiler()
+        local p = helpers.create_profiler()
         local a, b = orig_chol_memo(...)
         p.stop()
         chol_acc.add(p)
@@ -1778,7 +1778,7 @@ function M.profile_solve(args_str)
     end
     local orig_mul = mt.__mul
     mt.__mul = function(a, b)
-        local p = game.create_profiler()
+        local p = helpers.create_profiler()
         local out = orig_mul(a, b)
         p.stop()
         mul_acc.add(p)
@@ -1795,10 +1795,10 @@ function M.profile_solve(args_str)
 
     solution.solver_state = "ready"
     local force_data = storage.forces[FORCE_INDEX]
-    local total_acc = game.create_profiler(true)
+    local total_acc = helpers.create_profiler(true)
     local steps, solve_err = 0, nil
     while solution.solver_state == "ready" or solution.solver_state == "calculating" do
-        local tp = game.create_profiler()
+        local tp = helpers.create_profiler()
         local ok, err = pcall(pre_solve.forwerd_solve, force_data, solution)
         tp.stop()
         total_acc.add(tp)
@@ -1932,7 +1932,7 @@ function M.profile_ab(args_str)
         fs_log.set_level("warn")
         local rb0 = csr0.cholesky_rebuild_count
         solution.solver_state = "ready"
-        local p = game.create_profiler()
+        local p = helpers.create_profiler()
         local steps = 0
         while solution.solver_state == "ready" or solution.solver_state == "calculating" do
             pcall(pre_solve.forwerd_solve, fd, solution)
