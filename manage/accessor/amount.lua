@@ -6,6 +6,31 @@
 
 local M = {}
 
+---A recipe's real product from `LuaRecipePrototype.products` carries a single
+---`probability` field on Factorio 2.0; Factorio 2.1 replaces it with
+---`independent_probability` (a [0,1] chance the product is given at all) and
+---`shared_probability` ({min, max} window against a single shared roll other
+---products on the recipe can also key off of, for correlated multi-product
+---outcomes -- confirmed empirically against a real 2.1.9 engine, `probability`
+---reads back nil there). `shared_probability`'s roll is uniform over [0,1], so
+---regardless of how it correlates with other products' windows, THIS
+---product's own marginal (i.e. expected-value) chance of being given is
+---exactly its window width (max - min) -- which is what the LP-facing mean
+---amount below needs, not the per-craft joint outcome. Virtual recipes
+---(manage/virtual.lua) always set `probability` explicitly on their synthetic
+---product tables regardless of engine version, so they take the 2.0 branch
+---unconditionally and are unaffected by any of this.
+---@param product ProductEx
+---@return number
+local function product_probability(product)
+    if product.probability ~= nil then
+        return product.probability
+    end
+    local shared = product.shared_probability
+    local window = shared and (shared.max - shared.min) or 1
+    return (product.independent_probability or 1) * window
+end
+
 ---comment
 ---@param product ProductEx
 ---@param quality string
@@ -24,7 +49,7 @@ function M.raw_product_to_amount(product, quality, craft_energy, crafting_speed,
 
     local normal_amount = (amount_min + amount_max + target_by_productivity * effectivity_productivity) / 2
     local extra_amount = (product.extra_count_fraction or 0) * (1 + effectivity_productivity)
-    local amount = (normal_amount * product.probability + extra_amount) * crafting_speed / craft_energy
+    local amount = (normal_amount * product_probability(product) + extra_amount) * crafting_speed / craft_energy
 
     -- The raw layer (Product) carries a single `temperature`; the normalized /
     -- LP layer is range-only, so a point temperature becomes the degenerate
