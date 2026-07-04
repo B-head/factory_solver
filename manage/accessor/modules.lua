@@ -134,6 +134,13 @@ local MODULE_INVENTORY_BY_TYPE = {
     ["lab"] = defines.inventory.lab_modules,
     ["mining-drill"] = defines.inventory.mining_drill_modules,
     ["beacon"] = defines.inventory.beacon_modules,
+    -- Factorio 2.1 adds module_slots to AgriculturalTowerPrototype (data stage)
+    -- and defines.inventory.agricultural_tower_modules (confirmed on the 2.1
+    -- docs); neither exists on 2.0, so this key evaluates to nil there and the
+    -- entry is inert until a 2.1 mod actually gives an agricultural-tower-type
+    -- entity module slots. Vanilla/Space Age's own tower has module_inventory_size
+    -- == 0 on every currently supported version, so this never fires for it.
+    ["agricultural-tower"] = defines.inventory.agricultural_tower_modules,
 }
 
 ---Module slot count of a machine at the given quality. Factorio 2.0.77+ lets an
