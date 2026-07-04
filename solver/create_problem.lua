@@ -277,12 +277,15 @@ local function each_ingredient(line)
 end
 
 ---Iterate every product the line emits: real recipe products first, then the
----fuel's burnt_result (spent fuel cell) as a trailing pseudo-product when
----present. Mirror of each_ingredient on the production side -- the LP treats
----the spent cell as just another produced material; the separation only exists
----so it bypasses quality decomposition and the UI can render it apart from the
----recipe's own products. burnt_result is always an item, so callers that filter
----on `type == "fluid"` (temperature bridges) see it as a no-op.
+---fuel residue -- the item burnt_result (spent fuel cell) or the fluid spent_fluid
+----- as a trailing pseudo-product when present. Mirror of each_ingredient on the
+---production side -- the LP treats the residue as just another produced material;
+---the separation only exists so it bypasses quality decomposition and the UI can
+---render it apart from the recipe's own products. A line burns one fuel, so
+---burnt_result (item fuel) and spent_fluid (fluid fuel) are mutually exclusive and
+---share the single trailing slot. Note the spent_fluid IS a fluid at a point
+---temperature, so unlike the always-item burnt_result it DOES flow through the
+---temperature-bridge collection below (its [T,T] range is bridged to consumers).
 ---@param line NormalizedProductionLine
 ---@return fun(_: any, i: integer): integer?, NormalizedAmount?
 ---@return any
@@ -293,8 +296,11 @@ local function each_product(line)
         i = i + 1
         if i <= n then
             return i, line.products[i]
-        elseif i == n + 1 and line.fuel_burnt_result then
-            return i, line.fuel_burnt_result
+        elseif i == n + 1 then
+            local residue = line.fuel_burnt_result or line.fuel_spent_fluid
+            if residue then
+                return i, residue
+            end
         end
     end, nil, 0
 end
@@ -775,6 +781,9 @@ function M.dump_normalized_lines(production_lines)
         end
         if line.fuel_burnt_result then
             out[#out + 1] = "    fuel_burnt_result = " .. amount_literal(line.fuel_burnt_result) .. ","
+        end
+        if line.fuel_spent_fluid then
+            out[#out + 1] = "    fuel_spent_fluid = " .. amount_literal(line.fuel_spent_fluid) .. ","
         end
         out[#out + 1] = "    power_per_second = " .. num_literal(line.power_per_second) .. ","
         out[#out + 1] = "    pollution_per_second = " .. num_literal(line.pollution_per_second) .. ","

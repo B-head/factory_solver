@@ -381,6 +381,40 @@ function handlers.make_production_line_table(event)
                 table.insert(buttons, def)
             end
 
+            -- Spent fluid (spent_fluid) is the fluid-fuel counterpart of the spent
+            -- cell above: also a produced material sharing the Products column, and
+            -- likewise not quality-decomposed. It carries the emitted point
+            -- temperature, so build its typed_name with the range fields.
+            if n.fuel_spent_fluid then
+                local amount = n.fuel_spent_fluid
+                local typed_name = tn.create_typed_name("fluid", amount.name, amount.quality,
+                    amount.minimum_temperature, amount.maximum_temperature)
+                local craft = tn.typed_name_to_material(typed_name)
+                local is_hidden = acc.is_hidden(craft)
+                local is_unresearched = acc.is_unresearched(craft, relation_to_recipes)
+
+                local def = common.create_decorated_sprite_button {
+                    typed_name = typed_name,
+                    is_hidden = is_hidden,
+                    is_unresearched = is_unresearched,
+                    tags = {
+                        line_index = line_index,
+                        typed_name = typed_name,
+                        is_product = true,
+                        result_typed_name = line.recipe_typed_name,
+                        raw_amount = amount.amount_per_second,
+                    },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_production_line_inout_click,
+                        on_added = handlers.update_amount,
+                        on_amount_unit_changed = handlers.update_amount,
+                        on_calculation_changed = handlers.update_amount,
+                    },
+                }
+                common.append_tooltip_line(def, common.op_hints.inout())
+                table.insert(buttons, def)
+            end
+
             local def = {
                 type = "table",
                 column_count = 8,

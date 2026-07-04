@@ -796,6 +796,16 @@ function M.resolve_bare_fluids(normalized_production_lines)
         if line.fuel_ingredient then
             resolve_ingredient(line.fuel_ingredient)
         end
+        -- The spent fluid is an OUTPUT, so widen it like a product (a bare one
+        -- resolves to the point [default, default]). It normally already carries the
+        -- emitted point temperature from normalize, making this a no-op; the call
+        -- keeps the residue symmetric with recipe products for the rare bare case.
+        local spent = line.fuel_spent_fluid
+        if spent and spent.type == "fluid" then
+            spent.minimum_temperature, spent.maximum_temperature =
+                acc.resolve_bare_fluid_product(spent.name,
+                    spent.minimum_temperature, spent.maximum_temperature)
+        end
     end
 end
 

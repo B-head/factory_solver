@@ -277,6 +277,97 @@ function M.try_get_burnt_result(material)
     return nil
 end
 
+---Read a Factorio 2.1+ runtime field that does not exist on 2.0 engines.
+---Indexing a key a runtime prototype doesn't have throws rather than returning
+---nil (CLAUDE.md union-typing rule), so the read is pcall-guarded; a missing
+---field and a genuine nil value both come back as nil. Same feature-detection
+---shape as recipe_categories / the chain_probability read in pre_solve.
+---@param obj any
+---@param key string
+---@return any
+local function read_optional_field(obj, key)
+    local ok, value = pcall(function() return obj[key] end)
+    if ok then return value end
+    return nil
+end
+
+---The fluid produced when this fluid fuel is burned, at the FLUID-level default
+---(FluidPrototype::spent_fluid, new in Factorio 2.1.9). Returns the
+---SpentFluidSpecification ({ name, amount, temperature }, amount per 1 unit of
+---fuel consumed) or nil. This is the direct fluid analog of try_get_burnt_result:
+---it reads the material-intrinsic residue and ignores any machine-level override
+---or output_fluid_box gating (both applied by try_get_spent_fluid on the solver
+---path). Only fluid fuels carry one; item / virtual fuels and pre-2.1 engines
+---return nil. Used by the relation-cache / picker side, where the exact machine
+---is not resolved (see manage/relation.lua's register_spent_fluid).
+---@param material LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
+---@return SpentFluidSpecification?
+function M.try_get_fluid_spent_fluid(material)
+    if material.object_name ~= "LuaFluidPrototype" then
+        return nil
+    end
+    return read_optional_field(material, "spent_fluid")
+end
+
+---A generator's spent-fluid output leaves through a distinct output_fluid_box,
+---which surfaces at runtime as an output-typed entry in fluidbox_prototypes --
+---LuaEntityPrototype exposes no direct output_fluid_box getter, unlike
+---LuaFluidEnergySourcePrototype. Scan for one. Always false on pre-2.1 engines
+---(generators have no output fluid box there), which keeps the generator branch
+---of try_get_spent_fluid inert on 2.0.
+---@param machine LuaEntityPrototype
+---@return boolean
+local function generator_has_output_fluidbox(machine)
+    for _, box in ipairs(machine.fluidbox_prototypes) do
+        local pt = box.production_type
+        if pt == "output" or pt == "input-output" then
+            return true
+        end
+    end
+    return false
+end
+
+---The effective spent fluid `machine` emits when it burns `fuel` (a fluid), or
+---nil. Factorio 2.1.9 lets a fluid-burning Generator / FluidEnergySource emit a
+---byproduct fluid per unit of fuel consumed. This is the fluid analog of the
+---burnt_result residue, but machine-dependent where burnt_result is purely
+---fuel-intrinsic. Resolution mirrors the engine:
+---  * A machine-level override (FluidEnergySource::spent_fluid /
+---    GeneratorPrototype::spent_fluid) wins over the fuel fluid's
+---    FluidPrototype::spent_fluid default.
+---  * Either way it is emitted ONLY through an output fluid box
+---    (FluidEnergySource::output_fluid_box, or an output-typed fluidbox on a
+---    generator); the docs state the machine-level spec is "Only used when
+---    output_fluid_box is defined", so the gate applies to the override too.
+---Every read of a 2.1-only field is pcall-guarded (throws on 2.0). The fuel-type
+---guard and the output-box gate make item / heat / virtual fuels and every
+---pre-2.1 engine return nil.
+---@param machine LuaEntityPrototype
+---@param fuel LuaItemPrototype | LuaFluidPrototype | VirtualMaterial
+---@return SpentFluidSpecification?
+function M.try_get_spent_fluid(machine, fuel)
+    if fuel.object_name ~= "LuaFluidPrototype" then
+        return nil
+    end
+
+    local machine_spec, has_output
+    local energy = machine.fluid_energy_source_prototype
+    if energy then
+        machine_spec = read_optional_field(energy, "spent_fluid")
+        has_output = read_optional_field(energy, "output_fluid_box") ~= nil
+    elseif machine.type == "generator" then
+        machine_spec = read_optional_field(machine, "spent_fluid")
+        has_output = generator_has_output_fluidbox(machine)
+    else
+        return nil
+    end
+
+    if not has_output then
+        return nil
+    end
+    return machine_spec or read_optional_field(fuel, "spent_fluid")
+end
+
 ---comment
 ---@param machine LuaEntityPrototype
 ---@return EnergyType

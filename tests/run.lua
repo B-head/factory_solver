@@ -98,6 +98,7 @@ local case_files = {
     "material_cycles",
     "problem_dump",
     "lp_fuel_burnt_result",
+    "lp_fuel_spent_fluid",
     "lp_masslosing_cycle_import",
     "lp_catalyst_loop_bootstrap",
     "lp_explorer_catalyst",

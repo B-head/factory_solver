@@ -116,6 +116,36 @@ function M.normalize_production_line(line, bonuses)
         end
     end
 
+    -- Spent fluid: the fluid-fuel counterpart of the burnt_result above. A
+    -- fluid-burning generator / fluid-energy machine can emit a residue fluid per
+    -- unit of fuel consumed (spec.amount : 1, at spec.temperature) -- resolved
+    -- against the machine so a machine-level override or a missing output fluid box
+    -- is honoured (see energy_acc.try_get_spent_fluid). Kept apart from `products`
+    -- for the same reasons as fuel_burnt_result. Unlike the always-item spent cell
+    -- the residue is a fluid at a point temperature, so it is the degenerate range
+    -- [T,T] and rides the temperature-bridge path like any other fluid product.
+    ---@type NormalizedAmount?
+    local fuel_spent_fluid = nil
+    if fuel_ingredient and fuel_ingredient.type == "fluid" then
+        local fuel = tn.typed_name_to_material(line.fuel_typed_name)
+        local spec = energy_acc.try_get_spent_fluid(machine, fuel)
+        if spec then
+            ---@type LuaFluidPrototype?
+            local spent_proto = prototypes.fluid[spec.name]
+            local temperature = spec.temperature
+                or (spent_proto and spent_proto.default_temperature)
+            ---@type NormalizedAmount
+            fuel_spent_fluid = {
+                type = "fluid",
+                name = spec.name,
+                quality = "normal",
+                amount_per_second = fuel_ingredient.amount_per_second * spec.amount,
+                minimum_temperature = temperature,
+                maximum_temperature = temperature,
+            }
+        end
+    end
+
     local power = energy_acc.get_power_per_second(machine, machine_quality,
         effectivity.consumption, line.fuel_typed_name)
     local pollution = energy_acc.get_pollution_per_second(machine, "pollution",
@@ -162,6 +192,7 @@ function M.normalize_production_line(line, bonuses)
         ingredients = ingredients,
         fuel_ingredient = fuel_ingredient,
         fuel_burnt_result = fuel_burnt_result,
+        fuel_spent_fluid = fuel_spent_fluid,
         power_per_second = power,
         pollution_per_second = pollution,
         is_source = is_source,

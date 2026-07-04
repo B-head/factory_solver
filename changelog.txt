@@ -2,6 +2,12 @@
 Version: 0.7.1
 Date: ????
   Changes:
+    - Fluid fuels that leave a residue when burned (Factorio 2.1's "spent
+      fluid" - the fluid counterpart of a solid fuel's burnt result, such as
+      a spent fuel cell) are now modelled. The residue fluid is produced by
+      the burning line at its emitted temperature, counted in the totals,
+      shown in the production-line editor, and reachable from the recipe
+      picker's "spent" section, mirroring how burnt results already work.
 ---------------------------------------------------------------------------------------------------
 Version: 0.7.0
 Date: 2026-07-04

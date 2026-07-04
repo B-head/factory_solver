@@ -203,6 +203,9 @@ function M.intermediates(lines)
         if line.fuel_burnt_result then
             produced[tn.typed_name_to_variable_name(line.fuel_burnt_result)] = true
         end
+        if line.fuel_spent_fluid then
+            produced[tn.typed_name_to_variable_name(line.fuel_spent_fluid)] = true
+        end
         for _, ing in ipairs(line.ingredients) do
             consumed[tn.typed_name_to_variable_name(ing)] = true
         end

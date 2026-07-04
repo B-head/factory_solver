@@ -61,9 +61,14 @@ function handlers.on_init_choose_visiblity(event)
     if kind == "product" then
         allowed, recipe_names = dialog_tags.is_choose_product, relation_to_recipe.recipe_for_product
     elseif kind == "spent" then
-        -- Burnt fuel residue (spent cell / ash) is a way the material is produced,
-        -- so it shares the product-choosing mode.
-        allowed, recipe_names = dialog_tags.is_choose_product, relation_to_recipe.recipe_for_burnt_result
+        -- Burnt fuel residue (spent cell / ash) or spent fluid is a way the material
+        -- is produced, so it shares the product-choosing mode. An item carries
+        -- recipe_for_burnt_result, a fluid recipe_for_spent_fluid (mutually exclusive
+        -- by material type).
+        allowed = dialog_tags.is_choose_product
+        recipe_names = reference_typed_name.type == "fluid"
+            and relation_to_recipe.recipe_for_spent_fluid
+            or relation_to_recipe.recipe_for_burnt_result
     elseif kind == "ingredient" then
         allowed, recipe_names = dialog_tags.is_choose_ingredient, relation_to_recipe.recipe_for_ingredient
     elseif kind == "fuel" then
@@ -344,7 +349,9 @@ picker_build.register_spec {
         if kind == "product" then
             recipe_names = relation_to_recipe.recipe_for_product
         elseif kind == "spent" then
-            recipe_names = relation_to_recipe.recipe_for_burnt_result
+            recipe_names = reference.type == "fluid"
+                and relation_to_recipe.recipe_for_spent_fluid
+                or relation_to_recipe.recipe_for_burnt_result
         elseif kind == "ingredient" then
             recipe_names = relation_to_recipe.recipe_for_ingredient
         elseif kind == "fuel" then

@@ -166,6 +166,7 @@ __factory_solver__storage = {}
 ---@field craftable_count integer
 ---@field recipe_for_product string[]
 ---@field recipe_for_burnt_result string[] Recipes that emit this material only as a burnt fuel residue (spent cell / ash), kept apart from recipe_for_product so the picker lists them in their own section instead of burying the real producers.
+---@field recipe_for_spent_fluid string[] Fluid analog of recipe_for_burnt_result: recipes whose fluid-burning machine emits this fluid as a spent-fluid residue (FluidPrototype::spent_fluid, 2.1.9). Populated on fluid RelationToRecipe entries only; shares the picker's "spent" section with recipe_for_burnt_result.
 ---@field recipe_for_ingredient string[]
 ---@field fuel_consumer_categories string[] Recipe categories whose machines burn this material as fuel; expand to real recipe names via relation_to_recipes.recipes_by_category. Stored as category keys, not flattened recipe names: every recipe in a category shares its fuel set, so flattening is the recipe x fuel product (~389k entries on a pyanodon set). See relation.expand_fuel_consumers.
 ---@field fuel_consumer_virtual_recipes string[] Virtual recipes that consume this material as fuel (machine-derived, listed directly -- no category indirection).
@@ -185,6 +186,7 @@ __factory_solver__storage = {}
 ---@field structure_ready boolean? Set true when the listing phases finish (entering finalize_real): contributes / seeds / virtual tables are complete, so apply_research_change is structurally safe and a research finishing during the tick-split finalize is applied to rel incrementally instead of skipped. nil/false during listing.
 ---@field fuel RelationBuildFuelCache cache_fuel_names' result, built incrementally across the prep_fuel phases; reused by the real / virtual recipe passes.
 ---@field burnt_result_names table<string, string> Fuel item name -> burnt_result item name, built incrementally in prep_alloc_item.
+---@field spent_fluid_names table<string, string> Fuel fluid name -> fluid-level spent_fluid fluid name (FluidPrototype::spent_fluid, 2.1.9), built incrementally in prep_alloc_fluid. The fluid analog of burnt_result_names.
 
 ---cache_fuel_names' five return values bundled for storage. All name-string
 ---arrays / maps, so storage-safe.
@@ -409,6 +411,7 @@ __factory_solver__storage = {}
 ---@field ingredients NormalizedAmount[]
 ---@field fuel_ingredient NormalizedAmount?
 ---@field fuel_burnt_result NormalizedAmount?
+---@field fuel_spent_fluid NormalizedAmount? Fluid residue emitted per unit of fluid fuel burned (FluidPrototype / FluidEnergySource / Generator spent_fluid, 2.1.9). The fluid analog of fuel_burnt_result; a point-temperature fluid, so unlike the always-item burnt result it also participates in temperature bridging.
 ---@field power_per_second number
 ---@field pollution_per_second number
 ---@field is_bridge boolean? Temperature bridge injected by create_temperature_bridges (LP-internal plumbing, not a user recipe).
@@ -422,6 +425,16 @@ __factory_solver__storage = {}
 ---@field amount_per_second number
 ---@field minimum_temperature number?
 ---@field maximum_temperature number?
+
+---Factorio 2.1.9 runtime concept (LuaFluidPrototype.spent_fluid /
+---LuaFluidEnergySourcePrototype.spent_fluid / LuaEntityPrototype.spent_fluid):
+---the fluid a fluid-burning machine emits per unit of fuel consumed. Mirrored
+---here so the accessor annotations resolve on the pre-2.1 API stubs too (where
+---the concept is absent); sumneko merges it with the real concept when present.
+---@class SpentFluidSpecification
+---@field name string Spent fluid's prototype name.
+---@field amount number Amount produced per 1 unit of fuel fluid consumed.
+---@field temperature number Temperature the spent fluid is emitted at.
 
 ---@class Virtuals
 ---@field material table<string, VirtualMaterial>

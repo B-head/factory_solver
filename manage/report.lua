@@ -137,6 +137,16 @@ function M.get_total_amounts(bonuses, solution)
                 burnt.amount_per_second * quantity_of_machines_required)
         end
 
+        -- Spent fluid (spent_fluid) is the fluid-fuel counterpart of the burnt
+        -- result: a produced fluid, so it credits the fluid totals positively at
+        -- its emitted point temperature -- the counterpart to the fluid-fuel debit.
+        local spent = n.fuel_spent_fluid
+        if spent then
+            add(fluid_totals, tn.create_typed_name("fluid", spent.name, nil,
+                    spent.minimum_temperature, spent.maximum_temperature),
+                spent.amount_per_second * quantity_of_machines_required)
+        end
+
         ::continue_line::
     end
 

@@ -95,7 +95,7 @@ local function input_terms(line)
     return terms
 end
 
----Collect a line's product terms (products + burnt result) as (var, amount).
+---Collect a line's product terms (products + burnt result + spent fluid) as (var, amount).
 ---@param line NormalizedProductionLine
 ---@return MwTerm[]
 local function output_terms(line)
@@ -107,6 +107,12 @@ local function output_terms(line)
         terms[#terms + 1] = {
             var = tn.typed_name_to_variable_name(line.fuel_burnt_result),
             amount = line.fuel_burnt_result.amount_per_second,
+        }
+    end
+    if line.fuel_spent_fluid then
+        terms[#terms + 1] = {
+            var = tn.typed_name_to_variable_name(line.fuel_spent_fluid),
+            amount = line.fuel_spent_fluid.amount_per_second,
         }
     end
     return terms
