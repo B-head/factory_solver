@@ -4,6 +4,19 @@
 -- counts -- the agreement is the trust anchor (no single solver is gold).
 -- machines = sum over PLACED-line recipe vars (bridges excluded). NOT shipped.
 -- Regenerate: tests/gen_v060_exact.lua run in a 0.6.0 git worktree.
+-- "Asteroid up cycleing" and "SpacePlatform" have a confirmed-different correct
+-- answer on Factorio 2.1+: asteroid-crushing recipes raised their own-chunk
+-- self-return chance (basic 20% -> 30%, advanced 5% -> 10%) and asteroid-
+-- reprocessing recipes lost the quality module effect (allowed_effects.quality
+-- true -> false on metallic-asteroid-reprocessing, checked as representative of
+-- the -reprocessing family) -- both confirmed by reading recipe prototypes on a
+-- live 2.0.77 engine vs a live 2.1.9 engine. The values below are the 2.0-data
+-- answer (unchanged from the original 0.6.0/2.0 capture); the 2.1-data answer
+-- (verified independently via tests/research/reference_solver.lua converging on
+-- the same numbers as the current shipping solver) lives in
+-- BUNDLE16_V060_OVERRIDE_2_1 in manage/smoke_rcon.lua, selected at runtime by
+-- detected engine version. See project_factorio_2_1_api_migration in memory for
+-- the full derivation.
 return {
     ["Asteroid up cycleing"] = { state = "finished", T = 7.937372377e-14, import = 26.79722353, surplus = 0.001674102361, machines = 221.0184678 },
     ["Begining"] = { state = "finished", T = 1.619913368e-14, import = 0, surplus = 1.658791265e-10, machines = 36 },

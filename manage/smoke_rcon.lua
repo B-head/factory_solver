@@ -3137,6 +3137,47 @@ local BUNDLE16_KNOWN_REGRESSIONS = {}
 -- cascade. Its baseline is now finished, so it is compared like every other.)
 local BUNDLE16_SKIP = {}
 
+-- 2.1-data override for the two bundle16 problems whose CORRECT answer genuinely
+-- changed with a real vanilla recipe change, not a factory_solver regression:
+-- asteroid-crushing recipes raised their own-chunk self-return chance (basic
+-- 20% -> 30%, advanced 5% -> 10%) and asteroid-reprocessing recipes lost the
+-- quality module effect (allowed_effects.quality true -> false, checked on
+-- metallic-asteroid-reprocessing as representative of the -reprocessing
+-- family) -- both confirmed by reading recipe prototypes on a live 2.0.77
+-- engine vs a live 2.1.9 engine (tests/console.ps1). Verified independently via
+-- tests/research/reference_solver.lua converging on these same numbers under
+-- 2.1 data. tests/fixtures/bundle16_v060.lua keeps the original 2.0-data
+-- values (its own capture is 2.0-era); this table supplies the 2.1 answer
+-- instead, selected by bundle16_v060_baseline() below. See
+-- project_factorio_2_1_api_migration in memory for the full derivation.
+local BUNDLE16_V060_OVERRIDE_2_1 = {
+    ["Asteroid up cycleing"] = { state = "finished", T = 0, import = 0.5400000001, surplus = 0, machines = 3 },
+    ["SpacePlatform"] = { state = "finished", T = 0, import = 0.8360000001, surplus = 0, machines = 20.36 },
+}
+
+---True iff the currently-running engine is Factorio 2.1 or newer.
+---script.active_mods["base"] is a plain version string at runtime (e.g.
+---"2.1.9"); mirrors data_test.lua's SUPPORTS_CATEGORIES_ARRAY / base_major
+---detection, applied at the control stage instead of the data stage.
+---@return boolean
+local function is_factorio_2_1_plus()
+    local major, minor = tostring(script.active_mods["base"]):match("^(%d+)%.(%d+)")
+    major, minor = tonumber(major), tonumber(minor)
+    return major ~= nil and minor ~= nil and (major > 2 or (major == 2 and minor >= 1))
+end
+
+---Baseline lookup for a bundle16 problem name: the 2.1-data override when the
+---running engine is 2.1+ and this problem name has one, else the (2.0-data)
+---bundle16_v060 table.
+---@param name string
+---@return table?
+local function bundle16_v060_baseline(name)
+    if is_factorio_2_1_plus() and BUNDLE16_V060_OVERRIDE_2_1[name] then
+        return BUNDLE16_V060_OVERRIDE_2_1[name]
+    end
+    return bundle16_v060[name]
+end
+
 -- The four user-selectable shipping norms (manage/pre_solve.lua dispatch). The
 -- cascade is checked by check_bundle16_v060 against the 0.6.0 baseline; these four
 -- run the SAME tier-sum comparison against that baseline -- only the solver norm
@@ -3170,7 +3211,6 @@ local BUNDLE16_NORMS = { "l1", "l2", "linf", "legacy" }
 -- MATCH the baseline.
 local BUNDLE16_NORM_XFAIL = {
     l1 = {
-        ["Asteroid up cycleing"] = true,
         ["Fulgora bottom up"] = true,
         ["Fulgora top down"] = true,
         ["Quality loop"] = true,
@@ -3181,14 +3221,12 @@ local BUNDLE16_NORM_XFAIL = {
     -- baseline tier sums -- the dust they parked was the only divergence -- so they
     -- are no longer pinned. The remainder genuinely redistribute the violation.
     l2 = {
-        ["Asteroid up cycleing"] = true,
         ["Fulgora bottom up"] = true,
         ["Fulgora top down"] = true,
         ["Quality loop"] = true,
         ["SpacePlatform"] = true,
     },
     linf = {
-        ["Asteroid up cycleing"] = true,
         ["Fulgora bottom up"] = true,
         ["Fulgora top down"] = true,
         -- Fusion now converges to the baseline under the per-kind amount
@@ -3200,6 +3238,33 @@ local BUNDLE16_NORM_XFAIL = {
     },
     legacy = {},
 }
+
+-- "Asteroid up cycleing"'s cross-norm divergence (l1/l2/linf's un-gated solve
+-- redistributing violation differently than the gated cascade/legacy baseline)
+-- was established against 2.0-data numbers (2026-06-20). On Factorio 2.1+ this
+-- problem compares against BUNDLE16_V060_OVERRIDE_2_1 instead (see above),
+-- where T == 0 -- no violation exists at all to redistribute -- so every norm
+-- converges to the identical vertex and MATCHes cleanly; pinning it there
+-- would misfire as an XPASS the moment it started matching. Kept 2.0-only via
+-- bundle16_norm_expected() below rather than folded into BUNDLE16_NORM_XFAIL.
+local BUNDLE16_NORM_XFAIL_2_0_ONLY = {
+    l1 = { ["Asteroid up cycleing"] = true },
+    l2 = { ["Asteroid up cycleing"] = true },
+    linf = { ["Asteroid up cycleing"] = true },
+}
+
+---Whether (norm, problem name) is a pinned XFAIL, folding in the 2.0-only
+---pins from BUNDLE16_NORM_XFAIL_2_0_ONLY when NOT running on Factorio 2.1+.
+---@param norm string
+---@param name string
+---@return boolean
+local function bundle16_norm_expected(norm, name)
+    if (BUNDLE16_NORM_XFAIL[norm] or {})[name] then return true end
+    if not is_factorio_2_1_plus() then
+        return ((BUNDLE16_NORM_XFAIL_2_0_ONLY[norm] or {})[name]) == true
+    end
+    return false
+end
 
 ---RCON entry point: REGRESSION GUARD comparing the DEFAULT SHIPPING solver (the
 ---real pre_solve.forwerd_solve pump, driven synchronously to terminal, on each
@@ -3272,7 +3337,7 @@ function M.check_bundle16_v060_impl()
 
     local report, fails, matched_n, diverged_n, skipped = {}, {}, 0, 0, 0
     for _, p in ipairs(payloads) do
-        local v060 = bundle16_v060[p.name]
+        local v060 = bundle16_v060_baseline(p.name)
 
         for n in pairs(solutions) do solutions[n] = nil end
         local name = save.import_solution(solutions, p)
@@ -3398,9 +3463,8 @@ function M.check_bundle16_norms_impl()
     local report, fails = {}, {}
     local matched_n, xfail_n, skipped = 0, 0, 0
     for _, norm in ipairs(BUNDLE16_NORMS) do
-        local expect = BUNDLE16_NORM_XFAIL[norm] or {}
         for _, p in ipairs(payloads) do
-            local v060 = bundle16_v060[p.name]
+            local v060 = bundle16_v060_baseline(p.name)
 
             for n in pairs(solutions) do solutions[n] = nil end
             local name = save.import_solution(solutions, p)
@@ -3427,7 +3491,7 @@ function M.check_bundle16_norms_impl()
                 if not near(cur[f], v060[f]) then diff[#diff + 1] = f end
             end
             local matched = (solution.solver_state == "finished" and #diff == 0)
-            local expected = expect[p.name] == true
+            local expected = bundle16_norm_expected(norm, p.name)
             local verdict
             if matched and not expected then
                 verdict = "MATCH"; matched_n = matched_n + 1
