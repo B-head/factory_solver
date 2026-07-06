@@ -155,10 +155,14 @@ end
 ---Module-inventory `defines.inventory` index per machine type, used to read the
 ---quality-scaled module slot count via get_inventory_size. A type absent here (or
 ---a nil define on an older engine) falls back to the static module_inventory_size.
+---Factorio 2.1 unifies assembling-machine/furnace/rocket-silo module storage under
+---a single `crafter_modules` define and drops the three separate 2.0 ones
+---(confirmed nil on a real 2.1.9 engine); the `or` falls back to `crafter_modules`
+---so the same table works unchanged on both 2.0 and 2.1.
 local MODULE_INVENTORY_BY_TYPE = {
-    ["assembling-machine"] = defines.inventory.assembling_machine_modules,
-    ["furnace"] = defines.inventory.furnace_modules,
-    ["rocket-silo"] = defines.inventory.rocket_silo_modules,
+    ["assembling-machine"] = defines.inventory.assembling_machine_modules or defines.inventory.crafter_modules,
+    ["furnace"] = defines.inventory.furnace_modules or defines.inventory.crafter_modules,
+    ["rocket-silo"] = defines.inventory.rocket_silo_modules or defines.inventory.crafter_modules,
     ["lab"] = defines.inventory.lab_modules,
     ["mining-drill"] = defines.inventory.mining_drill_modules,
     ["beacon"] = defines.inventory.beacon_modules,
