@@ -159,38 +159,35 @@ function handlers.on_total_effectivity_visible(event)
     elem.visible = 0 < (machine.module_inventory_size or 0) or acc.is_use_beacon(machine)
 end
 
----Substrate section is plant-only. The whole flow is hidden for any other
----machine type so non-plant production lines see no extra UI.
+---Substrate section is plant-only. Resolved via the recipe (acc.
+---get_recipe_plant), not the machine -- the machine slot is now a real,
+---user-selectable agricultural-tower-type entity (see manage/virtual.lua's
+---create_plant_virtual), independent of which plant it grows.
 ---@param event EventDataTrait
 function handlers.on_substrate_visible(event)
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
-    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = tn.typed_name_to_machine(machine_typed_name)
-    elem.visible = machine.type == "plant"
+    local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    elem.visible = acc.get_recipe_plant(recipe) ~= nil
 end
 
----Counterpart to on_substrate_visible: hides Machine / Quality / their
----separator line for plant lines so Substrate becomes the only "machine
----identity" section visible. The plant entity is still bound as
----machine_typed_name internally (picker would return only the plant anyway),
----but its UI is redundant noise — Substrate carries all the meaningful
----per-line choice. Sets visible=false only; leaves non-plant defaults alone
----so e.g. Quality's `visible = script.feature_flags.quality` still applies.
----
----Spoilage virtual recipes share the same "no real machine" property —
----machine_typed_name is the entity-unknown sentinel and there is nothing
----to configure (no quality, no modules, no fuel). Hide the Machine /
----Quality sections for them too; the "No configurable items" label below
----takes their place.
+---Spoilage virtual recipes have no configurable settings (no machine, no
+---quality, no modules, no fuel, no beacons) -- machine_typed_name is the
+---entity-unknown sentinel and there is nothing to configure. Hides the
+---Machine / Quality / Modules / Beacons sections (and their separator line)
+---for them; the "No configurable items" label below takes their place.
+---Plant lines are NOT machineless anymore: their machine slot is a real,
+---user-selectable agricultural-tower-type entity whose Machine / Quality /
+---Modules / Beacons sections are as meaningful as any normal machine's, so
+---they are no longer hidden here (Substrate is an ADDITIONAL section for
+---plant lines, not a replacement for Machine).
 ---@param event EventDataTrait
-function handlers.on_hide_for_plant(event)
+function handlers.on_hide_for_machineless(event)
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
-    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = tn.typed_name_to_machine(machine_typed_name)
     local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
     local recipe = tn.typed_name_to_recipe(recipe_typed_name)
     -- Guard with `object_name == nil`: real LuaRecipePrototype userdata
@@ -200,14 +197,14 @@ function handlers.on_hide_for_plant(event)
         and ((recipe --[[@as VirtualRecipe]]).is_spoilage == true
             or (recipe --[[@as VirtualRecipe]]).is_source == true
             or (recipe --[[@as VirtualRecipe]]).is_sink == true)
-    if machine.type == "plant" or is_machineless then
+    if is_machineless then
         elem.visible = false
     end
 end
 
 ---Spoilage virtual recipes have no configurable settings (no machine, no
 ---quality, no modules, no fuel). The regular sections are hidden via
----on_hide_for_plant; this handler reveals a single placeholder label so the
+---on_hide_for_machineless; this handler reveals a single placeholder label so the
 ---dialog body isn't empty.
 ---@param event EventDataTrait
 function handlers.on_no_configurable_items_visible(event)
@@ -233,13 +230,14 @@ function handlers.on_make_substrate_table(event)
     local elem = event.element
     local dialog = assert(fs_util.find_upper(event.element, "factory_solver_machine_setups"))
 
-    local machine_typed_name = dialog.tags.machine_typed_name --[[@as TypedName]]
-    local machine = tn.typed_name_to_machine(machine_typed_name)
-    if machine.type ~= "plant" then
+    local recipe_typed_name = dialog.tags.recipe_typed_name --[[@as TypedName]]
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    local plant = acc.get_recipe_plant(recipe)
+    if not plant then
         return
     end
 
-    local tiles = acc.get_plant_substrate_tiles(machine)
+    local tiles = acc.get_plant_substrate_tiles(plant)
 
     -- If the line's saved substrate is no longer in the restriction list
     -- (mod data drift), snap to the first available one and write it back so
@@ -1000,14 +998,14 @@ return {
                 style = "caption_label",
                 caption = { "factory-solver-machine" },
                 handler = {
-                    on_added = handlers.on_hide_for_plant,
+                    on_added = handlers.on_hide_for_machineless,
                 },
             },
             {
                 type = "frame",
                 style = "factory_solver_slot_background_frame",
                 handler = {
-                    on_added = handlers.on_hide_for_plant,
+                    on_added = handlers.on_hide_for_machineless,
                 },
                 {
                     type = "table",
@@ -1025,11 +1023,13 @@ return {
                 single_line = false,
                 visible = false,
             },
-            -- Plant-only counterpart to the Machine label+frame above: plant lines
-            -- replace the machine identity with a substrate tile pick, so this sits
-            -- at the same vertical position as Machine. on_hide_for_plant hides
-            -- the Machine block iff the line is a plant; on_substrate_visible
-            -- makes this block visible only then, so exactly one of the two shows.
+            -- Plant-only ADDITIONAL section, alongside (not replacing) Machine
+            -- above: the machine slot for a plant line is a real, user-selectable
+            -- agricultural-tower-type entity (see manage/virtual.lua's
+            -- create_plant_virtual), and Substrate carries the separate, tower-
+            -- independent choice of which soil tile the plant grows on.
+            -- on_substrate_visible shows this block only for plant lines
+            -- (acc.get_recipe_plant(recipe) ~= nil).
             {
                 type = "flow",
                 style = "factory_solver_no_spacing_vertical_flow_style",
@@ -1061,7 +1061,7 @@ return {
                 direction = "horizontal",
                 visible = script.feature_flags.quality,
                 handler = {
-                    on_added = handlers.on_hide_for_plant,
+                    on_added = handlers.on_hide_for_machineless,
                 },
                 {
                     type = "flow",

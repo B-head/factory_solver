@@ -1171,29 +1171,47 @@ end
 ---is emitted per plant; modded plants may have several seeds, in which case
 ---each gets its own recipe with that seed as the sole ingredient.
 ---
----The plant entity (not the agricultural tower) is the fixed_crafting_machine,
----on purpose: 1 craft = 1 plant growing through one full cycle = 1 occupied slot
----in some tower's radius, and that slot count IS proportional to throughput
+---No fixed_crafting_machine: the machine slot is a real, user-selectable
+---agricultural-tower-type entity (acc.get_machines_for_recipe dispatches on
+---acc.get_recipe_plant(recipe), which resolves the plant from
+---source_entity_name below and enumerates compatible towers via
+---acc.get_towers_for_plant). This is deliberately decoupled from the RATE:
+---1 craft = 1 plant growing through one full cycle = 1 occupied slot in some
+---tower's radius, and that slot count IS proportional to throughput
 ---(concurrent slots = rate * growth time), so quantity_of_machines_required is
----the number of concurrent plant slots. The tower cannot be the machine because
----its count is NOT proportional to production -- a tower harvests every plant in
----a fixed radius, so the number of towers is a spatial-packing step function of
----the layout, with no honest towers-per-output ratio. Consequently the tower's
----electric draw (tower power * tower count) has no proportional basis and is
----deliberately omitted from the power total -- this is by design, not an
----oversight. (The crane action time is likewise not surfaced at runtime; only
----crane_energy_usage is, and that is a per-action peak, not a steady load.)
----growth_ticks is the sole rate-limiting factor.
+---the number of concurrent plant slots regardless of which tower is selected --
+---recipe_acc.get_virtual_recipe_rates hardcodes 1.0 for both "plant" and
+---"agricultural-tower" machine types, and get_crafting_energy always returns 1
+---for virtual recipes, so the machine's identity never enters the rate/quantity
+---math. A tower's OWN count is NOT proportional to production (a tower
+---harvests every plant in a fixed radius, so tower count is a spatial-packing
+---step function of the layout, with no honest towers-per-output ratio) --
+---consequently the tower's own electric draw / own energy-source pollution are
+---deliberately suppressed in accessor.normalize.lua when machine.type ==
+---"agricultural-tower" (see that file), by the same design principle as
+---before. What the tower's machine slot DOES feed into: its own
+---module_typed_names / affected_by_beacons / effect_receiver, folded into
+---effectivity.productivity and effectivity.pollution exactly like a normal
+---machine -- this is how a modded (module-capable) tower's productivity/
+---pollution modules reach a plant line, confirmed against real gameplay
+---(2026-07-07): tower productivity modules increase harvest yield, tower
+---pollution-affecting modules increase harvest-time pollution; tower speed/
+---consumption/quality modules do not affect this model (speed only spins the
+---crane, consumption/quality have no bearing here) and are not specially
+---handled -- they simply flow into effectivity.speed/.consumption/.quality,
+---which nothing downstream in this virtual recipe's shape ever reads.
 ---
 ---Substrate (soil tile) selection is purely user metadata stored on the
----ProductionLine as substrate_tile_name; it does not flow through here.
----The picker UI reads plant.autoplace_specification.tile_restriction at
----render time to populate the substrate choices.
+---ProductionLine as substrate_tile_name; it does not flow through here. The
+---picker UI resolves the plant via acc.get_recipe_plant(recipe) (NOT via the
+---machine, which is now the tower) and reads
+---plant.autoplace_specification.tile_restriction at render time.
 ---
 ---harvest_emissions is baked into pollution_per_craft on the recipe; the
 ---per-second pollution layer in accessor.normalize_production_line picks
 ---this up and adds (pollution_per_craft * crafts_per_second * effectivity)
----to the line's pollution total.
+---to the line's pollution total -- effectivity.pollution here is now the
+---selected tower's, so a tower pollution module scales this contribution.
 ---@param plant_prototype LuaEntityPrototype
 ---@param planet_index PlanetIndex
 ---@return (VirtualRecipe|VirtualMaterial)[]
@@ -1243,8 +1261,6 @@ function M.create_plant_virtual(plant_prototype, planet_index)
         plant_prototype.autoplace_specification,
         planet_index.entity_planets, planet_index.control_planets)
 
-    local fixed_machine = tn.craft_to_typed_name(plant_prototype)
-
     local crafts = {}
     for _, seed in ipairs(seeds) do
         ---@type Ingredient
@@ -1265,7 +1281,6 @@ function M.create_plant_virtual(plant_prototype, planet_index)
             subgroup_name = plant_prototype.subgroup.name,
             products = products,
             ingredients = { seed_ingredient },
-            fixed_crafting_machine = fixed_machine,
             pollution_per_craft = harvest_pollution,
             hidden = plant_prototype.hidden,
             source_entity_name = plant_prototype.name,

@@ -31,11 +31,40 @@ function M.normalize_production_line(line, bonuses)
     local recipe_quality = line.recipe_typed_name.quality
     local machine = tn.typed_name_to_machine(line.machine_typed_name)
     local machine_quality = line.machine_typed_name.quality
+    -- A plant-growth line's machine is a user-selected agricultural-tower-type
+    -- entity (manage/virtual.lua's create_plant_virtual no longer sets
+    -- fixed_crafting_machine), chosen so its own modules/beacons/effect_receiver
+    -- feed effectivity.productivity/.pollution below -- but a real tower's own
+    -- electric draw and own energy-source pollution have no honest per-line
+    -- basis (tower count is a spatial-packing function of the layout, not
+    -- proportional to quantity_of_machines_required, which stays keyed to
+    -- concurrent plant slots -- see the long comment in create_plant_virtual).
+    -- Suppressed below, by the same design principle that already excludes
+    -- tower power from the model. No other virtual recipe kind ever puts an
+    -- agricultural-tower entity in the machine slot, so this type check alone
+    -- is a sufficient, precise signal.
+    local is_agricultural_tower = machine.type == "agricultural-tower"
     local total_modules = modules_acc.get_total_modules(machine, machine_quality, line.module_typed_names,
         line.affected_by_beacons, bonuses)
     local maximum_productivity = recipe_acc.get_maximum_productivity(recipe)
     local effectivity = modules_acc.get_total_effectivity(recipe, total_modules, machine.effect_receiver,
         line.recipe_typed_name, machine, bonuses, maximum_productivity)
+    -- Neutralize every tower effect kind EXCEPT productivity/pollution, right
+    -- at the source, so every downstream reader (crafting_speed below,
+    -- power/fuel, and the callers that consume the second return value --
+    -- pre_solve.lua's quality_decomposition, ui/solution_editor.lua's own
+    -- quality_decomposition call, report.lua) sees an honest ModuleEffects
+    -- without needing their own is_agricultural_tower guard. Neutral values
+    -- match get_total_effectivity's own no-effect defaults (speed/consumption
+    -- multiply, so neutral is 1; quality is additive, so neutral is 0) --
+    -- confirmed against real gameplay (2026-07-07): tower speed only spins
+    -- the crane, tower quality has no visible effect, and tower consumption
+    -- only touches the tower's own (unmodeled) power draw.
+    if is_agricultural_tower then
+        effectivity.speed = 1
+        effectivity.consumption = 1
+        effectivity.quality = 0
+    end
     local crafting_energy = recipe_acc.get_crafting_energy(recipe)
     local crafting_speed_cap = recipe_acc.get_crafting_speed_cap(recipe)
     -- Dispatch by recipe object kind. Real recipes (LuaRecipePrototype) are
@@ -78,7 +107,7 @@ function M.normalize_production_line(line, bonuses)
 
     ---@type NormalizedAmount?
     local fuel_ingredient = nil
-    if energy_acc.is_use_fuel(machine) then
+    if not is_agricultural_tower and energy_acc.is_use_fuel(machine) then
         local ftn = assert(line.fuel_typed_name)
         local fuel = tn.typed_name_to_material(ftn)
         local amount_per_second = energy_acc.get_fuel_amount_per_second(machine, machine_quality,
@@ -146,11 +175,20 @@ function M.normalize_production_line(line, bonuses)
         end
     end
 
-    local power = energy_acc.get_power_per_second(machine, machine_quality,
-        effectivity.consumption, line.fuel_typed_name)
-    local pollution = energy_acc.get_pollution_per_second(machine, "pollution",
-        machine_quality, effectivity.consumption, effectivity.pollution,
-        line.fuel_typed_name)
+    -- Suppressed for agricultural-tower machines (see is_agricultural_tower
+    -- above): the tower's own power draw and own energy-source pollution are
+    -- not modeled. pollution_per_craft below (the harvest emission) is a
+    -- separate, recipe-intrinsic contribution and is NOT gated by this --
+    -- it still scales by effectivity.pollution normally.
+    local power = 0
+    local pollution = 0
+    if not is_agricultural_tower then
+        power = energy_acc.get_power_per_second(machine, machine_quality,
+            effectivity.consumption, line.fuel_typed_name)
+        pollution = energy_acc.get_pollution_per_second(machine, "pollution",
+            machine_quality, effectivity.consumption, effectivity.pollution,
+            line.fuel_typed_name)
+    end
 
     -- Recipe-intrinsic pollution (plant.harvest_emissions baked into
     -- VirtualRecipe.pollution_per_craft by manage/virtual.lua). Real recipes

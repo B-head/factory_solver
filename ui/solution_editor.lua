@@ -181,12 +181,31 @@ function handlers.make_production_line_table(event)
             local is_hidden = acc.is_hidden(machine)
             local is_unresearched = acc.is_unresearched(machine, relation_to_recipes)
 
-            -- Plant lines display the selected substrate tile instead of the
-            -- plant entity here; the substrate button further below replaces
-            -- it. Showing the plant entity as a "machine" misleads the user
-            -- (1 craft = 1 plant slot, not 1 tower or 1 plant). The plant
-            -- entity is still bound as machine_typed_name internally.
-            --
+            -- Plant lines show their real, user-selectable agricultural-tower-
+            -- type machine here (see manage/virtual.lua's create_plant_virtual)
+            -- same as any other machine, ADDITIONALLY alongside the substrate
+            -- tile button further below (which surfaces the separate, tower-
+            -- independent choice of which soil tile the plant grows on).
+            if line.substrate_tile_name then
+                -- Plant production lines surface their selected substrate as
+                -- a tile sprite in the machine cell so it's readable at a
+                -- glance without opening machine_setup. Clicking routes
+                -- through the same recipe-click handler so the same dialog
+                -- opens, where Substrate section lets the user switch.
+                local def = {
+                    type = "sprite-button",
+                    style = "flib_slot_button_default",
+                    sprite = "tile/" .. line.substrate_tile_name,
+                    elem_tooltip = { type = "tile", name = line.substrate_tile_name },
+                    tooltip = common.op_hints.machine_icon(),
+                    tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
+                    },
+                }
+                table.insert(buttons, def)
+            end
+
             -- Spoilage virtual recipes share the same convention: there is
             -- no real machine that performs spoilage, so virtual.lua plugs
             -- an entity-unknown sentinel into machine_typed_name and we hide
@@ -205,7 +224,7 @@ function handlers.make_production_line_table(event)
             -- on the recipe icon already conveys what the row does.
             local is_source_sink_recipe = recipe and recipe.object_name == nil
                 and (recipe.is_source == true or recipe.is_sink == true)
-            if machine.type ~= "plant" and not is_spoilage_recipe and not is_source_sink_recipe then
+            if not is_spoilage_recipe and not is_source_sink_recipe then
                 local def = common.create_decorated_sprite_button {
                     typed_name = machine_typed_name,
                     is_hidden = is_hidden,
@@ -258,26 +277,6 @@ function handlers.make_production_line_table(event)
                         table.insert(buttons, def)
                     end
                 end
-            end
-
-            if line.substrate_tile_name then
-                -- Plant production lines surface their selected substrate as
-                -- a tile sprite in the machine cell so it's readable at a
-                -- glance without opening machine_setup. Clicking routes
-                -- through the same recipe-click handler so the same dialog
-                -- opens, where Substrate section lets the user switch.
-                local def = {
-                    type = "sprite-button",
-                    style = "flib_slot_button_default",
-                    sprite = "tile/" .. line.substrate_tile_name,
-                    elem_tooltip = { type = "tile", name = line.substrate_tile_name },
-                    tooltip = common.op_hints.machine_icon(),
-                    tags = flib_table.deep_merge { recipe_tags, { paste_target = "machine_fuel" } },
-                    handler = {
-                        [defines.events.on_gui_click] = handlers.on_production_line_recipe_click,
-                    },
-                }
-                table.insert(buttons, def)
             end
 
             if is_spoilage_recipe then

@@ -171,6 +171,40 @@ function M.create_lab_presets(origin)
     return ret
 end
 
+---Preset tower (agricultural-tower-type entity) per plant entity name.
+---Mirrors create_pump_presets / create_lab_presets: a plant-growth recipe's
+---candidate machine set is determined by the plant it grows (acc.
+---get_towers_for_plant), so the remembered default is keyed by the plant's
+---name rather than by recipe. A base/Space Age install has exactly one
+---candidate (vanilla's own agricultural-tower, module_inventory_size == 0 --
+---get_towers_for_plant lists it regardless), so get_default_preset picks it
+---unambiguously; only an install with zero agricultural-tower-type entities
+---at all (no Space Age, so no plant recipes exist either) would fall to the
+---unknown-entity sentinel.
+---@param origin table<string, TypedName>?
+---@return table<string, TypedName>
+function M.create_plant_tower_presets(origin)
+    local ret = {}
+    if origin then
+        ret = flib_table.deep_copy(origin)
+    end
+
+    for _, entity in pairs(prototypes.entity) do
+        if entity.type == "plant" then
+            tn.typed_name_migration(ret[entity.name])
+            if tn.validate_typed_name(ret[entity.name]) then
+                goto continue
+            end
+
+            local towers = acc.get_towers_for_plant(entity)
+            ret[entity.name] = M.get_default_preset(towers, "machine")
+            ::continue::
+        end
+    end
+
+    return ret
+end
+
 ---Preset machine per real recipe that is craftable only by >=2 fixed_recipe
 ---machines (its category has no general machine -- storage.virtuals.shared_fixed_-
 ---recipes). Keyed by recipe name because the candidate set is recipe-specific (each
@@ -339,6 +373,8 @@ function M.get_machine_preset(player_index, recipe_typed_name)
             return assert(player_data.presets.pump[recipe.pumped_fluid_name])
         elseif recipe.consumed_pack_name then
             return assert(player_data.presets.lab[recipe.consumed_pack_name])
+        elseif acc.get_recipe_plant(recipe) then
+            return assert(player_data.presets.plant_tower[acc.get_recipe_plant(recipe).name])
         else
             return assert()
         end

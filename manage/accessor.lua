@@ -82,6 +82,8 @@ M.entity_is_unresearched = prototype_acc.entity_is_unresearched
 M.is_unresearched = prototype_acc.is_unresearched
 M.get_fluidbox_filter_prototype = prototype_acc.get_fluidbox_filter_prototype
 M.get_plant_substrate_tiles = prototype_acc.get_plant_substrate_tiles
+M.get_recipe_plant = prototype_acc.get_recipe_plant
+M.get_towers_for_plant = prototype_acc.get_towers_for_plant
 
 -- Quality scaling -- manage/accessor/quality.lua
 M.get_quality_level = quality_acc.get_quality_level

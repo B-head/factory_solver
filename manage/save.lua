@@ -40,6 +40,7 @@ function M.init_player_data(player_index)
                 pump = preset.create_pump_presets(),
                 lab = preset.create_lab_presets(),
                 fixed_recipe = preset.create_fixed_recipe_presets(),
+                plant_tower = preset.create_plant_tower_presets(),
             },
             opened_gui = {},
         }
@@ -74,6 +75,7 @@ function M.reinit_player_data(player_index)
             presets.pump = preset.create_pump_presets(presets.pump)
             presets.lab = preset.create_lab_presets(presets.lab)
             presets.fixed_recipe = preset.create_fixed_recipe_presets(presets.fixed_recipe)
+            presets.plant_tower = preset.create_plant_tower_presets(presets.plant_tower)
         else
             player_data.presets = {
                 fuel = preset.create_fuel_presets(player_data.fuel_presets),
@@ -83,6 +85,7 @@ function M.reinit_player_data(player_index)
                 pump = preset.create_pump_presets(),
                 lab = preset.create_lab_presets(),
                 fixed_recipe = preset.create_fixed_recipe_presets(),
+                plant_tower = preset.create_plant_tower_presets(),
             }
             player_data.fuel_presets = nil
             player_data.resource_presets = nil
@@ -841,9 +844,14 @@ function M.new_production_line(player_index, solution, recipe_typed_name, fuel_t
     -- Plant lines default substrate to the first tile listed in the plant's
     -- autoplace_specification.tile_restriction. Non-plant recipes leave it
     -- nil. Mutated later through the substrate widget in solution_editor.
+    -- Resolved via the recipe (acc.get_recipe_plant), not the machine -- the
+    -- machine is now a user-selected agricultural-tower-type entity, not the
+    -- plant itself (see manage/virtual.lua's create_plant_virtual).
     local substrate_tile_name = nil
-    if machine.type == "plant" then
-        local tiles = acc.get_plant_substrate_tiles(machine)
+    local recipe = tn.typed_name_to_recipe(recipe_typed_name)
+    local plant = acc.get_recipe_plant(recipe)
+    if plant then
+        local tiles = acc.get_plant_substrate_tiles(plant)
         substrate_tile_name = tiles[1]
     end
 
@@ -995,8 +1003,9 @@ function M.apply_machine_clipboard(player_index, solution, line_index)
         end
 
         local new_substrate = nil
-        if new_machine.type == "plant" then
-            local tiles = acc.get_plant_substrate_tiles(new_machine)
+        local plant = acc.get_recipe_plant(recipe)
+        if plant then
+            local tiles = acc.get_plant_substrate_tiles(plant)
             if clipboard.substrate_tile_name
                 and flib_table.find(tiles, clipboard.substrate_tile_name)
             then

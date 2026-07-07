@@ -746,6 +746,71 @@ if raw.plant and raw.plant["yumako-tree"] and raw.item and raw.item["yumako-seed
 end
 
 -- ============================================================================
+-- 7b. Agricultural tower module-effect probe (Factorio 2.1.7 added
+--     AgriculturalTowerPrototype::module_slots / allowed_effects /
+--     effect_receiver -- a Modding-API addition vanilla's own tower doesn't
+--     use, module_inventory_size stays 0. factory_solver never reads modules
+--     off a tower regardless, since create_plant_virtual's fixed_crafting_
+--     machine is always the PLANT, never the tower, and AgriculturalTower-
+--     Prototype has no crafting_categories field at all -- confirmed no code
+--     path exists for tower modules to reach the LP). This fixture is for
+--     manually exercising the ENGINE's own module-effect handling on a
+--     modded tower, independent of factory_solver: a fast-growing plant
+--     (growth_ticks=10, ~1/6s at normal game speed) plus a baseline tower and
+--     5 single-dimension-maxed variants (extreme effect_receiver.base_effect
+--     per kind, so each effect's real behavior -- yield count, item quality,
+--     energy drawn, pollution, timing -- can be isolated without needing a
+--     specific real module's mixed side effects). Load a real save (not the
+--     empty smoke scenario), place these near each other, plant a
+--     fs-test-fast-seed, and watch: no headless or RCON coverage exists for
+--     this (needs the graphical client / accelerated game speed to observe
+--     crane behavior and harvested item quality directly).
+-- ============================================================================
+
+if raw.plant and raw.plant["yumako-tree"] and raw.item and raw.item["yumako-seed"]
+    and raw["agricultural-tower"] and raw["agricultural-tower"]["agricultural-tower"] then
+    local fast_plant = table.deepcopy(raw.plant["yumako-tree"])
+    fast_plant.name = "fs-test-fast-plant"
+    fast_plant.localised_name = "fs-test-fast-plant"
+    fast_plant.next_upgrade = nil
+    fast_plant.placeable_by = nil
+    fast_plant.autoplace = nil
+    fast_plant.growth_ticks = 10
+
+    local fast_seed = table.deepcopy(raw.item["yumako-seed"])
+    fast_seed.name = "fs-test-fast-seed"
+    fast_seed.localised_name = "fs-test-fast-seed"
+    fast_seed.plant_result = "fs-test-fast-plant"
+
+    extend_test({ fast_plant, fast_seed })
+
+    local function effect_tower(name, base_effect)
+        local tower = table.deepcopy(raw["agricultural-tower"]["agricultural-tower"])
+        tower.name = name
+        tower.localised_name = name
+        tower.minable = nil
+        tower.next_upgrade = nil
+        tower.placeable_by = nil
+        tower.module_slots = 2
+        tower.allowed_effects = { "speed", "productivity", "quality", "consumption", "pollution" }
+        if base_effect then
+            tower.effect_receiver = table.deepcopy(tower.effect_receiver) or {}
+            tower.effect_receiver.base_effect = base_effect
+        end
+        return tower
+    end
+
+    extend_test({
+        effect_tower("fs-test-agri-baseline", nil),
+        effect_tower("fs-test-agri-speed", { speed = 10 }),
+        effect_tower("fs-test-agri-productivity", { productivity = 10 }),
+        effect_tower("fs-test-agri-quality", { quality = 10 }),
+        effect_tower("fs-test-agri-consumption", { consumption = -0.8 }),
+        effect_tower("fs-test-agri-pollution", { pollution = 10 }),
+    })
+end
+
+-- ============================================================================
 -- 8. Recipe / category / temperature edge recipes.
 -- ============================================================================
 

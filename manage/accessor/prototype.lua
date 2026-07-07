@@ -354,6 +354,8 @@ function M.get_machines_for_recipe(recipe)
         return M.get_offshore_pumps_for_fluid(recipe.pumped_fluid_name)
     elseif recipe.consumed_pack_name then
         return M.get_labs_for_pack(recipe.consumed_pack_name)
+    elseif M.get_recipe_plant(recipe) then
+        return M.get_towers_for_plant(M.get_recipe_plant(recipe))
     else
         return assert()
     end
@@ -466,6 +468,63 @@ function M.get_fluidbox_filter_prototype(machine, index)
     end
     local fluidbox = machine.fluidbox_prototypes[index]
     return fluidbox and fluidbox.filter
+end
+
+---Resolves the plant a plant-growth VirtualRecipe grows, independent of the
+---recipe's machine (a user-selected agricultural-tower-type entity, not the
+---plant -- see manage/virtual.lua's create_plant_virtual). Reads
+---source_entity_name rather than the machine so this works regardless of
+---which tower (if any) is currently selected. Returns nil for every other
+---recipe kind, including other virtual recipes that also carry
+---source_entity_name (rocket-silo launches, boilers, generators, ...) --
+---those resolve to a different entity type, so the trailing type == "plant"
+---check discriminates correctly. Real recipes never reach the
+---source_entity_name read: LuaRecipePrototype rejects unknown-key indexing at
+---the C++ layer, so object_name is checked first and short-circuits.
+---@param recipe LuaRecipePrototype | VirtualRecipe
+---@return LuaEntityPrototype?
+function M.get_recipe_plant(recipe)
+    ---@diagnostic disable-next-line: undefined-field
+    if recipe.object_name then return nil end
+    ---@diagnostic disable-next-line: undefined-field
+    local source_entity_name = recipe.source_entity_name
+    if not source_entity_name then return nil end
+    local entity = prototypes.entity[source_entity_name]
+    if entity and entity.type == "plant" then return entity end
+    return nil
+end
+
+---Agricultural-tower-type entities that can harvest a plant-growth virtual
+---recipe -- every one of them, NOT just module-capable ones. This is the
+---machine candidate list (manage/accessor.get_machines_for_recipe dispatches
+---here for plant recipes), so a base/Space Age install (vanilla's own tower
+---has module_inventory_size == 0, per Factorio 2.1.7's
+---AgriculturalTowerPrototype::module_slots Modding-API addition) must still
+---get its one real machine listed -- filtering by module capability here
+---would leave vanilla plant-growth lines with no eligible machine at all,
+---breaking ordinary (non-modded) gameplay entirely. Module presence only
+---matters later, for whether the Modules/Beacons sections of the selected
+---tower's machine_setup dialog have anything to show (already handled
+---generically by machine.module_inventory_size there). No accepted_seeds /
+---per-plant compatibility field exists on this prototype, and vanilla's own
+---tower harvests indiscriminately within its radius, so candidates are NOT
+---filtered by seed compatibility either -- every agricultural-tower-type
+---entity is offered for every plant.
+---@param plant LuaEntityPrototype
+---@return LuaEntityPrototype[]
+function M.get_towers_for_plant(plant)
+    if plant.type ~= "plant" then return {} end
+    local towers = prototypes.get_entity_filtered {
+        { filter = "type", type = "agricultural-tower" },
+    }
+    -- get_entity_filtered returns a LuaCustomTable (userdata), which
+    -- table.sort (inside sort_prototypes) cannot operate on directly -- to_list
+    -- copies it into a plain array first, matching every other candidate-list
+    -- accessor in this file that filters get_entity_filtered's result
+    -- (get_offshore_pumps_for_fluid / get_labs_for_pack go through fs_util.filter,
+    -- which has the same plain-table-copying side effect; this one has no filter
+    -- predicate to apply, so it needs to_list explicitly instead).
+    return fs_util.sort_prototypes(fs_util.to_list(towers))
 end
 
 ---Substrate (soil tile) names a plant entity can be planted on, derived
