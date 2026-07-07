@@ -109,6 +109,7 @@ local case_files = {
     "lp_observe_price",
     "lp_target_rescue",
     "lp_solver_norms",
+    "lp_linf_state_machine",
     "lp_cascade",
     "chain_reachability",
     "explore_detect",

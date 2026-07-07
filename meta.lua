@@ -234,7 +234,7 @@ __factory_solver__storage = {}
 
 ---@class LinfState
 ---@field phase "minmax"|"capped"|"done"  Which L∞ stage the next finished solve belongs to. "minmax" minimizes the peak violation t; "capped" minimizes total violation under t <= t_min; "done" is the settled sentinel.
----@field t_limit number?  The target-rescue budget threaded into both stages (so meeting the targets stays tier-1 above the min-max), nil when no rescue fired.
+---@field t_limit number  The target budget threaded into both stage builds as create_problem's target_budget row (so meeting the targets stays tier-1 above the min-max / capped objectives). The rescue's budget when one fired; otherwise locked at the baseline's achieved relaxation (the cascade's `rescue_budget or budget(T)` move), so the capped stage's L1 re-cost cannot re-enter the target collapse.
 ---@field t_budget number?  The locked peak cap (stage-1 optimum plus margin), threaded into the capped stage. Set when minmax finishes.
 
 ---@class TargetRescueState

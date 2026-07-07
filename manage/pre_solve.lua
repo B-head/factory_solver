@@ -139,10 +139,14 @@ function M.forwerd_solve(force_data, solution)
         -- A fresh "ready" (edit / migration / new solution) drops in-flight
         -- target-rescue state so the next solve restarts from a clean baseline.
         -- The rescue's own restarts set tr_restart; the downstream loops'
-        -- restarts (op_restart / reclassify_pending) keep the settled budget so
-        -- their re-solves stay locked on the rescued target.
+        -- restarts (op_restart / reclassify_pending / cc_restart / lf_restart)
+        -- keep the settled budget so their re-solves stay locked on the rescued
+        -- target. lf_restart in particular must preserve the "done" sentinel:
+        -- dropping it made target_rescue_step re-measure the min-max / capped
+        -- solutions and re-arm stage 1 mid-linf, destroying solution.linf and
+        -- livelocking rescue<->linf on any problem where the rescue fires.
         if not (solution.tr_restart or solution.op_restart or solution.reclassify_pending
-                or solution.cc_restart) then
+                or solution.cc_restart or solution.lf_restart) then
             solution.target_rescue = nil
         end
         solution.tr_restart = nil
@@ -168,6 +172,7 @@ function M.forwerd_solve(force_data, solution)
             solution.forced_imports = nil
             solution.reclassify_pending = nil
             solution.linf = nil
+            solution.lf_restart = nil
 
             local cc = solution.cascade
             if cc and cc.build then
@@ -203,6 +208,7 @@ function M.forwerd_solve(force_data, solution)
                 solution.forced_imports = nil
                 solution.reclassify_pending = nil
                 solution.linf = nil
+                solution.lf_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -213,6 +219,7 @@ function M.forwerd_solve(force_data, solution)
                 solution.forced_imports = nil
                 solution.reclassify_pending = nil
                 solution.linf = nil
+                solution.lf_restart = nil
                 -- L2: un-gated, with the recipe tier raised to clear the purify
                 -- zero-floor sqrt(mu) (see L2_RECIPE_EPS), then shaped by shape_l2
                 -- below (violation quad + linear floor).
@@ -239,6 +246,19 @@ function M.forwerd_solve(force_data, solution)
                     surplus_sink_gating = false,
                 }
                 linf_stage = solution.linf and solution.linf.phase or nil
+                -- Thread the settled target budget (M.linf_step's t_limit) into
+                -- both min-max stages, so meeting the targets stays tier-1 above
+                -- the peak / capped objectives. Load-bearing on the capped stage:
+                -- it re-costs the violations back to the L1 elastic_cost, so
+                -- without the budget row it re-enters the baseline's collapse
+                -- economics (target_cost / elastic_cost = 1024) and abandons the
+                -- very target the rescue just restored. Matches the corpus-
+                -- validated probe (tests/research/probe_linf_ship.lua) and the
+                -- lp_solver_norms fixtures, which both carry target_budget on
+                -- the minmax AND capped builds.
+                if solution.linf and solution.linf.t_limit then
+                    options.target_budget = solution.linf.t_limit
+                end
             else
                 -- "legacy": the original gated solver -- the hard reachability
                 -- gate plus deficit / catalyst cycle-entry seeding and the
@@ -252,6 +272,7 @@ function M.forwerd_solve(force_data, solution)
                 end
                 solution.reclassify_pending = nil
                 solution.linf = nil
+                solution.lf_restart = nil
                 options = {
                     reachability_gating = true,
                     deficit_seeding = true,
@@ -506,12 +527,16 @@ end
 ---tier-1); then:
 ---  baseline finished -> arm "minmax" (re-solve under create_problem.shape_minmax
 ---    "minmax", which minimizes the peak violation t). The settled target budget
----    threads in so the min-max keeps the targets met.
+---    (t_limit) threads into BOTH stage builds as create_problem's target_budget
+---    row, so the min-max and capped solves keep the targets met.
 ---  "minmax" finished -> read the least peak t_min, lock t_budget = t_min + margin,
 ---    arm "capped" (re-solve minimizing total violation under t <= t_budget).
 ---  "capped" finished -> the leveled answer stands.
 ---Mutates solution.linf and, when another solve is needed, re-arms
----solver_state="ready" with lf_restart set so the rebuild keeps the stage.
+---solver_state="ready" with lf_restart set so the rebuild keeps the stage (AND
+---the settled target_rescue -- lf_restart sits in the rebuild's preserve list,
+---which both threads the rescued budget and keeps target_rescue_step's "done"
+---sentinel alive so it cannot re-arm stage 1 mid-linf).
 ---@param solution Solution
 function M.linf_step(solution)
     if not solution.raw_variables or not solution.problem then return end
@@ -543,8 +568,18 @@ function M.linf_step(solution)
 
     if not linf then
         -- The baseline (target-rescued) just finished. Arm the min-max stage,
-        -- threading the settled target budget (nil when no rescue fired).
-        local t_limit = solution.target_rescue and solution.target_rescue.budget or nil
+        -- threading the settled target budget. When no rescue fired (or it
+        -- restored with no headroom), lock the stages at the baseline's own
+        -- achieved relaxation instead -- the cascade's `rescue_budget or
+        -- M.budget(T)` move (solver/cascade.lua begin) -- so the capped stage's
+        -- return to L1 costs can never shed the target below what the baseline
+        -- held (target_cost / elastic_cost caps out at 1024 violation units
+        -- per target unit, the same collapse economics the rescue exists for).
+        local t_limit = solution.target_rescue and solution.target_rescue.budget
+        if not t_limit then
+            local t0 = observe_price.target_relax(solution.problem.primals, solution.raw_variables.x)
+            t_limit = t0 * (1 + target_budget_rel) + target_budget_abs
+        end
         solution.linf = { phase = "minmax", t_limit = t_limit }
         restart()
     elseif linf.phase == "minmax" then
