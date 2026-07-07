@@ -110,6 +110,7 @@ local case_files = {
     "lp_target_rescue",
     "lp_solver_norms",
     "lp_linf_state_machine",
+    "lp_mode_compress",
     "lp_cascade",
     "chain_reachability",
     "explore_detect",

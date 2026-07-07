@@ -315,6 +315,14 @@ function M.resetup_force_data_metatable(force_data)
                     problem_generator.setup_metatable(solution.problem.reduced)
                 end
             end
+            -- The baseline held aside by an in-flight L2 mode compression
+            -- (manage/pre_solve.lua M.l2_compress_step) is a third Problem; it
+            -- needs its metatable back so a restore after load can serve
+            -- filter_result / UI reads.
+            local lc = solution.l2_compress
+            if lc and lc.saved and lc.saved.problem then
+                problem_generator.setup_metatable(lc.saved.problem)
+            end
         end
     end
 end

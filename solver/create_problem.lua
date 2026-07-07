@@ -206,6 +206,22 @@ local function bare_fluid_limit_of(value)
     return nil
 end
 
+---Base material identity for sibling grouping (solver/mode_compress.lua): the
+---temperature window folds away so every windowed variant of a fluid shares one
+---base; anything else (items, bare fluids) is its own base. Recorded on the
+---violation-escape Primals as material_base so the compression groups on
+---metadata instead of parsing the key string back apart (see CLAUDE.md).
+---Same TypedName-field test as bare_fluid_limit_of above.
+---@param value NormalizedAmount|TypedName
+---@param constraint_name string The material variable key `value` was built into.
+---@return string
+local function base_material_of(value, constraint_name)
+    if value.type == "fluid" and value.minimum_temperature ~= nil then
+        return vk.material({ type = "fluid", name = value.name, quality = "normal" })
+    end
+    return constraint_name
+end
+
 ---Base LINEAR objective cost of a variable class for this build. A
 ---`class_cost[kind]` override (CreateProblemOptions) wins; otherwise `fallback`
 ---when given (the special recipe tier / per-material initial_source default),
@@ -843,7 +859,8 @@ end
 ---@field target_only_objective boolean?  Target-rescue stage 1 (manage/pre_solve.lua M.target_rescue_step): re-cost the finished build so the target elastics (cost 1) are the ONLY objective; recipe/bridge keep a tiny face regularizer so the optimal face stays bounded for the IPM, everything else is free. The solve's summed |elastic| is T_min -- the least target violation this build can structurally reach (mirrors the reference solver's lexicographic stage 1). Build-only switch: combine with target_budget on the NEXT build to lock the optimum in.
 ---@field target_budget number?  Target-rescue lock (manage/pre_solve.lua M.target_rescue_step): add one upper-limit row capping the summed target elastics at this value, so the solve keeps the stage-1 target optimum no matter how expensive the violations the chain forces. This fixes the all-zero target collapse: a single weighted LP trades the target against violations at the finite exchange rate target_cost / elastic_cost = 2^10, so any problem needing > 1024 violation units per target unit was rationally abandoned (T relaxed in full -- the trade is linear, hence all-or-nothing). 30/1678 corpus problems before the rescue, 0 after. nil adds no row.
 ---@field recipe_epsilon number?  Override the flat recipe/bridge cost tier (the futile-loop tie-break; shipped default 2^-6). Used by the cascade stages indirectly (they overwrite recipe costs anyway) and by the machine-polish-vs-plain-epsilon research comparison. The per-key jitter scales as a fraction of this. nil keeps the shipped tier.
----@field hatch_exclude table<string, true>?  Cascade deletion final (solver/cascade.lua, also probe_vp_rescue): materials whose import hatches (intermediate |initial_source| / |shortage_source|) are omitted from the build entirely. Only sound once a stage solve has PROVEN the material's import can be ~zero (that solution witnesses feasibility, so elastic necessity is not violated) -- the deletion encodes the ~zero face structurally, where a ~zero budget row over live hatch variables is numerically hostile to the IPM interior. Deficit seeds still count for reachability; only the hatch variables disappear. nil omits nothing.
+---@field hatch_exclude table<string, true>?  Cascade deletion final (solver/cascade.lua, also probe_vp_rescue) and the L2 mode compression (manage/pre_solve.lua M.l2_compress_step): materials whose import hatches (intermediate |initial_source| / |shortage_source|) are omitted from the build entirely. Only sound once a stage solve has PROVEN the material's import can be ~zero (that solution witnesses feasibility, so elastic necessity is not violated) -- the deletion encodes the ~zero face structurally, where a ~zero budget row over live hatch variables is numerically hostile to the IPM interior. (The mode compression relaxes the ~zero form of the witness: it deletes a sibling channel whose group keeps a live channel of the same base material and kind, so the finished baseline witnesses that the flow has a surviving channel to fold onto.) Deficit seeds still count for reachability; only the hatch variables disappear. nil omits nothing.
+---@field sink_exclude table<string, true>?  L2 mode compression (manage/pre_solve.lua M.l2_compress_step, solver/mode_compress.lua): materials whose |surplus_sink| dump escape is omitted from the build -- the dump-side mirror of hatch_exclude, under the same sibling-witness soundness rule. nil omits nothing.
 ---@field import_quad number?  Legacy shorthand for class_quad.shortage_source (below): a diagonal convex quadratic on every |shortage_source| import column, so the material's marginal import cost becomes (linear shortage cost) + import_quad * x -- it RISES with import quantity (project_import_fabricate_convex, the QP route). Folded into class_quad at build time; an explicit class_quad.shortage_source wins. nil / 0 = pure linear (LP) import. (Measured negative for import-vs-fabricate -- the lever is the cost level, not its shape -- but the set_quad/has_quad machinery is a general IPM-native QP capability.)
 ---@field class_cost table<PrimalKind, number>?  Override the base LINEAR objective cost of an entire variable class, keyed by Primal.kind: "recipe" / "bridge" / "initial_source" / "final_sink" / "surplus_sink" / "shortage_source" / "elastic" / "headroom" (see default_class_cost for the defaults this replaces). The value REPLACES that class's base tier; the structural extras still layer on top of it -- the per-recipe jitter and a source line's product source_cost (recipe), and the per-material shortage/surplus mechanisms (soft gate, overrides, callbacks), which now scale the class base rather than the hardcoded tier. `recipe`'s fallback is the recipe_epsilon option; `initial_source`'s is the per-material source_cost_of. The structural slacks ("slack" / "linf_peak") are not steerable and ignore this. nil leaves every default.
 ---@field class_quad table<PrimalKind, number>?  Diagonal convex quadratic coefficient (the ½·q·x² curvature) placed on EVERY variable of a class, keyed by Primal.kind (same keys as class_cost). q must be >= 0 to stay convex; the first nonzero flips problem.has_quad (the QP Newton path). import_quad is the shortage_source shorthand and is merged in here. nil leaves every class purely linear.
@@ -896,6 +913,10 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
     -- numerically hostile to the IPM's interior point. Deficit seeds still
     -- count for reachability; only the hatch variables disappear.
     local opt_hatch_exclude = options.hatch_exclude
+    -- L2 mode compression (solver/mode_compress.lua): the dump-side mirror of
+    -- hatch_exclude -- materials whose |surplus_sink| escape is omitted so the
+    -- L2 spread over sibling dump channels folds onto the group's winner.
+    local opt_sink_exclude = options.sink_exclude
     -- Research probe (project_import_fabricate_convex, QP route): a convex
     -- quadratic on every |shortage_source| import column, so its marginal cost
     -- rises with quantity. Set via problem:set_quad; nil/0 = pure linear (LP).
@@ -1138,13 +1159,15 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
         -- producer/consumer). Underproduction is still relaxed by the
         -- shortage_source / initial_source escape hatches added below.
         if not bridge_target_variables[constraint_name]
-            and not (opt_surplus_sink_gating and drainable[constraint_name]) then
+            and not (opt_surplus_sink_gating and drainable[constraint_name])
+            and not (opt_sink_exclude and opt_sink_exclude[constraint_name]) then
             local elastic_name = vk.surplus_sink(constraint_name)
             local surplus_cost = resolve_class_cost(opt_class_cost, "surplus_sink")
             if opt_surplus_cost_fn then
                 surplus_cost = opt_surplus_cost_fn(constraint_name)
             end
             problem:add_objective(elastic_name, surplus_cost, false, "surplus_sink", constraint_name)
+            problem.primals[elastic_name].material_base = base_material_of(value, constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, -amount_weight_of(value))
             apply_class_quad(problem, opt_class_quad, elastic_name, "surplus_sink")
         end
@@ -1207,6 +1230,7 @@ function M.create_problem(solution_name, constraints, production_lines, forced_i
             end
             local w = amount_weight_of(value)
             problem:add_objective(elastic_name, shortage_cost, false, "shortage_source", constraint_name)
+            problem.primals[elastic_name].material_base = base_material_of(value, constraint_name)
             problem:add_subject_term(elastic_name, constraint_name, w)
             problem:add_subject_term(elastic_name, vk.limit(constraint_name), w)
 

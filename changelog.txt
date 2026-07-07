@@ -2,6 +2,13 @@
 Version: 0.8.1
 Date: ????
   Changes:
+    - The "balanced" (L2) norm now folds sibling import/dump channels after it
+      solves: when the even spread splits one material's imbalance across its
+      temperature variants, a short extra solve re-routes the flow through the
+      largest channel and drops the rest, so the result lists one import (or
+      dump) row per material instead of one per temperature window. Totals and
+      met targets are unchanged; if the extra solve fails to converge, the
+      uncompressed answer is kept.
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.0
 Date: 2026-07-07

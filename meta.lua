@@ -231,6 +231,14 @@ __factory_solver__storage = {}
 ---@field cc_restart boolean?  Internal flag: set when the cascade advances and re-arms solver_state="ready", so the rebuild keeps the in-flight cascade state instead of dropping it as it would for a fresh edit.
 ---@field linf LinfState?  In-flight L∞ (min-max) two-stage solve (manage/pre_solve.lua M.linf_step), only for solver_norm == "linf". nil before the baseline solve; a "done" sentinel once settled. Plain table, storage-safe.
 ---@field lf_restart boolean?  Internal flag: set when the L∞ stages re-arm solver_state="ready", so the rebuild keeps the in-flight linf state instead of dropping it as it would for a fresh edit.
+---@field l2_compress L2CompressState?  In-flight L2 mode compression (manage/pre_solve.lua M.l2_compress_step / solver/mode_compress.lua), only for solver_norm == "l2": once the target-rescued L2 baseline finishes, sibling violation channels (same base material AND same kind) fold to one per group and the problem re-solves without the losers. nil before the baseline solve; a "done" sentinel once settled. Plain tables (while in flight it carries the baseline Problem; manage/save.lua re-attaches its metatable on load).
+---@field lc_restart boolean?  Internal flag: set when the compression re-arms solver_state="ready", so the rebuild keeps the in-flight compress state AND the settled target rescue (the compressed build must stay locked on the rescued target -- deleting a spreading channel raises the survivors' quadratic marginal cost past the target's linear worth, so an unlocked re-solve can rationally trade the target away) instead of dropping them as it would for a fresh edit.
+
+---@class L2CompressState
+---@field phase "compress"|"done"  "compress" while the folded re-solve is in flight; "done" once the compressed answer stands (or the baseline was restored / nothing folded).
+---@field hatch table<string, true>?  Materials whose |shortage_source| import hatch the compressed build omits (import-side group losers), threaded into CreateProblemOptions.hatch_exclude on the lc_restart rebuild.
+---@field sink table<string, true>?  Materials whose |surplus_sink| dump escape the compressed build omits (dump-side group losers), threaded into CreateProblemOptions.sink_exclude.
+---@field saved {problem: Problem, raw_variables: PackedVariables, machines: table<string, number>}?  The finished baseline answer, held while the compress solve is in flight so a non-finished compress solve restores it verbatim (no third solve). Dropped when the phase settles.
 
 ---@class LinfState
 ---@field phase "minmax"|"capped"|"done"  Which L∞ stage the next finished solve belongs to. "minmax" minimizes the peak violation t; "capped" minimizes total violation under t <= t_min; "done" is the settled sentinel.

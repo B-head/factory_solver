@@ -24,6 +24,7 @@ local M = {}
 ---@field is_result boolean
 ---@field kind PrimalKind? Variable class; builders set it so solution readers classify without parsing the key.
 ---@field material string? For an escape variable, the base material variable key it stands in for.
+---@field material_base string? For a violation escape (shortage_source / surplus_sink), the material key with the temperature window folded away -- the sibling-grouping identity for the L2 mode compression (solver/mode_compress.lua). Set by create_problem at the escape's build site; nil elsewhere.
 ---@field quad number? Diagonal quadratic objective coefficient (the ½·quad·x² convex curvature; QP support). nil/0 = linear only.
 
 ---@class Dual

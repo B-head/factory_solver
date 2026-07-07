@@ -5,6 +5,7 @@ local linear_programming = require "solver/linear_programming"
 local substitution = require "solver/substitution"
 local observe_price = require "solver/observe_price"
 local cascade = require "solver/cascade"
+local mode_compress = require "solver/mode_compress"
 local vk = require "solver/var_key"
 
 local iterate_limit = 600
@@ -139,14 +140,17 @@ function M.forwerd_solve(force_data, solution)
         -- A fresh "ready" (edit / migration / new solution) drops in-flight
         -- target-rescue state so the next solve restarts from a clean baseline.
         -- The rescue's own restarts set tr_restart; the downstream loops'
-        -- restarts (op_restart / reclassify_pending / cc_restart / lf_restart)
-        -- keep the settled budget so their re-solves stay locked on the rescued
-        -- target. lf_restart in particular must preserve the "done" sentinel:
-        -- dropping it made target_rescue_step re-measure the min-max / capped
-        -- solutions and re-arm stage 1 mid-linf, destroying solution.linf and
-        -- livelocking rescue<->linf on any problem where the rescue fires.
+        -- restarts (op_restart / reclassify_pending / cc_restart / lf_restart /
+        -- lc_restart) keep the settled budget so their re-solves stay locked on
+        -- the rescued target. lf_restart in particular must preserve the "done"
+        -- sentinel: dropping it made target_rescue_step re-measure the min-max /
+        -- capped solutions and re-arm stage 1 mid-linf, destroying solution.linf
+        -- and livelocking rescue<->linf on any problem where the rescue fires.
+        -- lc_restart likewise keeps the compress re-solve locked on the rescued
+        -- target (an unlocked channel deletion can trade the target away past
+        -- the 2^10 exchange-rate ceiling).
         if not (solution.tr_restart or solution.op_restart or solution.reclassify_pending
-                or solution.cc_restart or solution.lf_restart) then
+                or solution.cc_restart or solution.lf_restart or solution.lc_restart) then
             solution.target_rescue = nil
         end
         solution.tr_restart = nil
@@ -173,6 +177,8 @@ function M.forwerd_solve(force_data, solution)
             solution.reclassify_pending = nil
             solution.linf = nil
             solution.lf_restart = nil
+            solution.l2_compress = nil
+            solution.lc_restart = nil
 
             local cc = solution.cascade
             if cc and cc.build then
@@ -209,6 +215,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.reclassify_pending = nil
                 solution.linf = nil
                 solution.lf_restart = nil
+                solution.l2_compress = nil
+                solution.lc_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -220,6 +228,16 @@ function M.forwerd_solve(force_data, solution)
                 solution.reclassify_pending = nil
                 solution.linf = nil
                 solution.lf_restart = nil
+                -- A fresh "ready" (edit / norm switch) drops the in-flight mode
+                -- compression; the compress step's OWN restart (lc_restart)
+                -- keeps it so this rebuild omits the folded channels. lc_restart
+                -- also rode the target-rescue preserve list above: the compress
+                -- build must stay locked on the rescued target (deleting a
+                -- spreading channel raises the survivors' quadratic marginal
+                -- cost, and an unlocked re-solve can rationally trade the
+                -- target away past the 2^10 exchange-rate ceiling).
+                if not solution.lc_restart then solution.l2_compress = nil end
+                solution.lc_restart = nil
                 -- L2: un-gated, with the recipe tier raised to clear the purify
                 -- zero-floor sqrt(mu) (see L2_RECIPE_EPS), then shaped by shape_l2
                 -- below (violation quad + linear floor).
@@ -230,6 +248,15 @@ function M.forwerd_solve(force_data, solution)
                     surplus_sink_gating = false,
                     recipe_epsilon = L2_RECIPE_EPS,
                 }
+                -- The compressed rebuild: omit the sibling channels the plan
+                -- folded away (import losers via hatch_exclude, dump losers via
+                -- sink_exclude). The QP handoff cold-starts this solve on its
+                -- own (linear_programming.qp_warm_strategy = "cold").
+                local lc = solution.l2_compress
+                if lc and lc.phase == "compress" then
+                    options.hatch_exclude = lc.hatch
+                    options.sink_exclude = lc.sink
+                end
                 apply_l2 = true
             elseif norm == "linf" then
                 solution.forced_imports = nil
@@ -239,6 +266,8 @@ function M.forwerd_solve(force_data, solution)
                 -- on the same stage.
                 if not solution.lf_restart then solution.linf = nil end
                 solution.lf_restart = nil
+                solution.l2_compress = nil
+                solution.lc_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -273,6 +302,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.reclassify_pending = nil
                 solution.linf = nil
                 solution.lf_restart = nil
+                solution.l2_compress = nil
+                solution.lc_restart = nil
                 options = {
                     reachability_gating = true,
                     deficit_seeding = true,
@@ -442,6 +473,15 @@ function M.forwerd_solve(force_data, solution)
         if solution.solver_state == "finished" then
             M.linf_step(solution)
         end
+    elseif norm == "l2" then
+        -- L2 mode compression: once the rescued baseline stands, fold the
+        -- sibling violation channels and re-solve without them. Driven on ANY
+        -- terminal state, not just "finished": a non-finished compress solve
+        -- must advance to the baseline restore rather than stall.
+        local st = solution.solver_state
+        if st ~= "ready" and st ~= "calculating" then
+            M.l2_compress_step(solution)
+        end
     elseif norm == "legacy" then
         -- Legacy two-pass diagnose-then-reclassify. When the FIRST pass
         -- converges, re-seed every avoidable export-feasible cheat as a forced
@@ -462,7 +502,7 @@ function M.forwerd_solve(force_data, solution)
             end
         end
     end
-    -- "l1" / "l2": the baseline (plus the target rescue above) is the answer; no
+    -- "l1": the baseline (plus the target rescue above) is the answer; no
     -- downstream loop.
 end
 
@@ -593,6 +633,76 @@ function M.linf_step(solution)
         -- "capped" just finished: the leveled solution stands.
         linf.phase = "done"
     end
+end
+
+---Advance the L2 mode compression one step after a terminal solve
+---(solver_norm == "l2"). The target rescue settles first; then:
+---  baseline finished -> plan the fold (solver/mode_compress.lua: group the
+---    active violation channels by base material AND kind, keep each group's
+---    max-flow winner). Nothing to fold -> "done" at zero extra cost. Otherwise
+---    hold the baseline answer aside and arm the "compress" re-solve, whose
+---    rebuild omits the folded channels (hatch_exclude / sink_exclude).
+---  "compress" finished -> the compressed answer stands.
+---  "compress" NOT finished (diverged / unbounded / iterate limit) -> restore
+---    the held baseline verbatim -- problem, raw variables, machine counts --
+---    with no third solve. This is convergence robustness only, NOT a quality
+---    gate: no corpus problem needed it (1676/1676 compress solves converged),
+---    and no in-code verdict judges the compressed answer's quality (verify-
+---    gate thresholds are unvalidated, so none ship).
+---Mutates solution.l2_compress and, when the compress solve is needed, re-arms
+---solver_state="ready" with lc_restart set so the rebuild keeps the compress
+---state and the settled target rescue.
+---@param solution Solution
+function M.l2_compress_step(solution)
+    if not solution.problem then return end
+    local lc = solution.l2_compress
+    if lc and lc.phase == "done" then return end
+
+    if not lc then
+        -- The baseline (target-rescued) just terminated. If it failed, leave
+        -- the terminal state for the UI -- there is nothing to compress.
+        if solution.solver_state ~= "finished" or not solution.raw_variables then
+            solution.l2_compress = { phase = "done" }
+            return
+        end
+        local plan = mode_compress.plan(solution.problem, solution.raw_variables.x)
+        if not plan then
+            solution.l2_compress = { phase = "done" }
+            return
+        end
+        solution.l2_compress = {
+            phase = "compress",
+            hatch = plan.hatch,
+            sink = plan.sink,
+            -- Hold the finished baseline so a non-finished compress solve
+            -- restores it without solving again. The problem rides storage as
+            -- plain tables; manage/save.lua re-attaches its metatable on load.
+            saved = {
+                problem = solution.problem,
+                raw_variables = solution.raw_variables,
+                machines = solution.quantity_of_machines_required,
+            },
+        }
+        solution.lc_restart = true
+        solution.solver_state = "ready"
+        solution.solver_iteration = nil
+        -- solution.raw_variables stays as-is: the QP handoff discards the warm
+        -- seed on its own (linear_programming.qp_warm_strategy = "cold").
+        return
+    end
+
+    -- phase == "compress": the folded re-solve reached a terminal state.
+    if solution.solver_state ~= "finished" and lc.saved then
+        local saved = lc.saved
+        solution.problem = saved.problem
+        solution.raw_variables = saved.raw_variables
+        solution.quantity_of_machines_required = saved.machines
+        solution.inactive_recipe_variables = saved.problem.inactive_recipe_variables
+        solution.solver_state = "finished"
+        solution.solver_iteration = nil
+    end
+    lc.saved = nil
+    lc.phase = "done"
 end
 
 ---Advance the cascade staged rescue one step after a terminal solve. On the
