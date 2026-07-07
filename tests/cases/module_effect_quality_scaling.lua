@@ -18,11 +18,12 @@
 -- reimplementing the blend. get_module_effects is a bound function (like
 -- get_durability -- see CLAUDE.md's "Runtime API gotchas"): calling it with
 -- `:` instead of `.` shifts the quality argument into the wrong slot and
--- raises "Invalid QualityID" (also confirmed in-game). Because this mod's
--- declared minimum (base >= 2.0.56, see info.json) predates the version
--- get_module_effects was verified on, get_effective_module_effects
--- pcall-guards the call and falls back to the module's unscaled base
--- effects if it fails.
+-- raises "Invalid QualityID" (also confirmed in-game). get_module_effects
+-- was added in Factorio 2.0.67 (confirmed via the official changelog); this
+-- mod's declared minimum was raised to match (base >= 2.0.67, see
+-- info.json), so get_effective_module_effects's pcall-guard is defense
+-- against a future engine regression rather than a live gap today. It still
+-- falls back to the module's unscaled base effects if the call ever fails.
 --
 -- These mocks stand in for prototypes.item (not provided by
 -- tests/headless_env.lua). prototypes.quality is NOT needed here: quality
@@ -144,7 +145,7 @@ table.insert(cases, {
 })
 
 table.insert(cases, {
-    name = "get_module_effects key genuinely doesn't exist (throws on index, pre-2.0.69-style): falls back to unscaled module_effects",
+    name = "get_module_effects key genuinely doesn't exist (throws on index, pre-2.0.67-style): falls back to unscaled module_effects",
     run = function()
         local test_module = setmetatable(
             {

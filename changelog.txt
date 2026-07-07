@@ -1,13 +1,37 @@
 ---------------------------------------------------------------------------------------------------
-Version: 0.7.1
+Version: 0.8.0
 Date: ????
+  Features:
+    - Add support for Factorio 2.1 (see Info for how to enable it).
+    - Add module support for agricultural towers (new in Factorio
+      2.1). A modded tower with module slots can now hold productivity,
+      pollution, and other modules, and be covered by beacons,
+      through the normal machine setup -- changing the plant-growth 
+      line's harvest yield and pollution to match. Vanilla's own
+      tower has no module slots, so it is unaffected.
+    - Model fuels that leave a fluid behind when burned (new in Factorio
+      2.1), the liquid counterpart of a spent fuel item. The leftover fluid
+      is produced at the temperature it leaves at, added to the totals, shown
+      in the production-line editor, and offered in the recipe picker's
+      spent-fuel section, matching how solid burnt results already work.
+    - Support recipes that accept more than one crafting category, matching
+      them to every machine that covers any of those categories. Some
+      Factorio 2.0 mods already use such recipes; Factorio 2.1 makes them
+      common by splitting its old combined categories (such as
+      chemistry-or-cryogenics).
   Changes:
-    - Fluid fuels that leave a residue when burned (Factorio 2.1's "spent
-      fluid" - the fluid counterpart of a solid fuel's burnt result, such as
-      a spent fuel cell) are now modelled. The residue fluid is produced by
-      the burning line at its emitted temperature, counted in the totals,
-      shown in the production-line editor, and reachable from the recipe
-      picker's "spent" section, mirroring how burnt results already work.
+    - On Factorio 2.1, correct the quality recycling cascade, which otherwise
+      pushed almost all of a recycle's output into the top quality tier.
+    - On Factorio 2.1, include the extra module slots that higher machine
+      quality grants.
+    - On Factorio 2.1, scale module effects at higher quality tiers by the
+      game's own per-effect, per-module amounts, so a mod that scales an
+      effect unevenly across its modules or quality tiers is reflected
+      correctly. Vanilla is unaffected.
+  Info:
+    - The mod still ships targeting Factorio 2.0. To run it on Factorio 2.1,
+      set factorio_version to 2.1 and require flib 0.17.0 or newer.
+    - Now requires Factorio 2.0.67 or newer.
 ---------------------------------------------------------------------------------------------------
 Version: 0.7.0
 Date: 2026-07-04
@@ -265,6 +289,8 @@ Date: 2026-05-28
     - Tag research and spoilage virtual recipes with category overlays, and use
       the pre-spoilage item icon for spoilage entries.
     - Custom shortcut icon and lowercase "S" thumbnail.
+  Info:
+    - Now requires Factorio 2.0.56 or newer, for reading thruster performance.
 ---------------------------------------------------------------------------------------------------
 Version: 0.4.4
 Date: 2026-05-28

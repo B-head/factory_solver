@@ -52,11 +52,13 @@ local beneficial_effect_sign = {
 ---get_module_effects is a bound function (like get_durability -- see
 ---CLAUDE.md's "Runtime API gotchas"): call it with `.`, not `:`, or the
 ---quality argument silently lands in the wrong slot ("Invalid QualityID",
----confirmed in-game). pcall-guarded because the method's minimum supported
----Factorio version is unverified (this mod's declared floor is base >=
----2.0.56); on failure (or a nil/false result), falls back to the module's
----unscaled base effects rather than attempting to reproduce the engine's
----blend by hand.
+---confirmed in-game). get_module_effects was added in Factorio 2.0.67
+---(confirmed via the official changelog, forums.factorio.com/viewtopic.
+---php?t=130971); this mod's declared floor was raised to match (base >=
+---2.0.67, see info.json), so the pcall below guards against a future
+---engine regression rather than a live gap. On failure (or a nil/false
+---result), falls back to the module's unscaled base effects rather than
+---attempting to reproduce the engine's blend by hand.
 ---@param module LuaItemPrototype
 ---@param quality QualityID
 ---@return ModuleEffects
