@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.0
-Date: ????
+Date: 2026-07-07
   Features:
     - Add support for Factorio 2.1 (see Info for how to enable it).
     - Add module support for agricultural towers (new in Factorio
