@@ -1,7 +1,14 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.2
 Date: ????
-  Changes:
+  Gui:
+    - Wrap the module slot row in the machine setup window across six
+      columns, so machines with many module slots no longer render as
+      a single row that overflows the dialog.
+    - Rearrange each beacon in the machine setup window into a two-line
+      block (beacon icon, quantity, and remove above; module slots
+      below), so a beacon with many module slots wraps independently
+      instead of stretching the shared row.
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.1
 Date: 2026-07-08
