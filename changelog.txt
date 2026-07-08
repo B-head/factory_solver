@@ -9,6 +9,23 @@ Date: ????
       dump) row per material instead of one per temperature window. Totals and
       met targets are unchanged; if the extra solve fails to converge, the
       uncompressed answer is kept.
+  Bugfixes:
+    - The "balanced" (L2) norms could meet part of a target by importing the
+      target item itself when its producing chain needs very many machines per
+      unit of output (pyanodon-scale chains): the machine-count tie-break cost
+      outweighed the import penalty, so a slice of an Exact target arrived as
+      an import even though building more of the chain was free of violations.
+      The L2 norms now solve in two stages -- a measurement solve finds the
+      least possible import/dump violation, then the machine-minimizing solve
+      is locked to it -- so machine count can no longer buy imports or dumps.
+      Costs one extra solve per calculation; if either stage fails to
+      converge, the old single-stage answer is used.
+    - The lexicographic target rescue was ineffective under the "balanced"
+      (L2) norms on problems whose target forces a large penalized surplus:
+      the rescue's measurement solve was built with the L2 violation costs
+      still applied, so it concluded the target was unreachable and restored
+      the collapsed answer. The measurement solve now runs target-only,
+      exactly as it does under the other norms.
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.1
 Date: 2026-07-08

@@ -44,6 +44,10 @@ local CASCADE_DEMAND = "|cascade_demand|"
 local LINF_PEAK = "|linf_peak|"
 local LINF_CAP = "|linf_cap|"
 local LINF_CAP_BUDGET = "|linf_cap_budget|"
+-- L2 two-stage violation lock (see create_problem.apply_violation_locks /
+-- pre_solve M.l2_lock_step): one upper-bound dual per violation GROUP, capping
+-- the group's physical violation at the stage-1 (measurement) optimum.
+local L2_LOCK = "|l2_lock|"
 -- A bare |elastic| sits on a |limit| dual, so the composite a constraint
 -- relaxation carries is |elastic||limit|<material>.
 local ELASTIC_LIMIT = ELASTIC .. LIMIT
@@ -140,6 +144,14 @@ function M.linf_cap(column) return LINF_CAP .. column end
 ---The single dual row locking t <= t_min in the L∞ capped stage.
 ---@return string
 function M.linf_cap_budget() return LINF_CAP_BUDGET end
+
+---The upper-bound dual capping one violation group's physical flow at its
+---stage-1 optimum in the L2 two-stage solve. Keyed by the group key
+---("<kind>|<base material key>", create_problem's violation grouping) so the
+---groups stay distinct.
+---@param group string the violation group key the cap is over
+---@return string
+function M.l2_lock(group) return L2_LOCK .. group end
 
 ---@param dual_variable string
 ---@return string

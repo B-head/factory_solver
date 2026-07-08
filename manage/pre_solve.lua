@@ -69,6 +69,28 @@ local iterate_limit = 600
 local VIOLATION_QUAD = 2 ^ 11 -- L2 norm curvature, scaled with L2_RECIPE_EPS (was 2)
 local VIOLATION_FLOOR = 2 ^ -8 -- elastic-net linear floor on the violation elastics (> sqrt(mu))
 local L2_RECIPE_EPS = 2 ^ -10
+-- L2 two-stage violation lock (M.l2_lock_step). The single weighted L2
+-- objective trades the recipe tier against the violation quad at the finite
+-- rate eps*M (M = machines per product unit), so on machine-heavy chains the
+-- machine tier BUYS violation: the crossover eps*M/quad reaches ~0.05/s at
+-- M ~ 1e5 machines per unit/s (pyanodon scale -- the PyBlock guar report had
+-- 11% of an Exact target imported). That breaks the problem definition's
+-- V >> M lexicography, so the L2 norms solve in two stages: stage 1 measures
+-- the violation optimum with the recipe tier dropped to a pure face
+-- regularizer (the target_rescue_epsilon precedent -- it only bounds futile
+-- cycles for the IPM, and cycles are violation-neutral so the measured caps
+-- are unaffected by its mushy enforcement), then stage 2 re-solves at ship
+-- costs with each violation GROUP capped at its measured optimum + margin
+-- (create_problem.plan_violation_locks / apply_violation_locks). Corpus A/B
+-- (tests/research/probe_l2_twostage.lua, all 1678 explorer dumps, 2026-07-08):
+-- every stage converged, ~2x solve cost, violations dropped to the stage-1
+-- optimum wherever the single stage had bought them (297 problems >10%
+-- better), targets unmoved (max drift 1.6e-5 = tolerance noise); the only
+-- "regressions" were violation columns parking at the abs margin floor.
+-- Margins mirror the rescue budget (IPM relative residual + abs floor when
+-- the optimum is 0).
+local L2_STAGE1_EPS = 2 ^ -20
+local l2_lock_rel, l2_lock_abs = 1e-3, 1e-6
 -- L-infinity capped-stage peak budget: relative slack for the IPM's relative
 -- residual plus an absolute floor when the peak is 0 (the target-rescue values).
 local linf_budget_rel, linf_budget_abs = 1e-3, 1e-6
@@ -155,9 +177,14 @@ function M.forwerd_solve(force_data, solution)
         -- and livelocking rescue<->linf on any problem where the rescue fires.
         -- lc_restart likewise keeps the compress re-solve locked on the rescued
         -- target (an unlocked channel deletion can trade the target away past
-        -- the 2^10 exchange-rate ceiling).
+        -- the 2^10 exchange-rate ceiling). ll_restart (the L2 two-stage lock)
+        -- sits here for the same reason: the locked stage-2 build must carry
+        -- the rescued budget, and target_rescue_step's "done" sentinel must
+        -- survive the stage rebuild or it re-arms stage 1 mid-pipeline (the
+        -- linf livelock class).
         if not (solution.tr_restart or solution.op_restart or solution.reclassify_pending
-                or solution.cc_restart or solution.lf_restart or solution.lc_restart) then
+                or solution.cc_restart or solution.lf_restart or solution.lc_restart
+                or solution.ll_restart) then
             solution.target_rescue = nil
         end
         solution.tr_restart = nil
@@ -186,6 +213,8 @@ function M.forwerd_solve(force_data, solution)
             solution.lf_restart = nil
             solution.l2_compress = nil
             solution.lc_restart = nil
+            solution.l2_lock = nil
+            solution.ll_restart = nil
 
             local cc = solution.cascade
             if cc and cc.build then
@@ -225,6 +254,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.lf_restart = nil
                 solution.l2_compress = nil
                 solution.lc_restart = nil
+                solution.l2_lock = nil
+                solution.ll_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -245,16 +276,29 @@ function M.forwerd_solve(force_data, solution)
                 -- cost, and an unlocked re-solve can rationally trade the
                 -- target away past the 2^10 exchange-rate ceiling).
                 if not solution.lc_restart then solution.l2_compress = nil end
+                -- The two-stage violation lock: the stage's OWN restart
+                -- (ll_restart) keeps it, and so does the compress restart --
+                -- the compressed rebuild re-applies the group locks below, or
+                -- the fold would re-open the eps-vs-quad trade the lock closed.
+                if not (solution.ll_restart or solution.lc_restart) then
+                    solution.l2_lock = nil
+                end
+                solution.ll_restart = nil
                 solution.lc_restart = nil
-                -- L2: un-gated, with the recipe tier raised to clear the purify
-                -- zero-floor sqrt(mu) (see L2_RECIPE_EPS), then shaped by shape_l2
-                -- below (violation quad + linear floor).
+                -- L2: un-gated, shaped by shape_l2 below (violation quad +
+                -- linear floor), solved in two stages (M.l2_lock_step). The
+                -- FIRST build (no l2_lock state yet) is the violation
+                -- measurement: its recipe tier drops to a pure face
+                -- regularizer so eps*M cannot buy violation (see
+                -- L2_STAGE1_EPS). Every later build runs at the ship tier --
+                -- raised to clear the purify zero-floor sqrt(mu) (see
+                -- L2_RECIPE_EPS) -- with the measured group caps re-applied.
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
                     catalyst_closure = false,
                     surplus_sink_gating = false,
-                    recipe_epsilon = L2_RECIPE_EPS,
+                    recipe_epsilon = solution.l2_lock and L2_RECIPE_EPS or L2_STAGE1_EPS,
                 }
                 -- The compressed rebuild: omit the sibling channels the plan
                 -- folded away (import losers via hatch_exclude, dump losers via
@@ -267,23 +311,26 @@ function M.forwerd_solve(force_data, solution)
                 end
                 apply_l2 = true
             elseif norm == "l2_baseline" then
-                -- L2 baseline: the identical QP shaping as "l2" (same
-                -- un-gated options, same recipe_epsilon, same shape_l2 below)
-                -- but the mode-compression fold never runs -- l2_compress
-                -- stays permanently nil so the UI can show this side by side
-                -- with "l2" to see what the fold changed.
+                -- L2 baseline: the identical QP shaping and two-stage
+                -- violation lock as "l2" (same un-gated options, same staged
+                -- recipe_epsilon, same shape_l2 + lock application below) but
+                -- the mode-compression fold never runs -- l2_compress stays
+                -- permanently nil so the UI can show this side by side with
+                -- "l2" to see what the fold changed.
                 solution.forced_imports = nil
                 solution.reclassify_pending = nil
                 solution.linf = nil
                 solution.lf_restart = nil
                 solution.l2_compress = nil
                 solution.lc_restart = nil
+                if not solution.ll_restart then solution.l2_lock = nil end
+                solution.ll_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
                     catalyst_closure = false,
                     surplus_sink_gating = false,
-                    recipe_epsilon = L2_RECIPE_EPS,
+                    recipe_epsilon = solution.l2_lock and L2_RECIPE_EPS or L2_STAGE1_EPS,
                 }
                 apply_l2 = true
             elseif norm == "linf" then
@@ -296,6 +343,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.lf_restart = nil
                 solution.l2_compress = nil
                 solution.lc_restart = nil
+                solution.l2_lock = nil
+                solution.ll_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -332,6 +381,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.lf_restart = nil
                 solution.l2_compress = nil
                 solution.lc_restart = nil
+                solution.l2_lock = nil
+                solution.ll_restart = nil
                 options = {
                     reachability_gating = true,
                     deficit_seeding = true,
@@ -372,10 +423,25 @@ function M.forwerd_solve(force_data, solution)
         -- and synthetic-demand rows. See solver/cascade.lua M.shape_problem.
         if cc_build then
             cascade.shape_problem(solution.problem, cc_build)
-        elseif apply_l2 then
+        elseif apply_l2 and not options.target_only_objective then
             -- L2 ("balanced"): violation elastics -> quadratic + a small linear
             -- floor (the elastic-net admixture that lets purify reach 0), ports free.
+            -- NOT applied to the target-rescue stage-1 build: target_only_objective
+            -- re-costs every non-target column to a measurement epsilon, and
+            -- re-quadding the violations on top of it made stage 1 pay the full
+            -- violation bill -- so on a collapse problem (surplus >> the
+            -- target's linear worth) stage 1 collapsed too, measured "no
+            -- headroom", and the rescue silently restored the collapsed
+            -- baseline. Stage 1 must stay the pure target-only LP the other
+            -- norms measure with (caught by lp_l2_state_machine's rescue case).
             create_problem.shape_l2(solution.problem, VIOLATION_QUAD, VIOLATION_FLOOR)
+            -- Stage 2 (and every later l2 rebuild, the compress re-solve
+            -- included): cap each violation group at its measured stage-1
+            -- optimum. The fallback build carries no caps (l2_lock.caps nil).
+            local ll = solution.l2_lock
+            if ll and ll.caps then
+                create_problem.apply_violation_locks(solution.problem, ll.caps)
+            end
         elseif linf_stage == "minmax" then
             -- L-infinity stage 1: re-cost to min-max (add the peak primal + cap
             -- rows). See create_problem.shape_minmax / M.linf_step.
@@ -501,14 +567,21 @@ function M.forwerd_solve(force_data, solution)
         if solution.solver_state == "finished" then
             M.linf_step(solution)
         end
-    elseif norm == "l2" then
-        -- L2 mode compression: once the rescued baseline stands, fold the
-        -- sibling violation channels and re-solve without them. Driven on ANY
-        -- terminal state, not just "finished": a non-finished compress solve
-        -- must advance to the baseline restore rather than stall.
+    elseif norm == "l2" or norm == "l2_baseline" then
+        -- L2 pipeline: the two-stage violation lock settles first (measurement
+        -- solve -> group-capped ship re-solve; see M.l2_lock_step), then -- on
+        -- the "l2" norm only -- the mode compression folds sibling channels
+        -- and re-solves under the same caps. Both are driven on ANY terminal
+        -- state, not just "finished": a non-finished stage must advance to its
+        -- fallback / baseline restore rather than stall.
         local st = solution.solver_state
         if st ~= "ready" and st ~= "calculating" then
-            M.l2_compress_step(solution)
+            if M.l2_lock_step(solution) then
+                return
+            end
+            if norm == "l2" then
+                M.l2_compress_step(solution)
+            end
         end
     elseif norm == "legacy" then
         -- Legacy two-pass diagnose-then-reclassify. When the FIRST pass
@@ -530,8 +603,73 @@ function M.forwerd_solve(force_data, solution)
             end
         end
     end
-    -- "l1" / "l2_baseline": the baseline (plus the target rescue above) is
-    -- the answer; no downstream loop.
+    -- "l1": the baseline (plus the target rescue above) is the answer; no
+    -- downstream loop.
+end
+
+---Advance the L2 two-stage violation lock one step after a terminal solve
+---(solver_norm == "l2" / "l2_baseline"). The target rescue settles first
+---(targets are tier-1); then:
+---  measurement finished (no l2_lock state yet; the build ran at
+---    L2_STAGE1_EPS) -> measure the per-group violation caps off its optimum
+---    (create_problem.plan_violation_locks) and arm the "locked" re-solve at
+---    ship costs; the caps ride every later l2 rebuild.
+---  "locked" finished -> the answer stands ("done"); the caps stay on the
+---    settled state so the mode-compression re-solve rebuilds under them.
+---  measurement or "locked" NOT finished (diverged / iterate limit) -> arm
+---    "fallback": a plain ship-cost re-solve with no caps -- exactly the
+---    pre-two-stage single solve -- rather than standing on a failed stage or
+---    on the measurement's non-ship epsilon. Convergence robustness only: no
+---    corpus problem needed it (1678/1678 stages converged, see L2_STAGE1_EPS).
+---  "fallback" terminal -> whatever it reached stands ("done").
+---Mutates solution.l2_lock and, when another solve is needed, re-arms
+---solver_state="ready" with ll_restart set so the rebuild keeps the lock state
+---AND the settled target rescue (ll_restart sits in both preserve lists; see
+---the linf livelock note on the rescue preserve condition).
+---Returns true while a lock-stage solve is in flight, so the caller defers the
+---mode compression to the locked answer.
+---@param solution Solution
+---@return boolean restarted
+function M.l2_lock_step(solution)
+    if not solution.problem then return false end
+    local ll = solution.l2_lock
+    if ll and ll.phase == "done" then return false end
+
+    local function restart()
+        solution.ll_restart = true
+        solution.solver_state = "ready"
+        solution.solver_iteration = nil
+        -- solution.raw_variables stays as-is: the QP handoff discards the warm
+        -- seed on its own (linear_programming.qp_warm_strategy = "cold").
+    end
+
+    if not ll then
+        -- The measurement build just terminated.
+        if solution.solver_state ~= "finished" or not solution.raw_variables then
+            solution.l2_lock = { phase = "fallback" }
+            restart()
+            return true
+        end
+        solution.l2_lock = {
+            phase = "locked",
+            caps = create_problem.plan_violation_locks(
+                solution.problem, solution.raw_variables.x, l2_lock_rel, l2_lock_abs),
+        }
+        restart()
+        return true
+    elseif ll.phase == "locked" then
+        if solution.solver_state ~= "finished" then
+            ll.phase = "fallback"
+            ll.caps = nil
+            restart()
+            return true
+        end
+        ll.phase = "done"
+        return false
+    end
+    -- "fallback" just terminated: whatever state it reached stands.
+    ll.phase = "done"
+    return false
 end
 
 ---Advance the lexicographic target rescue one step after a finished solve.

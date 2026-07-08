@@ -110,7 +110,7 @@ function handlers.make_build_table(event)
 
     -- on_calculation_changed fires every tick while the solver iterates, and
     -- also fires on the transitional "ready" state a multi-stage solve (target
-    -- rescue / linf / L2 mode compression / cascade) re-arms itself into
+    -- rescue / linf / L2 violation lock / L2 mode compression / cascade) re-arms itself into
     -- between stages -- often while a prior stage's raw_variables is still
     -- held (save.is_solving). Rebuilding on either would empty this
     -- fit-to-content docked panel (or flash a stale intermediate stage's

@@ -1447,6 +1447,97 @@ function M.shape_l2(problem, quad, floor)
     end
 end
 
+---The L2 violation-lock grouping key: one lock row per (kind, base material)
+---group, NOT per violation column. Two reasons the coarser grain is the right
+---one: (1) it is the SAME grouping the mode-compression fold uses
+---(solver/mode_compress.lua M.plan -- keep the two in sync), so folding a
+---group's sibling channels onto its winner re-routes flow WITHIN one group and
+---never trips a lock; (2) the problem definition's violation ledger is per
+---material -- letting stage 2 redistribute a fixed violation total across one
+---fluid's temperature variants is exactly the degeneracy the fold collapses
+---anyway, while the group total stays pinned.
+---@param p Primal a shortage_source / surplus_sink primal
+---@return string
+local function violation_group_key(p)
+    return p.kind .. "|" .. (p.material_base or p.material)
+end
+
+---The |coefficient| of a violation column on its material row: the per-kind
+---amount weight, so coefficient * x is the PHYSICAL flow (mirrors the
+---mode-compression plan's physical read).
+---@param problem Problem
+---@param key string
+---@param p Primal
+---@return number
+local function violation_weight(problem, key, p)
+    local terms = problem.subject_terms[key]
+    return math.abs((terms and p.material and terms[p.material]) or 1)
+end
+
+---Measure the per-group violation caps for the L2 two-stage solve from a
+---finished stage-1 (measurement) build: cap = the group's physical violation
+---total at the stage-1 optimum, plus an IPM margin (relative residual + an
+---absolute floor when the optimum is 0 -- the same shape as the target-rescue
+---budget). Groups whose optimum is 0 are included ON PURPOSE: their abs-floor
+---cap is what stops stage 2 from opening a violation channel the measurement
+---never used. Per-variable pinning was rejected for the group grain above;
+---the strict convexity of the violation quad makes the stage-1 violation
+---vector (hence every group total) unique even where the recipe face is
+---degenerate, so the caps are well-defined.
+---@param problem Problem The finished stage-1 build.
+---@param x table<string, number> The converged primal values (PackedVariables.x).
+---@param margin_rel number
+---@param margin_abs number
+---@return table<string, number> caps Physical-unit cap per violation group key.
+function M.plan_violation_locks(problem, x, margin_rel, margin_abs)
+    local caps = {}
+    for key, p in pairs(problem.primals) do
+        if (p.kind == "shortage_source" or p.kind == "surplus_sink") and p.material then
+            local group = violation_group_key(p)
+            local phys = violation_weight(problem, key, p) * (x[key] or 0)
+            caps[group] = (caps[group] or 0) + phys
+        end
+    end
+    for group, total in pairs(caps) do
+        caps[group] = total + math.max(total * margin_rel, margin_abs)
+    end
+    return caps
+end
+
+---Apply the measured violation caps to a freshly built + shape_l2'd problem:
+---one upper-limit row per group present in THIS build, with each member
+---violation column entering at its physical weight. A rebuild may carry fewer
+---members than the measurement (the mode-compression fold excludes group
+---losers via hatch_exclude / sink_exclude); the survivors still route into
+---their group's row, so the fold's winner absorbs the group total without
+---tripping the cap. Groups with no member in this build are skipped.
+---
+---Why the lock exists: the single weighted L2 objective trades the recipe
+---tier against the violation quad at the finite rate eps*M (M = machines per
+---product unit), which on machine-heavy chains buys real violation with
+---machines -- breaking the problem definition's V >> M lexicography (the
+---PyBlock guar report: 11% of an Exact target imported). The caps restore the
+---tiers: stage 2 minimizes machines only AMONG the violation-optimal answers.
+---@param problem Problem A stage-2 build (create_problem + shape_l2).
+---@param caps table<string, number> From M.plan_violation_locks.
+function M.apply_violation_locks(problem, caps)
+    local added = {}
+    for key, p in pairs(problem.primals) do
+        if (p.kind == "shortage_source" or p.kind == "surplus_sink") and p.material then
+            local group = violation_group_key(p)
+            local cap = caps[group]
+            if cap then
+                local row = vk.l2_lock(group)
+                if not added[group] then
+                    problem:add_upper_limit_constraint(row, cap)
+                    added[group] = true
+                end
+                problem:add_subject_term(key, row, violation_weight(problem, key, p))
+            end
+        end
+    end
+end
+
 ---Shape an L∞ ("leveled" / min-max) stage onto a freshly-built ungated baseline
 ---problem (the solver_norm == "linf" path; see manage/pre_solve.lua M.linf_step).
 ---Two lexicographic stages over the SAME violation elastics the L1 build already
