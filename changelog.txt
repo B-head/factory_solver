@@ -1,7 +1,9 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.1
 Date: ????
-  Changes:
+  Bugfixes:
+    - Fix a layout issue in the machine presets window caused by an
+      inappropriate fixed-width style.
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.0
 Date: 2026-07-07

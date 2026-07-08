@@ -354,7 +354,6 @@ return {
         style = "inside_shallow_frame",
         direction = "vertical",
         style_mods = {
-            width = 440,
             bottom_padding = 12,
         },
         {
