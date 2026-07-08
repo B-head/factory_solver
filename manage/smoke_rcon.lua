@@ -60,6 +60,7 @@ local report = require "manage/report"
 local save = require "manage/save"
 local solution_codec = require "manage/solution_codec"
 local pre_solve = require "manage/pre_solve"
+local create_problem = require "solver/create_problem"
 local tn = require "manage/typed_name"
 -- The 16-Solution codec/reference bundle (a real factory_solver native share
 -- string). require runs at LOAD time only -- never inside an RCON handler -- so
@@ -3777,6 +3778,35 @@ function M.check_qp_warmstart_impl()
     return string.format("OK: %d problems, l2 warm-start converges to the cold optimum", #payloads)
 end
 
+---Decode a native share string and write each solution's create_problem input
+---(dump_normalized_lines / dump_constraints, both `load()`-able Lua chunks) to
+---script-output. Debugging aid for user bug reports: turns an exported solution
+---into headless-fixture inputs without any GUI steps, on whatever mod set the
+---server was booted with (tests/console.ps1 -Mods ...). Normalization uses the
+---smoke force's default research bonuses (no research, only `normal` quality
+---unlocked) -- a report reproduced from a researched save may need the bonuses
+---adjusted like bundle16_research_bonuses does for quality.
+---@param shared string
+---@return string
+function M.dump_import_normalized(shared)
+    save.init_force_data(FORCE_INDEX)
+    local payloads, derr = solution_codec.decode(shared)
+    if not payloads then
+        return "ERROR: decode failed: " .. tostring(derr and derr[1])
+    end
+    local bonuses = save.default_research_bonuses()
+    local written = {}
+    for i, p in ipairs(payloads) do
+        local lines = pre_solve.to_normalized_production_lines(p.production_lines, bonuses)
+        local base = string.format("import_normalized_%d", i)
+        helpers.write_file(base .. "_lines.lua", create_problem.dump_normalized_lines(lines))
+        helpers.write_file(base .. "_constraints.lua", create_problem.dump_constraints(p.constraints))
+        written[#written + 1] = string.format("%s (%q, %d lines, norm=%s)",
+            base, p.name, #lines, tostring(p.solver_norm))
+    end
+    return "OK: " .. table.concat(written, "; ")
+end
+
 ---Register the remote interface the launcher calls. Interface names share a
 ---flat namespace across mods, so it carries the factory_solver_ prefix. Remote
 ---interfaces are not persisted across save/load, so this must run on every load
@@ -3794,6 +3824,7 @@ function M.register()
         check_bundle16_codecs = M.check_bundle16_codecs,
         bundle16_drop_report = M.bundle16_drop_report,
         dump_bundle16_normalized = M.dump_bundle16_normalized,
+        dump_import_normalized = M.dump_import_normalized,
         check_bundle16_v060 = M.check_bundle16_v060,
         check_bundle16_norms = M.check_bundle16_norms,
         check_qp_warmstart = M.check_qp_warmstart,
