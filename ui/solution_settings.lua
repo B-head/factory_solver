@@ -18,8 +18,9 @@ local limit_type_to_index = {
 local solver_norm_to_index = {
     ["l1"] = 1,
     ["l2"] = 2,
-    ["linf"] = 3,
-    ["legacy"] = 4,
+    ["l2_baseline"] = 3,
+    ["linf"] = 4,
+    ["legacy"] = 5,
 }
 
 -- Amount quick-set popup (slider + belt/pump buttons). The slider sets a
@@ -717,15 +718,14 @@ return {
         {
             type = "label",
             style = "caption_label",
-            visible = false,
             caption = { "factory-solver-solver-norm" },
         },
         {
             type = "drop-down",
-            visible = false,
             items = {
                 { "factory-solver-solver-norm-l1" },
                 { "factory-solver-solver-norm-l2" },
+                { "factory-solver-solver-norm-l2-baseline" },
                 { "factory-solver-solver-norm-linf" },
                 { "factory-solver-solver-norm-legacy" },
             },
@@ -734,6 +734,10 @@ return {
                 on_added = handlers.on_solver_norm_refresh,
                 on_selected_solution_changed = handlers.on_solver_norm_refresh,
             },
+        },
+        {
+            type = "line",
+            style = "factory_solver_line",
         },
         {
             type = "label",

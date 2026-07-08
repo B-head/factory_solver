@@ -11,17 +11,24 @@ local vk = require "solver/var_key"
 local iterate_limit = 600
 
 -- The shipped solver dispatch (2026-06-20) is per-solution: solution.solver_norm
--- picks how the import/dump imbalance is balanced. All four user-selectable norms
+-- picks how the import/dump imbalance is balanced. All five user-selectable norms
 -- run on the SAME un-gated baseline build and differ only in problem shaping:
---   "l1"     concentrate -- the plain ungated baseline (linear elastic_cost), one
---            solve. The L1 norm: the imbalance piles onto few channels.
---   "l2"     balanced -- the baseline with the violation elastics repriced to a
---            pure quadratic (create_problem's violation_quad), one (QP) solve.
---            The L2 norm: the imbalance spreads evenly.
---   "linf"   leveled -- a two-stage min-max (M.linf_step): minimize the peak
---            violation, then minimize total under that cap. The L-infinity norm.
---   "legacy" the old hard reachability gate + two-pass diagnose (the rollback
---            path, kept as a conservative default).
+--   "l1"          concentrate -- the plain ungated baseline (linear elastic_cost),
+--                 one solve. The L1 norm: the imbalance piles onto few channels.
+--   "l2"          balanced -- the baseline with the violation elastics repriced to
+--                 a pure quadratic (create_problem's violation_quad), one (QP)
+--                 solve, THEN the mode-compression fold (M.l2_compress_step):
+--                 sibling violation channels collapse to one per group and the
+--                 problem re-solves without the losers. The L2 norm: the
+--                 imbalance spreads evenly.
+--   "l2_baseline" the identical L2 QP shaping as "l2", but WITHOUT the
+--                 compression fold -- the pre-fold answer, exposed so it can be
+--                 compared side by side against "l2" on the same solution.
+--   "linf"        leveled -- a two-stage min-max (M.linf_step): minimize the peak
+--                 violation, then minimize total under that cap. The L-infinity
+--                 norm.
+--   "legacy"      the old hard reachability gate + two-pass diagnose (the
+--                 rollback path, kept as a conservative default).
 -- "cascade" is the retired staged rescue (solver/cascade.lua), kept dispatchable
 -- but NOT offered in the UI, so its fixtures keep validating it. The target
 -- rescue (M.target_rescue_step) runs in front of every norm: targets are tier-1.
@@ -198,7 +205,7 @@ function M.forwerd_solve(force_data, solution)
                 }
             end
         else
-            -- The four shipping norms share the un-gated baseline; clear the
+            -- The five shipping norms share the un-gated baseline; clear the
             -- retained loops' in-flight state so a switch INTO one of these
             -- starts clean.
             solution.cascade = nil
@@ -206,8 +213,9 @@ function M.forwerd_solve(force_data, solution)
             solution.observe_price = nil
             solution.op_restart = nil
 
-            -- l1 / l2 / linf are FULLY un-gated: every create_problem gate and
-            -- cycle-entry heuristic is explicitly OFF (only legacy turns them on).
+            -- l1 / l2 / l2_baseline / linf are FULLY un-gated: every
+            -- create_problem gate and cycle-entry heuristic is explicitly OFF
+            -- (only legacy turns them on).
             -- Stated in full so the dispatch reads the whole option set, not the
             -- create_problem defaults.
             if norm == "l1" then
@@ -257,6 +265,26 @@ function M.forwerd_solve(force_data, solution)
                     options.hatch_exclude = lc.hatch
                     options.sink_exclude = lc.sink
                 end
+                apply_l2 = true
+            elseif norm == "l2_baseline" then
+                -- L2 baseline: the identical QP shaping as "l2" (same
+                -- un-gated options, same recipe_epsilon, same shape_l2 below)
+                -- but the mode-compression fold never runs -- l2_compress
+                -- stays permanently nil so the UI can show this side by side
+                -- with "l2" to see what the fold changed.
+                solution.forced_imports = nil
+                solution.reclassify_pending = nil
+                solution.linf = nil
+                solution.lf_restart = nil
+                solution.l2_compress = nil
+                solution.lc_restart = nil
+                options = {
+                    reachability_gating = false,
+                    deficit_seeding = false,
+                    catalyst_closure = false,
+                    surplus_sink_gating = false,
+                    recipe_epsilon = L2_RECIPE_EPS,
+                }
                 apply_l2 = true
             elseif norm == "linf" then
                 solution.forced_imports = nil
@@ -502,8 +530,8 @@ function M.forwerd_solve(force_data, solution)
             end
         end
     end
-    -- "l1": the baseline (plus the target rescue above) is the answer; no
-    -- downstream loop.
+    -- "l1" / "l2_baseline": the baseline (plus the target rescue above) is
+    -- the answer; no downstream loop.
 end
 
 ---Advance the lexicographic target rescue one step after a finished solve.

@@ -127,7 +127,7 @@ function M.decode(s)
         -- importing under the wrong solver.
         if payload.solver_norm ~= nil then
             local n = payload.solver_norm
-            if n ~= "l1" and n ~= "l2" and n ~= "linf" and n ~= "legacy" and n ~= "cascade" then
+            if n ~= "l1" and n ~= "l2" and n ~= "l2_baseline" and n ~= "linf" and n ~= "legacy" and n ~= "cascade" then
                 return nil, { "factory-solver-import-error-structure" }
             end
         end

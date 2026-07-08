@@ -17,9 +17,12 @@
 -- user edit re-arms it to "ready" like every other solution, replacing the
 -- frozen values with a normal in-game solve.
 ---@alias SolverState "ready"|"calculating"|"finished"|"unfinished"|"singular"|"unbounded"|"unfeasible"|"freeze"
--- Per-solution import/dump balancing norm. The first four are user-selectable in
--- the UI; "cascade" is the retired staged rescue, kept dispatchable but hidden.
----@alias SolverNorm "l1"|"l2"|"linf"|"legacy"|"cascade"
+-- Per-solution import/dump balancing norm. The first five are user-selectable
+-- in the UI; "cascade" is the retired staged rescue, kept dispatchable but
+-- hidden. "l2_baseline" is the "l2" QP shaping WITHOUT the post-solve mode-
+-- compression fold -- exposed so the fold's effect can be compared side by
+-- side against "l2" on the same solution.
+---@alias SolverNorm "l1"|"l2"|"l2_baseline"|"linf"|"legacy"|"cascade"
 ---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
 -- Fluid temperature is carried range-only: a point temperature is the degenerate
 -- range minimum_temperature == maximum_temperature. There is no single-value
@@ -218,7 +221,7 @@ __factory_solver__storage = {}
 ---@field problem Problem?
 ---@field solver_state SolverState
 ---@field solver_iteration integer?
----@field solver_norm SolverNorm?  Per-solution import/dump balancing norm (manage/pre_solve.lua dispatch). "l1" un-gated baseline (linear elastic), "l2" QP least-norm on the violation elastics, "linf" lexicographic min-max, "legacy" the hard reachability gate + two-pass. "cascade" is the retired staged rescue, kept dispatchable (not exposed in the UI) so its fixtures keep validating. nil = "legacy" (the default; backfilled on load).
+---@field solver_norm SolverNorm?  Per-solution import/dump balancing norm (manage/pre_solve.lua dispatch). "l1" un-gated baseline (linear elastic), "l2" QP least-norm on the violation elastics, "l2_baseline" the same QP shaping as "l2" but WITHOUT the post-solve mode-compression fold (a comparison baseline), "linf" lexicographic min-max, "legacy" the hard reachability gate + two-pass. "cascade" is the retired staged rescue, kept dispatchable (not exposed in the UI) so its fixtures keep validating. nil = "legacy" (the default; backfilled on load).
 ---@field raw_variables PackedVariables?
 ---@field done_lines table<string, true>?
 ---@field forced_imports table<string, true>?  Legacy two-pass reclassify (manage/pre_solve.lua, used only when observe_price is disabled): avoidable cheats diagnosed from pass 1, re-seeded as |initial_source| imports for pass 2. nil during pass 1 / a clean solve.
