@@ -811,6 +811,29 @@ if raw.plant and raw.plant["yumako-tree"] and raw.item and raw.item["yumako-seed
 end
 
 -- ============================================================================
+-- 7c. Beacon with many module slots. Vanilla beacon carries module_slots = 2,
+--     so the machine-setup dialog's per-beacon module row never wraps in a
+--     stock install; large-slot beacons only appear in some third-party mods.
+--     This fixture lets the wrapping behaviour of ui/machine_setup.lua's beacon
+--     modules table (now a filter_slot_table with column_count = 6) be observed
+--     directly by picking this beacon in the Add beacon slot. No LP / GUI code
+--     path is otherwise exercised -- purely visual test data. Guarded so a
+--     beacon-less install skips it. module_slots = 24 yields four rows of six
+--     to make wrapping unambiguously visible.
+-- ============================================================================
+
+if raw.beacon and raw.beacon["beacon"] then
+    local big_beacon = table.deepcopy(raw.beacon["beacon"])
+    big_beacon.name = "fs-test-beacon-many-slots"
+    big_beacon.localised_name = "fs-test-beacon-many-slots"
+    big_beacon.minable = nil
+    big_beacon.next_upgrade = nil
+    big_beacon.placeable_by = nil
+    big_beacon.module_slots = 24
+    extend_test({ big_beacon })
+end
+
+-- ============================================================================
 -- 8. Recipe / category / temperature edge recipes.
 -- ============================================================================
 
