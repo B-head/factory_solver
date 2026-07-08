@@ -108,13 +108,16 @@ function handlers.make_build_table(event)
     local elem = event.element
     local solution = save.get_selected_solution(event.player_index)
 
-    -- on_calculation_changed fires every tick while the solver iterates
-    -- (solver_state is the "calculating" in-progress state). Rebuilding then
-    -- would empty this fit-to-content docked panel each tick, collapsing it to
-    -- just the title until the solve lands. So during a mid-solve state keep the
-    -- last-rendered rows untouched and rebuild only when a final state arrives;
-    -- a missing solution still clears to empty.
-    if solution and solution.solver_state == "calculating" then
+    -- on_calculation_changed fires every tick while the solver iterates, and
+    -- also fires on the transitional "ready" state a multi-stage solve (target
+    -- rescue / linf / L2 mode compression / cascade) re-arms itself into
+    -- between stages -- often while a prior stage's raw_variables is still
+    -- held (save.is_solving). Rebuilding on either would empty this
+    -- fit-to-content docked panel (or flash a stale intermediate stage's
+    -- numbers) each tick until the solve lands. So during a mid-solve state
+    -- keep the last-rendered rows untouched and rebuild only when a settled
+    -- state arrives; a missing solution still clears to empty.
+    if solution and save.is_solving(solution) then
         return
     end
 

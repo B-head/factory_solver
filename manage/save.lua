@@ -351,6 +351,22 @@ function M.get_selected_solution(player_index)
     return storage.forces[force_index].solutions[player_data.selected_solution]
 end
 
+---Whether `solution` still has a solve (or solve stage) in flight. Mirrors
+---manage/pre_solve.lua M.find_the_need_for_solve's own pump condition:
+---"calculating" is a solve in progress, and "ready" is a settled stage
+---waiting for the NEXT stage's solve to be picked up (target rescue / linf /
+---L2 mode compression / cascade all re-arm "ready" between stages, often
+---while leaving the previous stage's raw_variables in place as a warm-start
+---seed or restore fallback). Both states mean the currently-held
+---raw_variables can be a stale placeholder, not the pipeline's real answer --
+---GUI result panels must not render (or must hold their last render) until
+---this returns false.
+---@param solution Solution
+---@return boolean
+function M.is_solving(solution)
+    return solution.solver_state == "calculating" or solution.solver_state == "ready"
+end
+
 ---Enumerate every recipe that has at least one technology effect of type
 ---`change-recipe-productivity`. Stable across forces (data-stage prototype
 ---scan), so the dialog can render a fixed row list and Sync can iterate over
