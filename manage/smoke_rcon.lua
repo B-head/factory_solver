@@ -1200,6 +1200,87 @@ fixtures.cascade_vc = {
 ---check_target_rescue -- a bare "finished" would also pass for the collapsed
 ---all-zero answer, so the check asserts the rescue state, the met target, and
 ---the running loop.
+---L2 mode compression (manage/pre_solve.lua M.l2_compress_step): the "balanced"
+---norm spreads one material's import across its temperature-window siblings, and
+---the post-solve compression must fold that spread back to one channel per
+---(base, kind) group. The in-game shape: a boiler (steam@165) and a heat
+---exchanger (steam@500) both bridge into the steam turbine's acceptance range,
+---and recipe caps starve the producers below the turbine's demand, so the
+---shortfall must import -- the L2 quad then splits it across the sibling steam
+---windows (the same fixture shape as tests/cases/lp_mode_compress.lua's
+---end-to-end case, on real prototypes and the real solve pump). The heat
+---exchanger's <heat> and the boilers' water are consumed-only (free
+---|initial_source| ports), so the steam siblings carry the only violations.
+---Asserted by check_l2_compress after the pump settles. Base game only.
+fixtures.l2_compress = {
+    requires = {},
+    ---@param solution Solution
+    build = function(solution)
+        -- The compression only runs on the "balanced" norm's QP solve.
+        solution.solver_norm = "l2"
+
+        local boiler_recipe = "<run>boiler:water"
+        local hx_recipe = "<run>heat-exchanger:water"
+        local turbine_recipe = "<run>steam-turbine"
+        for _, recipe_name in ipairs({ boiler_recipe, hx_recipe, turbine_recipe }) do
+            assert(storage.virtuals.recipe[recipe_name],
+                "virtual recipe '" .. recipe_name .. "' not registered")
+        end
+
+        ---@type ProductionLine[]
+        local lines = {
+            {
+                recipe_typed_name = tn.create_typed_name("virtual_recipe", boiler_recipe),
+                machine_typed_name = tn.create_typed_name("machine", "boiler"),
+                module_typed_names = {},
+                affected_by_beacons = {},
+                fuel_typed_name = tn.create_typed_name("item", "coal"),
+            },
+            {
+                recipe_typed_name = tn.create_typed_name("virtual_recipe", hx_recipe),
+                machine_typed_name = tn.create_typed_name("machine", "heat-exchanger"),
+                module_typed_names = {},
+                affected_by_beacons = {},
+                -- A heat machine burns the <heat> virtual material as its fuel
+                -- (is_use_fuel is true for it, so the line must carry one).
+                fuel_typed_name = tn.create_typed_name("virtual_material", "<heat>"),
+            },
+            {
+                recipe_typed_name = tn.create_typed_name("virtual_recipe", turbine_recipe),
+                machine_typed_name = tn.create_typed_name("machine", "steam-turbine"),
+                module_typed_names = {},
+                affected_by_beacons = {},
+                -- A generator consumes its working fluid AS its fuel: the line
+                -- must carry the machine's fixed fluid fuel (steam over the
+                -- turbine's acceptance range), derived like save.new_production_line.
+                fuel_typed_name = assert(
+                    acc.try_get_fixed_fuel(prototypes.entity["steam-turbine"]),
+                    "steam-turbine has no fixed fluid fuel"),
+            },
+        }
+        for _, line in ipairs(lines) do
+            table.insert(solution.production_lines, line)
+        end
+
+        -- Recipe-variable bounds (the boiler_steam pattern, independent of the
+        -- exact steam rates): cap both producers well below one turbine's
+        -- steam draw, and force the turbine to run, so the steam shortfall has
+        -- to import through the violation escapes.
+        ---@type Constraint[]
+        local constraints = {
+            { type = "virtual_recipe", name = boiler_recipe, quality = "normal",
+                limit_type = "upper", limit_amount_per_second = 0.2 },
+            { type = "virtual_recipe", name = hx_recipe, quality = "normal",
+                limit_type = "upper", limit_amount_per_second = 0.2 },
+            { type = "virtual_recipe", name = turbine_recipe, quality = "normal",
+                limit_type = "lower", limit_amount_per_second = 1 },
+        }
+        for _, constraint in ipairs(constraints) do
+            table.insert(solution.constraints, constraint)
+        end
+    end,
+}
+
 fixtures.target_rescue = {
     requires = {},
     ---@param solution Solution
@@ -1599,6 +1680,69 @@ function M.check_target_rescue()
     end
 
     return "OK"
+end
+
+---RCON entry point: assert the l2_compress fixture actually exercised the L2
+---mode compression -- the fold fired (channels were excluded), the compressed
+---problem really lacks them, the state machine settled, and the turbine's
+---lower bound is still met. A solve that converges WITHOUT compressing (the
+---plan came back empty) is an ERROR here: the fixture exists to drive the
+---fold, so an inert pass would silently drop the coverage.
+---@return string
+function M.check_l2_compress()
+    local force_data = storage.forces[FORCE_INDEX]
+    local solutions = force_data and force_data.solutions
+    local _, solution = next(solutions or {})
+    if not solution then
+        return "ERROR: no solution"
+    end
+    if solution.solver_state ~= "finished" then
+        return "ERROR: solver_state is " .. tostring(solution.solver_state) .. ", not finished"
+    end
+
+    local lc = solution.l2_compress
+    if not lc then
+        return "ERROR: l2_compress state nil -- the compression machine never started"
+    end
+    if lc.phase ~= "done" then
+        return "ERROR: l2_compress phase is " .. tostring(lc.phase) .. ", not done"
+    end
+    if lc.saved ~= nil then
+        return "ERROR: the held baseline was not dropped after settling"
+    end
+    local folded = 0
+    for _ in pairs(lc.hatch or {}) do folded = folded + 1 end
+    for _ in pairs(lc.sink or {}) do folded = folded + 1 end
+    if folded == 0 then
+        return "ERROR: the compression never fired (no channel folded) -- the fixture is inert"
+    end
+
+    -- The compressed problem must really lack the folded channels.
+    local primals = solution.problem and solution.problem.primals or {}
+    for _, p in pairs(primals) do
+        if p.kind == "shortage_source" and lc.hatch and lc.hatch[p.material] then
+            return "ERROR: folded import channel still present: " .. p.key
+        end
+        if p.kind == "surplus_sink" and lc.sink and lc.sink[p.material] then
+            return "ERROR: folded dump channel still present: " .. p.key
+        end
+    end
+
+    -- The turbine's lower bound survived the fold (the target lock's job).
+    local x = solution.raw_variables and solution.raw_variables.x or {}
+    local elastic = 0
+    for k, v in pairs(x) do
+        local p = primals[k]
+        if p and (p.kind == "elastic" or p.kind == "headroom") then
+            elastic = elastic + math.abs(v)
+        end
+    end
+    if elastic > 1e-3 then
+        return "ERROR: constraint still relaxed by " .. string.format("%.4f", elastic)
+            .. " after the fold"
+    end
+
+    return "OK: folded=" .. folded
 end
 
 ---RCON entry point: assert the force/prototype-global cache invariants that the
@@ -3654,6 +3798,7 @@ function M.register()
         check_bundle16_norms = M.check_bundle16_norms,
         check_qp_warmstart = M.check_qp_warmstart,
         check_target_rescue = M.check_target_rescue,
+        check_l2_compress = M.check_l2_compress,
         check_force_caches = M.check_force_caches,
         check_relation_split = M.check_relation_split,
         check_fuel_reconciliation = M.check_fuel_reconciliation,

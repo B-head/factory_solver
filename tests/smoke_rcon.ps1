@@ -45,6 +45,7 @@ param(
     [int] $RconStartupSeconds = 90,
     [string[]] $Fixtures = @("iron_plate", "missing_prototype", "boiler_steam", "reactor_burnt_fuel",
         "spent_fluid", "catalyst_reclassify", "cascade_vp", "cascade_vc", "target_rescue",
+        "l2_compress",
         "migration_legacy_shape", "codec_solution_roundtrip", "codec_frozen_import",
         "codec_fp_roundtrip", "codec_helmod_roundtrip", "codec_helmod_import_order",
         "codec_yafc_roundtrip", "yafc_real_sample", "codec_yafc_virtual", "codec_yafc_spoilage",
@@ -451,6 +452,17 @@ try {
             if ($rescue -ne "OK") { $verdict = "FAIL" }
         }
 
+        # The l2_compress fixture additionally proves the L2 mode compression
+        # folded the sibling steam import channels (fold fired, folded channels
+        # absent from the compressed problem, bounds still met) -- an inert
+        # L2 solve that never compresses also reaches "finished".
+        $l2Compress = $null
+        if ($verdict -eq "PASS" -and $fixture -eq "l2_compress") {
+            $l2Compress = Invoke-RconCommand -Stream $stream `
+                -Command "/silent-command rcon.print(remote.call('$iface','check_l2_compress'))"
+            if ($l2Compress -notlike "OK*") { $verdict = "FAIL" }
+        }
+
         # Informational: surface which cascade tiers fired for the cascade fixtures
         # (does not affect the verdict). Lets a run show e.g. whether the polish
         # tier fired atop an upper-tier rescue without re-deriving it.
@@ -466,6 +478,7 @@ try {
         if ($cascadeVp) { $detail += "; cascade_vp=$cascadeVp" }
         if ($cascadeVc) { $detail += "; cascade_vc=$cascadeVc" }
         if ($rescue) { $detail += "; rescue=$rescue" }
+        if ($l2Compress) { $detail += "; l2_compress=$l2Compress" }
         if ($cascadeSummary) { $detail += "; [$cascadeSummary]" }
         Write-Host "SMOKE $verdict`: [$fixture] $detail"
         if ($verdict -ne "PASS") { $allPass = $false }
