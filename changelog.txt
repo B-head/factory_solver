@@ -1,6 +1,6 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.2
-Date: ????
+Date: 2026-07-09
   Gui:
     - Wrap the module slot row in the machine setup window across six
       columns, so machines with many module slots no longer render as
