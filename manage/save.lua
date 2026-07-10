@@ -276,6 +276,8 @@ function M.reinit_force_data(force_index)
             solution.cc_restart = nil
             solution.linf = nil
             solution.lf_restart = nil
+            solution.placement = nil
+            solution.pm_restart = nil
             -- solver_norm gained later: older saves lack it. Backfill the
             -- default so the dispatch (manage/pre_solve.lua) always reads a
             -- valid norm. Unlike the in-flight state above this is a user knob,
@@ -322,6 +324,12 @@ function M.resetup_force_data_metatable(force_data)
             local lc = solution.l2_compress
             if lc and lc.saved and lc.saved.problem then
                 problem_generator.setup_metatable(lc.saved.problem)
+            end
+            -- The base answer held by an in-flight sparse placement
+            -- (manage/pre_solve.lua M.placement_step) is a Problem too.
+            local pm = solution.placement
+            if pm and pm.saved and pm.saved.problem then
+                problem_generator.setup_metatable(pm.saved.problem)
             end
         end
     end

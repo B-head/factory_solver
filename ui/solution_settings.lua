@@ -21,6 +21,8 @@ local solver_norm_to_index = {
     ["l2_baseline"] = 3,
     ["linf"] = 4,
     ["legacy"] = 5,
+    ["batch"] = 6,
+    ["smart"] = 7,
 }
 
 -- Amount quick-set popup (slider + belt/pump buttons). The slider sets a
@@ -728,6 +730,8 @@ return {
                 { "factory-solver-solver-norm-l2-baseline" },
                 { "factory-solver-solver-norm-linf" },
                 { "factory-solver-solver-norm-legacy" },
+                { "factory-solver-solver-norm-batch" },
+                { "factory-solver-solver-norm-smart" },
             },
             handler = {
                 [defines.events.on_gui_selection_state_changed] = handlers.on_solver_norm_changed,

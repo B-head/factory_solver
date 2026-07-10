@@ -22,7 +22,7 @@
 -- hidden. "l2_baseline" is the "l2" QP shaping WITHOUT the post-solve mode-
 -- compression fold -- exposed so the fold's effect can be compared side by
 -- side against "l2" on the same solution.
----@alias SolverNorm "l1"|"l2"|"l2_baseline"|"linf"|"legacy"|"cascade"
+---@alias SolverNorm "l1"|"l2"|"l2_baseline"|"linf"|"legacy"|"cascade"|"batch"|"smart"
 ---@alias Craft LuaItemPrototype|LuaFluidPrototype|LuaRecipePrototype|LuaEntityPrototype|VirtualMaterial|VirtualRecipe
 -- Fluid temperature is carried range-only: a point temperature is the degenerate
 -- range minimum_temperature == maximum_temperature. There is no single-value
@@ -221,7 +221,7 @@ __factory_solver__storage = {}
 ---@field problem Problem?
 ---@field solver_state SolverState
 ---@field solver_iteration integer?
----@field solver_norm SolverNorm?  Per-solution import/dump balancing norm (manage/pre_solve.lua dispatch). "l1" un-gated baseline (linear elastic), "l2" QP least-norm on the violation elastics, "l2_baseline" the same QP shaping as "l2" but WITHOUT the post-solve mode-compression fold (a comparison baseline), "linf" lexicographic min-max, "legacy" the hard reachability gate + two-pass. "cascade" is the retired staged rescue, kept dispatchable (not exposed in the UI) so its fixtures keep validating. nil = "legacy" (the default; backfilled on load).
+---@field solver_norm SolverNorm?  Per-solution import/dump balancing norm (manage/pre_solve.lua dispatch). "l1" un-gated baseline (linear elastic), "l2" QP least-norm on the violation elastics, "l2_baseline" the same QP shaping as "l2" but WITHOUT the post-solve mode-compression fold (a comparison baseline), "linf" lexicographic min-max, "batch" / "smart" the sparse elastic placements (all-elastic L2 base, then a restricted L2 on a Phase-I-measured / statically-derived escape placement with a physical guard), "legacy" the hard reachability gate + two-pass. "cascade" is the retired staged rescue, kept dispatchable (not exposed in the UI) so its fixtures keep validating. nil = "legacy" (the default; backfilled on load).
 ---@field raw_variables PackedVariables?
 ---@field done_lines table<string, true>?
 ---@field forced_imports table<string, true>?  Legacy two-pass reclassify (manage/pre_solve.lua, used only when observe_price is disabled): avoidable cheats diagnosed from pass 1, re-seeded as |initial_source| imports for pass 2. nil during pass 1 / a clean solve.
@@ -238,6 +238,23 @@ __factory_solver__storage = {}
 ---@field lc_restart boolean?  Internal flag: set when the compression re-arms solver_state="ready", so the rebuild keeps the in-flight compress state AND the settled target rescue (the compressed build must stay locked on the rescued target -- deleting a spreading channel raises the survivors' quadratic marginal cost past the target's linear worth, so an unlocked re-solve can rationally trade the target away) instead of dropping them as it would for a fresh edit.
 ---@field l2_lock L2LockState?  In-flight L2 two-stage violation lock (manage/pre_solve.lua M.l2_lock_step), for solver_norm == "l2" / "l2_baseline": stage 1 measures the violation optimum with the recipe tier dropped to a face regularizer, stage 2 re-solves at ship costs with each violation group capped at that optimum -- so the machine tie-break epsilon can no longer buy violation units on machine-heavy chains (the eps*M-vs-quad equilibrium). nil before the measurement solve; a "done" sentinel (still carrying the caps for the compress rebuild) once settled. Plain table, storage-safe.
 ---@field ll_restart boolean?  Internal flag: set when a lock stage re-arms solver_state="ready", so the rebuild keeps the in-flight lock state AND the settled target rescue instead of dropping them as it would for a fresh edit (same preserve-list role as lf_restart / lc_restart).
+---@field placement PlacementState?  In-flight sparse elastic placement (manage/pre_solve.lua M.placement_step / solver/placement.lua), for solver_norm == "batch" / "smart": the all-elastic L2 base solve is held as the physical guard reference, then the L2 re-solves restricted to a sparse escape placement (Phase-I-measured or statically derived from the necessity law), widening on a guard failure. nil before the base solve; a "done" sentinel once settled. Plain tables (while in flight it carries the base Problem; manage/save.lua re-attaches its metatable on load).
+---@field pm_restart boolean?  Internal flag: set when the placement re-arms solver_state="ready", so the rebuild keeps the in-flight placement state AND the settled target rescue instead of dropping them as it would for a fresh edit (same preserve-list role as lf_restart / lc_restart / ll_restart).
+
+---@class PlacementState
+---@field phase "phase1"|"restricted"|"done"  "phase1" while a Phase-I feasibility measurement is in flight ("batch" only); "restricted" while a placement-restricted L2 re-solve runs; "done" once the sparse answer stands (or the base was restored).
+---@field groups table<string, string[]>?  Violation-group index of the base build: base material (Primal.material_base grain) -> its variant material rows, the unit the placement/exclusion works in.
+---@field placed table<string, true>?  The placement: groups whose escapes the restricted build keeps. Everything else is excluded via CreateProblemOptions.hatch_exclude / sink_exclude.
+---@field gp table<string, number>?  Per-group physical violation of the base solve (the widening rank and the structural carriers' reference).
+---@field base_imp number?  Physical import total of the base solve (guard reference).
+---@field base_dmp number?  Physical dump total of the base solve (guard reference).
+---@field t_limit number?  Target budget threaded into every placement build (the linf t_limit move): the settled rescue budget, else the base solve's achieved relaxation + margin -- neither the Phase-I nor a sparse re-solve may trade a target away past the base.
+---@field rounds integer?  Guard widening rounds spent.
+---@field p1iters integer?  Phase-I iterations spent ("batch").
+---@field arts {pos: string, neg: string, row: string}[]?  The Phase-I artificial keys of the in-flight "phase1" build (solver/placement.lua M.shape_phase1), read back by M.phase1_support.
+---@field units string[][]?  SCC units (base-material member lists) of the static law placement ("smart"), walked by the structural widening.
+---@field junctions string[][]?  Multi-output junction output lists ("smart"), same role as units.
+---@field saved {problem: Problem, raw_variables: PackedVariables, machines: table<string, number>}?  The finished base answer, restored verbatim when the restricted solve cannot be widened back to convergence (the L2CompressState.saved pattern).
 
 ---@class L2LockState
 ---@field phase "locked"|"fallback"|"done"  "locked" while the ship-epsilon re-solve under the stage-1 caps is in flight; "fallback" while the no-cap ship re-solve after a non-finished stage runs (the pre-two-stage single solve, convergence robustness only); "done" once settled.

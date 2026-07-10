@@ -1,6 +1,16 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.8.2
 Date: ????
+  Features:
+    - Two experimental solver norms, "Sparse (Phase-I)" and "Sparse (static)":
+      instead of allowing an import/dump escape on every intermediate (and
+      letting the balanced spread activate most of them), they re-solve with
+      escapes only where the factory structurally cannot balance -- measured
+      by a Phase-I feasibility solve, or derived from the material cycles and
+      multi-output junctions without extra solves. The result lists far fewer
+      external channels. A guard compares the physical import/dump totals
+      against the all-escape solution and widens the placement (up to
+      restoring it entirely) when a too-sparse set would inflate them.
   Changes:
     - The "balanced" (L2) norm now folds sibling import/dump channels after it
       solves: when the even spread splits one material's imbalance across its

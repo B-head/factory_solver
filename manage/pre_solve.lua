@@ -6,6 +6,7 @@ local substitution = require "solver/substitution"
 local observe_price = require "solver/observe_price"
 local cascade = require "solver/cascade"
 local mode_compress = require "solver/mode_compress"
+local placement = require "solver/placement"
 local vk = require "solver/var_key"
 
 local iterate_limit = 600
@@ -117,6 +118,26 @@ local target_rescue_trigger = 1e-6
 -- values as the reference solver's stage budgets.
 local target_budget_rel, target_budget_abs = 1e-3, 1e-6
 
+-- Sparse elastic placement (solver_norm "batch" / "smart"; see
+-- solver/placement.lua and M.placement_step). Both norms first solve the
+-- all-elastic L2 base (the guard reference), then re-solve the L2 restricted
+-- to a sparse placement -- measured by Phase-I feasibility solves ("batch",
+-- research probe_batch_iis.lua: mean 2.2 Phase-I solves, activation -52%) or
+-- derived statically from the necessity law ("smart",
+-- probe_scc_compress.lua/probe_law_fix.lua: no extra solves, -30%). The guard
+-- compares the restricted solve's PHYSICAL import+dump total against the
+-- base's and widens the placement while the ratio exceeds PLACEMENT_GUARD
+-- (research: a sparse set placed away from the true imbalance amplifies
+-- physically through stoichiometric chains -- up to 430x unguarded; the
+-- guarded corpus runs end with 0 failures at max ratio 1.5). Constants match
+-- the corpus-validated probes.
+local PLACEMENT_GUARD = 1.5 -- accepted physical inflation over the base solve
+local PLACEMENT_ADDK = 6 -- groups added per rank-widening round
+local PLACEMENT_MAX_ROUNDS = 4 -- guard widening rounds before standing / restoring
+local PLACEMENT_MAX_P1 = 12 -- Phase-I iteration backstop (corpus max: 4)
+local placement_art_tol = 1e-3 -- Phase-I "feasible" threshold on the summed artificials
+local placement_support_tol = 1e-4 -- per-row artificial support threshold
+
 -- Proportional row reduction: fold provably surplus-free producer/consumer
 -- doubletons out of the LP before the IPM solves it, then reconstruct the
 -- eliminated variables. The IPM works on the smaller reduced problem; the full
@@ -184,7 +205,7 @@ function M.forwerd_solve(force_data, solution)
         -- linf livelock class).
         if not (solution.tr_restart or solution.op_restart or solution.reclassify_pending
                 or solution.cc_restart or solution.lf_restart or solution.lc_restart
-                or solution.ll_restart) then
+                or solution.ll_restart or solution.pm_restart) then
             solution.target_rescue = nil
         end
         solution.tr_restart = nil
@@ -200,6 +221,9 @@ function M.forwerd_solve(force_data, solution)
         local linf_stage = nil
         -- Whether to apply the L2 cost shaping after construction (norm == "l2").
         local apply_l2 = false
+        -- Whether to shape this build into the sparse-placement Phase-I
+        -- feasibility LP (norm == "batch", placement phase "phase1").
+        local phase1_shape = false
         if norm == "cascade" then
             -- Retained (UI-hidden) staged rescue: un-gated baseline, then the
             -- cascade (M.cascade_step) owns every later build. A fresh "ready"
@@ -215,6 +239,8 @@ function M.forwerd_solve(force_data, solution)
             solution.lc_restart = nil
             solution.l2_lock = nil
             solution.ll_restart = nil
+            solution.placement = nil
+            solution.pm_restart = nil
 
             local cc = solution.cascade
             if cc and cc.build then
@@ -256,6 +282,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.lc_restart = nil
                 solution.l2_lock = nil
                 solution.ll_restart = nil
+                solution.placement = nil
+                solution.pm_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -267,6 +295,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.reclassify_pending = nil
                 solution.linf = nil
                 solution.lf_restart = nil
+                solution.placement = nil
+                solution.pm_restart = nil
                 -- A fresh "ready" (edit / norm switch) drops the in-flight mode
                 -- compression; the compress step's OWN restart (lc_restart)
                 -- keeps it so this rebuild omits the folded channels. lc_restart
@@ -323,6 +353,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.lf_restart = nil
                 solution.l2_compress = nil
                 solution.lc_restart = nil
+                solution.placement = nil
+                solution.pm_restart = nil
                 if not solution.ll_restart then solution.l2_lock = nil end
                 solution.ll_restart = nil
                 options = {
@@ -345,6 +377,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.lc_restart = nil
                 solution.l2_lock = nil
                 solution.ll_restart = nil
+                solution.placement = nil
+                solution.pm_restart = nil
                 options = {
                     reachability_gating = false,
                     deficit_seeding = false,
@@ -365,6 +399,56 @@ function M.forwerd_solve(force_data, solution)
                 if solution.linf and solution.linf.t_limit then
                     options.target_budget = solution.linf.t_limit
                 end
+            elseif norm == "batch" or norm == "smart" then
+                solution.forced_imports = nil
+                solution.reclassify_pending = nil
+                solution.linf = nil
+                solution.lf_restart = nil
+                solution.l2_compress = nil
+                solution.lc_restart = nil
+                solution.l2_lock = nil
+                solution.ll_restart = nil
+                -- A fresh "ready" (edit / norm switch) drops the in-flight
+                -- placement; the step's OWN restart (pm_restart) keeps it so
+                -- the rebuild stays on the same phase. pm_restart also rides
+                -- the target-rescue preserve list above (the linf livelock
+                -- class): every placement build must keep the rescued budget.
+                if not solution.pm_restart then solution.placement = nil end
+                solution.pm_restart = nil
+                -- Sparse placement: the same un-gated baseline as "l2". The
+                -- FIRST build (no placement state yet) is the all-elastic L2
+                -- base -- the guard's physical reference. Later builds carry
+                -- the placement exclusions: the Phase-I feasibility LP
+                -- ("batch" only; shaped below) or the restricted L2.
+                options = {
+                    reachability_gating = false,
+                    deficit_seeding = false,
+                    catalyst_closure = false,
+                    surplus_sink_gating = false,
+                    recipe_epsilon = L2_RECIPE_EPS,
+                }
+                local pm = solution.placement
+                if pm and (pm.phase == "phase1" or pm.phase == "restricted") then
+                    options.hatch_exclude, options.sink_exclude =
+                        placement.excludes(pm.groups, pm.placed)
+                    -- Thread the settled target budget (the linf t_limit move)
+                    -- into every placement build: the Phase-I must measure the
+                    -- material imbalance GIVEN the targets stay met (or the
+                    -- collapse economics relax them and the support names
+                    -- nothing), and the restricted L2 must not trade a target
+                    -- away when the sparse placement makes it expensive. The
+                    -- generic rescue threading below overwrites this with the
+                    -- rescue's own budget when one settled -- the same value
+                    -- pm.t_limit was seeded from.
+                    if pm.t_limit then
+                        options.target_budget = pm.t_limit
+                    end
+                end
+                if pm and pm.phase == "phase1" then
+                    phase1_shape = true
+                else
+                    apply_l2 = true
+                end
             else
                 -- "legacy": the original gated solver -- the hard reachability
                 -- gate plus deficit / catalyst cycle-entry seeding and the
@@ -383,6 +467,8 @@ function M.forwerd_solve(force_data, solution)
                 solution.lc_restart = nil
                 solution.l2_lock = nil
                 solution.ll_restart = nil
+                solution.placement = nil
+                solution.pm_restart = nil
                 options = {
                     reachability_gating = true,
                     deficit_seeding = true,
@@ -450,6 +536,11 @@ function M.forwerd_solve(force_data, solution)
             -- L-infinity stage 2: cap the peak at the locked t_budget and keep
             -- the build's normal L1 costs.
             create_problem.shape_minmax(solution.problem, "capped", solution.linf.t_budget)
+        elseif phase1_shape then
+            -- Sparse-placement Phase-I ("batch"): every cost to 0, a ±
+            -- artificial pair on every row. The art keys are held on the
+            -- placement state so the step can read the support back.
+            solution.placement.arts = placement.shape_phase1(solution.problem)
         end
         -- Mirror the inactive-recipe set onto the solution so save / UI lookups
         -- (which see solution, not problem) can gray out isolated lines without
@@ -493,10 +584,14 @@ function M.forwerd_solve(force_data, solution)
         -- quadratic on the (singleton) violation escapes and shape_minmax adds
         -- cap rows, so the doubleton fold (which folds singleton escapes onto a
         -- recipe) would drop the quad / not match the post-shape structure.
+        -- The Phase-I build is not folded either: the artificial columns sit
+        -- on every row, so no escape is a singleton the doubleton fold could
+        -- take, and the build is a cheap one-shot LP anyway.
         local fold = substitution_enabled
             and not (cc_build and cascade.is_cold(cc_build))
             and linf_stage == nil
             and not apply_l2
+            and not phase1_shape
         if fold then
             local reduced, reconstruction = substitution.reduce(solution.problem)
             solution.problem.reduced = reduced
@@ -582,6 +677,14 @@ function M.forwerd_solve(force_data, solution)
             if norm == "l2" then
                 M.l2_compress_step(solution)
             end
+        end
+    elseif norm == "batch" or norm == "smart" then
+        -- Sparse elastic placement (base -> [Phase-I loop] -> restricted +
+        -- guard). Driven on ANY terminal state: a non-finished stage must
+        -- advance to its widening / restore fallback rather than stall.
+        local st = solution.solver_state
+        if st ~= "ready" and st ~= "calculating" then
+            M.placement_step(solution, norm, get_normalized())
         end
     elseif norm == "legacy" then
         -- Legacy two-pass diagnose-then-reclassify. When the FIRST pass
@@ -869,6 +972,217 @@ function M.l2_compress_step(solution)
     end
     lc.saved = nil
     lc.phase = "done"
+end
+
+---Advance the sparse elastic placement one step after a terminal solve
+---(solver_norm == "batch" / "smart"; see solver/placement.lua for the shared
+---machinery and the research provenance). The target rescue settles first
+---(targets are tier-1); then:
+---  base (all-elastic L2) finished -> index the violation groups, record the
+---    physical totals (the guard reference) and hold the answer aside (the
+---    restore fallback). "smart" derives its static placement here and arms
+---    the restricted re-solve; "batch" arms the Phase-I loop.
+---  "phase1" ("batch" only) finished -> read the artificial support; feasible
+---    (sum ~ 0) arms the restricted re-solve, otherwise open every
+---    support-named group and re-measure. A diverged Phase-I or an empty
+---    support falls back to placing everything (= the plain L2).
+---  "restricted" finished -> compare the physical import+dump total against
+---    the base. Within PLACEMENT_GUARD (or out of widening rounds) the sparse
+---    answer stands; otherwise widen the placement -- "batch" by physical
+---    rank, "smart" structurally (the SCC / junction partners of the inflated
+---    carriers; every SCC member when the solve did not even converge) -- and
+---    re-solve. A restricted solve that cannot be widened back to convergence
+---    restores the held base answer verbatim (no extra solve).
+---Every placement re-solve is COLD (the warm seed is dropped): the stages
+---swap objectives (L2 <-> Phase-I <-> restricted L2), and warm-starting an
+---IPM across an objective swap walks the duality measure the wrong way (the
+---linf lesson; the QP handoff additionally cold-starts on its own).
+---Mutates solution.placement and, when another solve is needed, re-arms
+---solver_state="ready" with pm_restart set so the rebuild keeps the in-flight
+---placement AND the settled target rescue (pm_restart sits in the rebuild's
+---preserve list).
+---@param solution Solution
+---@param norm SolverNorm "batch" | "smart"
+---@param lines NormalizedProductionLine[]
+function M.placement_step(solution, norm, lines)
+    if not solution.problem then return end
+    local pm = solution.placement
+    if pm and pm.phase == "done" then return end
+    local finished = solution.solver_state == "finished" and solution.raw_variables ~= nil
+
+    local function restart()
+        solution.pm_restart = true
+        solution.solver_state = "ready"
+        solution.solver_iteration = nil
+        solution.raw_variables = nil
+    end
+
+    if not pm then
+        -- The base (all-elastic L2, target-rescued) just terminated. If it
+        -- failed, leave the terminal state for the UI -- there is no
+        -- reference to place against.
+        if not finished then
+            solution.placement = { phase = "done" }
+            return
+        end
+        local groups = placement.violation_groups(solution.problem)
+        if next(groups) == nil then
+            -- No violation escapes at all (no intermediates): the base answer
+            -- IS the sparse answer.
+            solution.placement = { phase = "done" }
+            return
+        end
+        local stats = placement.violation_stats(solution.problem, solution.raw_variables.x)
+        -- The target budget every placement build carries (the linf t_limit
+        -- move): the rescue's settled budget when one fired, else the base
+        -- solve's own achieved relaxation plus the IPM margin -- so neither
+        -- the Phase-I measurement nor a sparse re-solve can trade a target
+        -- away past what the all-elastic base held.
+        local t_limit = solution.target_rescue and solution.target_rescue.budget
+        if not t_limit then
+            local t0 = observe_price.target_relax(solution.problem.primals, solution.raw_variables.x)
+            t_limit = t0 * (1 + target_budget_rel) + target_budget_abs
+        end
+        pm = {
+            groups = groups,
+            base_imp = stats.imp,
+            base_dmp = stats.dmp,
+            gp = stats.gp,
+            t_limit = t_limit,
+            placed = {},
+            rounds = 0,
+            p1iters = 0,
+            -- Hold the finished base so an unrecoverable restricted solve
+            -- restores it without solving again (the l2_compress pattern).
+            saved = {
+                problem = solution.problem,
+                raw_variables = solution.raw_variables,
+                machines = solution.quantity_of_machines_required,
+            },
+        }
+        solution.placement = pm
+        if norm == "smart" then
+            pm.placed, pm.units, pm.junctions =
+                placement.law_placement(solution.problem, lines, stats.gp)
+            pm.phase = "restricted"
+        else
+            pm.phase = "phase1"
+        end
+        restart()
+        return
+    end
+
+    if pm.phase == "phase1" then
+        local widened_all = false
+        if finished and pm.arts then
+            -- Termination reads only the artificials that map onto a violation
+            -- group: residual art on an unmapped row (a fluid window etc.) is
+            -- imbalance no escape placement could absorb anyway, and holding
+            -- the loop open on it would spin to the place-all fallback.
+            local _, support =
+                placement.phase1_support(pm.arts, solution.raw_variables.x, placement_support_tol)
+            local mat2base = placement.invert_groups(pm.groups)
+            local mapped_total = 0
+            for _, s in ipairs(support) do
+                if mat2base[s.row] then mapped_total = mapped_total + s.art end
+            end
+            if mapped_total <= placement_art_tol then
+                pm.arts = nil
+                pm.phase = "restricted"
+                restart()
+                return
+            end
+            local added = 0
+            for _, s in ipairs(support) do
+                local base = mat2base[s.row]
+                if base and not pm.placed[base] then
+                    pm.placed[base] = true
+                    added = added + 1
+                end
+            end
+            pm.p1iters = pm.p1iters + 1
+            widened_all = added == 0 or pm.p1iters >= PLACEMENT_MAX_P1
+        else
+            -- The Phase-I LP itself diverged (feasible by construction, so
+            -- this is IPM trouble; corpus: 1/1677).
+            widened_all = true
+        end
+        if widened_all then
+            -- No progress to be had: place everything, degenerating the
+            -- restricted solve to the plain L2 the base already reached.
+            for base in pairs(pm.groups) do pm.placed[base] = true end
+            pm.arts = nil
+            pm.phase = "restricted"
+        end
+        restart()
+        return
+    end
+
+    -- phase == "restricted": the sparse re-solve reached a terminal state.
+    if finished then
+        local stats = placement.violation_stats(solution.problem, solution.raw_variables.x)
+        local base_total = pm.base_imp + pm.base_dmp
+        local ratio = base_total > 1e-9 and (stats.imp + stats.dmp) / base_total or 1
+        if ratio <= PLACEMENT_GUARD or pm.rounds >= PLACEMENT_MAX_ROUNDS then
+            -- The sparse answer stands. Out-of-rounds over the guard stands
+            -- too: it converged, and restoring the base would silently hide
+            -- the placement the user asked to see.
+            pm.saved = nil
+            pm.phase = "done"
+            return
+        end
+        local added
+        if norm == "smart" then
+            added = placement.widen_structural(
+                pm.units, pm.junctions, pm.gp, stats.gp, pm.placed)
+            if added == 0 then
+                added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
+            end
+        else
+            added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
+        end
+        if added == 0 then
+            pm.saved = nil
+            pm.phase = "done"
+            return
+        end
+        pm.rounds = pm.rounds + 1
+        restart()
+        return
+    end
+
+    -- The restricted solve did NOT converge (a too-sparse placement can be
+    -- numerically hostile, or -- "smart" only, 4/1474 on the corpus --
+    -- statically infeasible). Widen and retry while rounds remain.
+    if pm.rounds < PLACEMENT_MAX_ROUNDS then
+        local added
+        if norm == "smart" then
+            added = placement.widen_all_units(pm.units, pm.placed)
+            if added == 0 then
+                added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
+            end
+        else
+            added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
+        end
+        if added > 0 then
+            pm.rounds = pm.rounds + 1
+            restart()
+            return
+        end
+    end
+    -- Out of rounds (or nothing left to widen) without a converged restricted
+    -- solve: restore the held base answer verbatim.
+    local saved = pm.saved
+    if saved then
+        solution.problem = saved.problem
+        solution.raw_variables = saved.raw_variables
+        solution.quantity_of_machines_required = saved.machines
+        solution.inactive_recipe_variables = saved.problem.inactive_recipe_variables
+        solution.solver_state = "finished"
+        solution.solver_iteration = nil
+    end
+    pm.saved = nil
+    pm.phase = "done"
 end
 
 ---Advance the cascade staged rescue one step after a terminal solve. On the

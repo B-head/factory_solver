@@ -48,6 +48,12 @@ local LINF_CAP_BUDGET = "|linf_cap_budget|"
 -- pre_solve M.l2_lock_step): one upper-bound dual per violation GROUP, capping
 -- the group's physical violation at the stage-1 (measurement) optimum.
 local L2_LOCK = "|l2_lock|"
+-- Sparse-placement Phase-I artificials (see solver/placement.lua
+-- M.shape_phase1 / pre_solve M.placement_step): a ± pair per dual row, so the
+-- feasibility LP is solvable by construction and its optimum names the rows no
+-- placed escape can close.
+local PHASE1_ART_POS = "|phase1_art+|"
+local PHASE1_ART_NEG = "|phase1_art-|"
 -- A bare |elastic| sits on a |limit| dual, so the composite a constraint
 -- relaxation carries is |elastic||limit|<material>.
 local ELASTIC_LIMIT = ELASTIC .. LIMIT
@@ -152,6 +158,16 @@ function M.linf_cap_budget() return LINF_CAP_BUDGET end
 ---@param group string the violation group key the cap is over
 ---@return string
 function M.l2_lock(group) return L2_LOCK .. group end
+
+---The Phase-I artificial on one dual row (the sparse-placement feasibility
+---measurement). `sign` picks the + / - member of the pair; keyed by the row so
+---the pairs stay distinct.
+---@param row string the dual row the artificial relaxes
+---@param sign 1|-1
+---@return string
+function M.phase1_art(row, sign)
+    return (sign > 0 and PHASE1_ART_POS or PHASE1_ART_NEG) .. row
+end
 
 ---@param dual_variable string
 ---@return string
