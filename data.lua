@@ -536,7 +536,7 @@ styles.factory_solver_beacons_table = {
 
 styles.factory_solver_beacon_quantity_textfield = {
     type = "textbox_style",
-    width = 60,
+    width = 80,
 }
 
 styles.factory_solver_effectivity_slot_background_frame = {

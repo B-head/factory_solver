@@ -530,15 +530,21 @@ function handlers.on_make_beacons_table(event)
         local beacon_typed_name = affected_by_beacon.beacon_typed_name
         local beacon = beacon_typed_name and acc.get_beacon(beacon_typed_name.name)
 
+        -- Visual separator between beacons (replaces the old outer table's
+        -- draw_horizontal_lines now that each beacon is its own vertical block).
+        if beacon_index > 1 then
+            fs_util.add_gui(elem, { type = "line" })
+        end
+
+        local beacon_button_def
         do
             local display_typed_name = beacon_typed_name
             if beacon_typed_name and not beacon then
                 display_typed_name = tn.create_typed_name("machine", "entity-unknown",
                     beacon_typed_name.quality)
             end
-            local def
             if display_typed_name then
-                def = decorated_slot {
+                beacon_button_def = decorated_slot {
                     typed_name = display_typed_name,
                     tags = {
                         beacon_index = beacon_index,
@@ -547,9 +553,9 @@ function handlers.on_make_beacons_table(event)
                         [defines.events.on_gui_click] = handlers.on_open_beacon_picker,
                     },
                 }
-                common.append_tooltip_line(def, common.op_hints.beacon_slot())
+                common.append_tooltip_line(beacon_button_def, common.op_hints.beacon_slot())
             else
-                def = {
+                beacon_button_def = {
                     type = "sprite-button",
                     style = "flib_slot_button_default",
                     tooltip = common.op_hints.beacon_slot_empty(),
@@ -561,34 +567,58 @@ function handlers.on_make_beacons_table(event)
                     },
                 }
             end
-            fs_util.add_gui(elem, def)
         end
 
-        do
-            local def = {
-                type = "textfield",
-                style = "factory_solver_beacon_quantity_textfield",
-                numeric = true,
-                allow_decimal = false,
-                clear_and_focus_on_right_click = true,
-                text = tostring(affected_by_beacon.beacon_quantity),
-                tags = {
-                    beacon_index = beacon_index,
-                },
-                handler = {
-                    [defines.events.on_gui_text_changed] = handlers.on_beacon_quantity_confirmed,
-                }
-            }
-            fs_util.add_gui(elem, def)
-        end
-
-        do
-            -- Module slots live in their own flow with a dedicated rebuild
-            -- handler so module picks update without rebuilding the whole
-            -- beacons table (which would reset in-progress quantity edits).
-            local def = {
+        -- Per-beacon block: top row (icon + qty + remove) and the wrapping
+        -- module slots below. Modules live in their own container with a
+        -- dedicated rebuild handler so module picks update without rebuilding
+        -- the whole beacons list (which would reset in-progress quantity edits).
+        fs_util.add_gui(elem, {
+            type = "flow",
+            direction = "vertical",
+            style_mods = { vertical_spacing = 0 },
+            {
                 type = "flow",
                 direction = "horizontal",
+                style_mods = { vertical_align = "center" },
+                beacon_button_def,
+                {
+                    type = "textfield",
+                    style = "factory_solver_beacon_quantity_textfield",
+                    numeric = true,
+                    allow_decimal = false,
+                    clear_and_focus_on_right_click = true,
+                    text = tostring(affected_by_beacon.beacon_quantity),
+                    tags = {
+                        beacon_index = beacon_index,
+                    },
+                    handler = {
+                        [defines.events.on_gui_text_changed] = handlers.on_beacon_quantity_confirmed,
+                    },
+                },
+                {
+                    type = "empty-widget",
+                    style = "flib_horizontal_pusher",
+                },
+                {
+                    type = "sprite-button",
+                    style = "mini_tool_button_red",
+                    sprite = "utility/close",
+                    hovered_sprite = "utility/close_black",
+                    clicked_sprite = "utility/close_black",
+                    tooltip = { "factory-solver-remove-beacon" },
+                    tags = {
+                        beacon_index = beacon_index,
+                    },
+                    handler = {
+                        [defines.events.on_gui_click] = handlers.on_remove_beacon_click,
+                    },
+                },
+            },
+            {
+                type = "table",
+                style = "filter_slot_table",
+                column_count = 6,
                 tags = {
                     beacon_index = beacon_index,
                 },
@@ -596,27 +626,8 @@ function handlers.on_make_beacons_table(event)
                     on_added = handlers.on_make_beacon_modules,
                     on_module_changed = handlers.on_make_beacon_modules,
                 },
-            }
-            fs_util.add_gui(elem, def)
-        end
-
-        do
-            local def = {
-                type = "sprite-button",
-                style = "mini_tool_button_red",
-                sprite = "utility/close",
-                hovered_sprite = "utility/close_black",
-                clicked_sprite = "utility/close_black",
-                tooltip = { "factory-solver-remove-beacon" },
-                tags = {
-                    beacon_index = beacon_index,
-                },
-                handler = {
-                    [defines.events.on_gui_click] = handlers.on_remove_beacon_click
-                },
-            }
-            fs_util.add_gui(elem, def)
-        end
+            },
+        })
     end
 end
 
@@ -1096,8 +1107,9 @@ return {
                         caption = { "factory-solver-modules" },
                     },
                     {
-                        type = "flow",
-                        direction = "horizontal",
+                        type = "table",
+                        style = "filter_slot_table",
+                        column_count = 6,
                         handler = {
                             on_machine_setup_changed = handlers.on_make_machine_modules,
                             on_module_changed = handlers.on_make_machine_modules,
@@ -1117,10 +1129,8 @@ return {
                         caption = { "factory-solver-beacons" },
                     },
                     {
-                        type = "table",
-                        style = "factory_solver_beacons_table",
-                        column_count = 4,
-                        draw_horizontal_lines = true,
+                        type = "flow",
+                        direction = "vertical",
                         handler = {
                             on_added = handlers.on_make_beacons_table,
                             on_beacon_changed = handlers.on_make_beacons_table,
@@ -1129,6 +1139,7 @@ return {
                     {
                         type = "button",
                         caption = { "factory-solver-add-beacon" },
+                        style_mods = { top_margin = 4 },
                         handler = {
                             [defines.events.on_gui_click] = handlers.on_add_beacon_click,
                         },
