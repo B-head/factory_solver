@@ -122,20 +122,24 @@ table.insert(cases, {
         harness.assert_eq(pm and pm.phase, "done", "placement settled")
         assert(solution.raw_variables, "expected packed variables")
         local x = solution.raw_variables.x
-        -- The target is met through the cycle (not bought through an escape).
-        harness.assert_near(x["recipe/make_P/normal"] or 0, 1, 1e-2, "make_P carries the target")
-        -- The placement is sparse: fewer groups survive in the final build
-        -- than the 5 intermediates the base carried, and everything the
-        -- Phase-I placed is a real escape (cell-side makeup / W dump).
-        local placed = count_placed(pm)
-        harness.assert_true(placed >= 1 and placed <= 3,
-            "phase-I placed a sparse set, got " .. placed)
-        harness.assert_eq(violation_group_count(solution.problem), placed,
-            "the final build carries exactly the placed groups")
-        -- base (1) + >=1 Phase-I + restricted (1); the guard usually passes
-        -- on the first restricted solve.
-        harness.assert_true(rebuilds >= 3 and rebuilds <= 9,
-            "base + phase-I loop + restricted, got " .. rebuilds .. " rebuilds")
+        -- The target is met through the cycle. The exact rate inherits the
+        -- BASE solve's activity via the floors (the base L2 spread runs regen
+        -- slightly hot, so the hard spent row pulls make_P up to it) -- at
+        -- least the target, not above the floored equilibrium.
+        harness.assert_true((x["recipe/make_P/normal"] or 0) >= 1 - 1e-3
+            and (x["recipe/make_P/normal"] or 0) <= 1.1,
+            "make_P carries the target, got " .. tostring(x["recipe/make_P/normal"]))
+        -- The DEFINITION: only feasibility-relevant escapes remain. The
+        -- mass-losing cycle needs exactly one makeup channel; the prune must
+        -- leave exactly it (cell -- the largest-flow member survives).
+        harness.assert_eq(count_placed(pm), 1, "exactly the cycle's makeup escape")
+        harness.assert_true((pm.placed or {})["item/cell/normal"] == true,
+            "the cell makeup channel is the survivor")
+        harness.assert_eq(violation_group_count(solution.problem), 1,
+            "the final build carries exactly the placed group")
+        -- base (1) + Phase-I opens (2) + prune (1) + restricted (1).
+        harness.assert_true(rebuilds >= 4 and rebuilds <= 9,
+            "base + phase-I loop + prune + restricted, got " .. rebuilds .. " rebuilds")
     end,
 })
 
@@ -179,10 +183,138 @@ table.insert(cases, {
         -- restricted solve would collapse to all-zero.
         harness.assert_near(x["recipe/r_t/normal"] or 0, 1, 1e-2,
             "target recipe runs at the requested rate in the sparse answer")
-        harness.assert_true((solution.placement.placed or {})["item/J/normal"] == true,
-            "the forced-surplus dump J is placed")
+        -- Exactly ONE escape survives: the forced surplus exits either as a
+        -- J dump or -- washed through r_x, a substitutable minimal choice the
+        -- max-artificial opening may equally pick -- as a Jin dump. WHICH one
+        -- is the open selection problem (import-vs-fabricate), not the
+        -- definition; the definition only forbids irrelevant escapes.
+        local pm = solution.placement
+        harness.assert_eq(count_placed(pm), 1, "exactly one escape survives")
+        harness.assert_true((pm.placed or {})["item/J/normal"] == true
+            or (pm.placed or {})["item/Jin/normal"] == true,
+            "the survivor carries the forced surplus (J or its washed Jin form)")
     end,
 })
+
+-- The side-chain fixture (the over-reduction regression, 2026-07-10): s2
+-- converts the byproduct G into H mass-neutrally, so the base L2 runs it at
+-- the half-half spread -- but nothing FORCES it in a sparse build (shutting
+-- it down balances G's and H's escape-less rows at 0 = 0, and the L1
+-- Phase-I is indifferent between the splits). Without the recipe floors the
+-- sparse re-solve kills every line the target does not need (observed
+-- in-game: most of a pyanodon factory at 0.000); with them the sparse
+-- answer must keep the user's factory at least as active as the base.
+local sidechain_lines = {
+    line("mk_T", { it("T", 1), it("G", 2) }, {}),
+    line("eat_T", { it("W", 1) }, { it("T", 1) }),
+    line("s2", { it("H", 1) }, { it("G", 1) }),
+}
+local sidechain_constraints = {
+    { type = "item", name = "T", quality = "normal",
+        limit_type = "lower", limit_amount_per_second = 1 },
+}
+
+table.insert(cases, {
+    name = "batch pump: the placement is scale-invariant",
+    run = function()
+        -- The same factory at a 1000x larger target must choose the SAME
+        -- escapes: the Phase-I decision thresholds follow the base solve's
+        -- violation scale (absolute cutoffs made a 30x smaller target flip
+        -- the placement -- the in-game "changing the scale is unstable").
+        local function placed_set(mult)
+            local constraints = {
+                { type = "item", name = "P", quality = "normal",
+                    limit_type = "lower", limit_amount_per_second = mult },
+            }
+            local solution = drive("batch", cycle_lines, constraints)
+            harness.assert_eq(solution.solver_state, "finished", "solver_state at x" .. mult)
+            local t = {}
+            for b in pairs(solution.placement.placed or {}) do t[#t + 1] = b end
+            table.sort(t)
+            return table.concat(t, ",")
+        end
+        harness.assert_eq(placed_set(1), placed_set(1000), "same placement at 1x and 1000x")
+    end,
+})
+
+table.insert(cases, {
+    name = "batch pump: definition-pure -- the pruned set stands over the smart guard threshold",
+    run = function()
+        -- The rigid fork (fixture (c)): mk co-produces X and Y 1:1, the only
+        -- consumer eats them 1:3. The base L2 spreads (eatXY ~0.4: dump some
+        -- X, import some Y, total ~0.8); under the floors the Phase-I opens
+        -- X then Y, and the prune discovers X's opening became redundant
+        -- (with Y open, eatXY can run at 1 and eat ALL of X) -- the pin for
+        -- "an early opening is dropped once a later one covers it". The
+        -- surviving {Y} placement concentrates: Y imports ~2, ~2.5x the
+        -- base's physical total -- and "batch" must STAND on it (no guard
+        -- widening may re-add feasibility-irrelevant escapes; the ratio is
+        -- recorded as information only).
+        local amp_lines = {
+            line("mk", { it("T", 1), it("X", 1), it("Y", 1) }, {}),
+            line("eatXY", { it("W", 1) }, { it("X", 1), it("Y", 3) }),
+        }
+        local amp_constraints = {
+            { type = "item", name = "T", quality = "normal",
+                limit_type = "lower", limit_amount_per_second = 1 },
+        }
+        local solution = drive("batch", amp_lines, amp_constraints)
+        harness.assert_eq(solution.solver_state, "finished", "solver_state")
+        local pm = solution.placement
+        harness.assert_eq(pm and pm.phase, "done", "placement settled")
+        harness.assert_eq(count_placed(pm), 1, "exactly one escape survives the prune")
+        harness.assert_true((pm.placed or {})["item/Y/normal"] == true,
+            "the fork's binding branch Y is the survivor")
+        harness.assert_true((pm.rounds or 0) == 0, "batch never runs a guard round")
+        harness.assert_true((pm.ratio or 0) >= 2 and (pm.ratio or 0) <= 3,
+            "the concentrated ratio is recorded as information, got " .. tostring(pm.ratio))
+        assert(solution.raw_variables, "expected packed variables")
+        local x = solution.raw_variables.x
+        harness.assert_near(x["recipe/eatXY/normal"] or 0, 1, 1e-2,
+            "the hard X row pins the consumer to the co-production")
+    end,
+})
+
+table.insert(cases, {
+    name = "batch pump: no escape is placed when free terminals absorb everything",
+    run = function()
+        -- H and W are terminal products with free final sinks, so the
+        -- byproduct G washes through s2 into H's free outflow and the
+        -- all-closed Phase-I is feasible outright: by the DEFINITION (an
+        -- escape exists only where its absence makes the problem infeasible)
+        -- the placement must be EMPTY -- the hard G row simply forces s2 to
+        -- carry all of it.
+        local solution = drive("batch", sidechain_lines, sidechain_constraints)
+        harness.assert_eq(solution.solver_state, "finished", "solver_state")
+        local pm = solution.placement
+        harness.assert_eq(pm and pm.phase, "done", "placement settled")
+        harness.assert_eq(count_placed(pm), 0, "no feasibility-relevant escape exists")
+        assert(solution.raw_variables, "expected packed variables")
+        local x = solution.raw_variables.x
+        harness.assert_true((x["recipe/s2/normal"] or 0) >= 1.9,
+            "s2 carries ALL of G into H's free sink, got " .. tostring(x["recipe/s2/normal"]))
+    end,
+})
+
+for _, norm in ipairs({ "batch", "smart" }) do
+    table.insert(cases, {
+        name = norm .. " pump: the recipe floors keep the target-independent side chain alive",
+        run = function()
+            local solution = drive(norm, sidechain_lines, sidechain_constraints)
+            harness.assert_eq(solution.solver_state, "finished", "solver_state")
+            harness.assert_eq(solution.placement and solution.placement.phase, "done",
+                "placement settled")
+            assert(solution.raw_variables, "expected packed variables")
+            local x = solution.raw_variables.x
+            harness.assert_near(x["recipe/mk_T/normal"] or 0, 1, 1e-2, "mk_T carries the target")
+            -- The base spread runs s2 at ~1 (half of G washes into H); the
+            -- sparse answer must not shut it down.
+            harness.assert_true((x["recipe/s2/normal"] or 0) >= 0.9,
+                "the side chain stays at its base activity, got "
+                .. tostring(x["recipe/s2/normal"]))
+        end,
+    })
+end
 
 table.insert(cases, {
     name = "smart pump on the rescue-firing problem: SCC representative covers the forced dump",

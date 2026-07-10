@@ -131,12 +131,35 @@ local target_budget_rel, target_budget_abs = 1e-3, 1e-6
 -- physically through stoichiometric chains -- up to 430x unguarded; the
 -- guarded corpus runs end with 0 failures at max ratio 1.5). Constants match
 -- the corpus-validated probes.
-local PLACEMENT_GUARD = 1.5 -- accepted physical inflation over the base solve
-local PLACEMENT_ADDK = 6 -- groups added per rank-widening round
-local PLACEMENT_MAX_ROUNDS = 4 -- guard widening rounds before standing / restoring
-local PLACEMENT_MAX_P1 = 12 -- Phase-I iteration backstop (corpus max: 4)
-local placement_art_tol = 1e-3 -- Phase-I "feasible" threshold on the summed artificials
-local placement_support_tol = 1e-4 -- per-row artificial support threshold
+local PLACEMENT_GUARD = 1.5 -- "smart" only: accepted physical inflation over the base solve
+local PLACEMENT_ADDK = 6 -- "smart" only: groups added per rank-widening round
+local PLACEMENT_MAX_ROUNDS = 4 -- "smart" only: guard widening rounds before standing / restoring
+local PLACEMENT_MAX_P1 = 24 -- Phase-I opening backstop (one group per iteration)
+-- Recipe activity floor as a fraction of the base solve's rate (the shipped
+-- analog of the research forcerec; solver/placement.lua M.apply_rate_floors).
+-- 1.0 = the sparse re-solve keeps every line at least as active as the
+-- all-elastic base, so escapes consolidate only through RUNNING MORE (washing
+-- a dump through a consumer chain), never by shutting factory parts down.
+local PLACEMENT_RATE_FLOOR = 1.0
+-- Phase-I decision thresholds, RELATIVE to the base solve's physical
+-- violation total (with an absolute floor for the violation-free case): the
+-- placement decisions must scale with the problem, or the same factory at a
+-- 30x smaller target crosses the absolute cutoffs and gets a qualitatively
+-- different placement (user report: "changing the scale is unstable").
+local PLACEMENT_ART_TOL_REL = 1e-4 -- "feasible" threshold on the summed artificials
+local PLACEMENT_SUPPORT_TOL_REL = 1e-5 -- per-row artificial support threshold
+local placement_art_tol_abs = 1e-6
+local placement_support_tol_abs = 1e-7
+
+---The scale-following Phase-I thresholds for one placement state.
+---@param pm PlacementState
+---@return number art_tol
+---@return number support_tol
+local function placement_tolerances(pm)
+    local S = (pm.base_imp or 0) + (pm.base_dmp or 0)
+    return math.max(PLACEMENT_ART_TOL_REL * S, placement_art_tol_abs),
+        math.max(PLACEMENT_SUPPORT_TOL_REL * S, placement_support_tol_abs)
+end
 
 -- Proportional row reduction: fold provably surplus-free producer/consumer
 -- doubletons out of the LP before the IPM solves it, then reconstruct the
@@ -428,9 +451,22 @@ function M.forwerd_solve(force_data, solution)
                     recipe_epsilon = L2_RECIPE_EPS,
                 }
                 local pm = solution.placement
-                if pm and (pm.phase == "phase1" or pm.phase == "restricted") then
-                    options.hatch_exclude, options.sink_exclude =
-                        placement.excludes(pm.groups, pm.placed)
+                if pm and (pm.phase == "phase1" or pm.phase == "prune"
+                        or pm.phase == "restricted") then
+                    if pm.phase == "prune" then
+                        -- Irreducibility probe: the placement minus the probed
+                        -- group -- still feasible means the opening was
+                        -- redundant and gets dropped.
+                        local trial = {}
+                        for base in pairs(pm.placed) do trial[base] = true end
+                        local probed = pm.prune_list[pm.prune_index]
+                        if probed then trial[probed] = nil end
+                        options.hatch_exclude, options.sink_exclude =
+                            placement.excludes(pm.groups, trial)
+                    else
+                        options.hatch_exclude, options.sink_exclude =
+                            placement.excludes(pm.groups, pm.placed)
+                    end
                     -- Thread the settled target budget (the linf t_limit move)
                     -- into every placement build: the Phase-I must measure the
                     -- material imbalance GIVEN the targets stay met (or the
@@ -444,7 +480,7 @@ function M.forwerd_solve(force_data, solution)
                         options.target_budget = pm.t_limit
                     end
                 end
-                if pm and pm.phase == "phase1" then
+                if pm and (pm.phase == "phase1" or pm.phase == "prune") then
                     phase1_shape = true
                 else
                     apply_l2 = true
@@ -542,6 +578,20 @@ function M.forwerd_solve(force_data, solution)
             -- placement state so the step can read the support back.
             solution.placement.arts = placement.shape_phase1(solution.problem)
         end
+        -- Sparse-placement recipe floors, on BOTH placement builds (after
+        -- shape_phase1, so the floor rows carry no artificials): without
+        -- them the sparse system "balances" every subgraph the target does
+        -- not need by shutting it down (a row with no escape balances at
+        -- 0 = 0), the Phase-I support names nothing there, and the user's
+        -- factory dies outside the target chain.
+        do
+            local pm = solution.placement
+            if (norm == "batch" or norm == "smart") and pm and pm.rates
+                and (pm.phase == "phase1" or pm.phase == "prune"
+                    or pm.phase == "restricted") then
+                placement.apply_rate_floors(solution.problem, pm.rates, PLACEMENT_RATE_FLOOR)
+            end
+        end
         -- Mirror the inactive-recipe set onto the solution so save / UI lookups
         -- (which see solution, not problem) can gray out isolated lines without
         -- reaching through solution.problem (which is nil after migrations).
@@ -618,13 +668,25 @@ function M.forwerd_solve(force_data, solution)
     -- eliminated x via x_elim = k * x_rep) so filter_result / diagnose / report
     -- below all see the complete variable set.
     local solve_problem = problem.reduced or problem
+    -- The sparse-placement builds (Phase-I / prune / restricted) get triple
+    -- headroom: all-zero costs plus the concentration's huge-against-dust
+    -- value spread leave them ill-conditioned, and several sat right at the
+    -- default limit (converging or not run to run). The limit only bounds
+    -- the worst case -- a converging solve still stops at convergence.
+    local limit = iterate_limit
+    do
+        local pm = solution.placement
+        if pm and pm.phase ~= nil and pm.phase ~= "done" then
+            limit = iterate_limit * 3
+        end
+    end
     local state, iteration, raw = linear_programming.solve(
         solve_problem,
         solution.solver_state,
         solution.solver_iteration,
         solution.raw_variables,
         acc.tolerance,
-        iterate_limit
+        limit
     )
     solution.solver_state = state
     solution.solver_iteration = iteration
@@ -679,9 +741,10 @@ function M.forwerd_solve(force_data, solution)
             end
         end
     elseif norm == "batch" or norm == "smart" then
-        -- Sparse elastic placement (base -> [Phase-I loop] -> restricted +
-        -- guard). Driven on ANY terminal state: a non-finished stage must
-        -- advance to its widening / restore fallback rather than stall.
+        -- Sparse elastic placement (base -> [Phase-I loop + prune] ->
+        -- restricted + guard). Driven on ANY terminal state: a non-finished
+        -- stage must advance to its widening / restore fallback rather than
+        -- stall.
         local st = solution.solver_state
         if st ~= "ready" and st ~= "calculating" then
             M.placement_step(solution, norm, get_normalized())
@@ -983,16 +1046,22 @@ end
 ---    restore fallback). "smart" derives its static placement here and arms
 ---    the restricted re-solve; "batch" arms the Phase-I loop.
 ---  "phase1" ("batch" only) finished -> read the artificial support; feasible
----    (sum ~ 0) arms the restricted re-solve, otherwise open every
----    support-named group and re-measure. A diverged Phase-I or an empty
----    support falls back to placing everything (= the plain L2).
----  "restricted" finished -> compare the physical import+dump total against
----    the base. Within PLACEMENT_GUARD (or out of widening rounds) the sparse
----    answer stands; otherwise widen the placement -- "batch" by physical
----    rank, "smart" structurally (the SCC / junction partners of the inflated
----    carriers; every SCC member when the solve did not even converge) -- and
----    re-solve. A restricted solve that cannot be widened back to convergence
----    restores the held base answer verbatim (no extra solve).
+---    (sum ~ 0) arms the irreducibility prune, otherwise open the single
+---    largest-artificial group and re-measure. A diverged Phase-I or an
+---    empty support falls back to placing everything (= the plain L2).
+---  "prune" ("batch" only) -> re-close each opening solo and drop the ones
+---    the feasibility does not need; the surviving set is irreducible.
+---  "restricted" finished -> "batch" STANDS unconditionally (the placement
+---    is definition-exact -- every escape provably necessary -- so a
+---    physical guard that re-adds escapes to tame the totals would
+---    contradict it; the ratio is recorded on pm.ratio as information).
+---    "smart" (a heuristic with no necessity proof) keeps the physical
+---    guard: over PLACEMENT_GUARD it widens structurally (the SCC /
+---    junction partners of the inflated carriers; every SCC member when
+---    the solve did not even converge) and re-solves. A smart placement
+---    that cannot be widened back to convergence -- or a batch restricted
+---    solve that fails numerically -- restores the held base answer
+---    verbatim (no extra solve).
 ---Every placement re-solve is COLD (the warm seed is dropped): the stages
 ---swap objectives (L2 <-> Phase-I <-> restricted L2), and warm-starting an
 ---IPM across an objective swap walks the duality measure the wrong way (the
@@ -1049,6 +1118,7 @@ function M.placement_step(solution, norm, lines)
             base_dmp = stats.dmp,
             gp = stats.gp,
             t_limit = t_limit,
+            rates = placement.recipe_rates(solution.problem, solution.raw_variables.x),
             placed = {},
             rounds = 0,
             p1iters = 0,
@@ -1073,6 +1143,7 @@ function M.placement_step(solution, norm, lines)
     end
 
     if pm.phase == "phase1" then
+        local art_tol, support_tol = placement_tolerances(pm)
         local widened_all = false
         if finished and pm.arts then
             -- Termination reads only the artificials that map onto a violation
@@ -1080,24 +1151,48 @@ function M.placement_step(solution, norm, lines)
             -- imbalance no escape placement could absorb anyway, and holding
             -- the loop open on it would spin to the place-all fallback.
             local _, support =
-                placement.phase1_support(pm.arts, solution.raw_variables.x, placement_support_tol)
+                placement.phase1_support(pm.arts, solution.raw_variables.x, support_tol)
             local mat2base = placement.invert_groups(pm.groups)
             local mapped_total = 0
             for _, s in ipairs(support) do
                 if mat2base[s.row] then mapped_total = mapped_total + s.art end
             end
-            if mapped_total <= placement_art_tol then
+            if mapped_total <= art_tol then
+                -- Feasible. Prune before standing: the greedy openings are an
+                -- upper bound (an early opening can be made redundant by a
+                -- later one -- the research IIS irreducibility pass), and the
+                -- placement must carry no escape the feasibility does not
+                -- need.
                 pm.arts = nil
-                pm.phase = "restricted"
+                local list = {}
+                for base in pairs(pm.placed) do list[#list + 1] = base end
+                -- Prune the physically smallest openings first, so where a
+                -- substitutable pair leaves a choice the larger carrier
+                -- survives.
+                table.sort(list, function(a, b)
+                    local pa, pb = pm.gp[a] or 0, pm.gp[b] or 0
+                    if pa ~= pb then return pa < pb end
+                    return a < b
+                end)
+                pm.prune_list = list
+                pm.prune_index = 1
+                pm.phase = (#list > 0) and "prune" or "restricted"
                 restart()
                 return
             end
+            -- Open ONLY the largest-artificial unopened group. Opening the
+            -- whole support at once shipped first and over-opened badly: the
+            -- Phase-I L1 objective is degenerate along serial chains (the
+            -- imbalance can exit at any link), so the IPM's analytic-centre
+            -- support names every link of the chain -- 10 opened vs 2 needed
+            -- on the Nuc Sample report.
             local added = 0
             for _, s in ipairs(support) do
                 local base = mat2base[s.row]
                 if base and not pm.placed[base] then
                     pm.placed[base] = true
-                    added = added + 1
+                    added = 1
+                    break
                 end
             end
             pm.p1iters = pm.p1iters + 1
@@ -1118,11 +1213,56 @@ function M.placement_step(solution, norm, lines)
         return
     end
 
+    if pm.phase == "prune" then
+        -- One irreducibility probe just terminated: the build had the probed
+        -- group re-closed (the rest of the placement open). Still feasible ->
+        -- the opening was redundant, drop it permanently; infeasible (or the
+        -- probe did not converge -- conservative) -> keep it.
+        local b = pm.prune_list[pm.prune_index]
+        if b and finished and pm.arts then
+            local art_tol, support_tol = placement_tolerances(pm)
+            local _, support =
+                placement.phase1_support(pm.arts, solution.raw_variables.x, support_tol)
+            local mat2base = placement.invert_groups(pm.groups)
+            local mapped_total = 0
+            for _, s in ipairs(support) do
+                if mat2base[s.row] then mapped_total = mapped_total + s.art end
+            end
+            if mapped_total <= art_tol then
+                pm.placed[b] = nil
+            end
+        end
+        pm.arts = nil
+        pm.prune_index = pm.prune_index + 1
+        if not pm.prune_list[pm.prune_index] then
+            pm.prune_list = nil
+            pm.prune_index = nil
+            pm.phase = "restricted"
+        end
+        restart()
+        return
+    end
+
     -- phase == "restricted": the sparse re-solve reached a terminal state.
     if finished then
         local stats = placement.violation_stats(solution.problem, solution.raw_variables.x)
         local base_total = pm.base_imp + pm.base_dmp
         local ratio = base_total > 1e-9 and (stats.imp + stats.dmp) / base_total or 1
+        -- Kept as information (a future UI hint): how far the sparse
+        -- answer's physical import+dump total sits from the all-elastic base.
+        pm.ratio = ratio
+        if norm == "batch" then
+            -- Definition-pure: every escape in the placement is provably
+            -- necessary (the prune), so nothing may be added back -- a
+            -- physical guard that re-opens feasibility-irrelevant escapes
+            -- to tame the totals contradicts the definition (it re-added
+            -- the very depleted-fuel-cell dump the prune had removed on
+            -- the Nuc Sample report). The concentrated amounts ARE the
+            -- answer; adjusting them is the user's call.
+            pm.saved = nil
+            pm.phase = "done"
+            return
+        end
         if ratio <= PLACEMENT_GUARD or pm.rounds >= PLACEMENT_MAX_ROUNDS then
             -- The sparse answer stands. Out-of-rounds over the guard stands
             -- too: it converged, and restoring the base would silently hide
@@ -1131,14 +1271,12 @@ function M.placement_step(solution, norm, lines)
             pm.phase = "done"
             return
         end
-        local added
-        if norm == "smart" then
-            added = placement.widen_structural(
-                pm.units, pm.junctions, pm.gp, stats.gp, pm.placed)
-            if added == 0 then
-                added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
-            end
-        else
+        -- "smart" only: the heuristic placement has no necessity proof, so
+        -- the physical guard (and its widening) stays -- it is what repairs
+        -- the heuristic's misses (the corpus failure dissection).
+        local added = placement.widen_structural(
+            pm.units, pm.junctions, pm.gp, stats.gp, pm.placed)
+        if added == 0 then
             added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
         end
         if added == 0 then
@@ -1151,17 +1289,15 @@ function M.placement_step(solution, norm, lines)
         return
     end
 
-    -- The restricted solve did NOT converge (a too-sparse placement can be
-    -- numerically hostile, or -- "smart" only, 4/1474 on the corpus --
-    -- statically infeasible). Widen and retry while rounds remain.
-    if pm.rounds < PLACEMENT_MAX_ROUNDS then
-        local added
-        if norm == "smart" then
-            added = placement.widen_all_units(pm.units, pm.placed)
-            if added == 0 then
-                added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
-            end
-        else
+    -- The restricted solve did NOT converge. For "batch" the placement is
+    -- Phase-I-certified feasible, so this is IPM numerics, not semantics:
+    -- restore the held base verbatim (below) rather than widen a placement
+    -- the definition already fixed. For "smart" (whose placement can be
+    -- statically infeasible -- 4/1474 on the corpus) widen and retry while
+    -- rounds remain.
+    if norm == "smart" and pm.rounds < PLACEMENT_MAX_ROUNDS then
+        local added = placement.widen_all_units(pm.units, pm.placed)
+        if added == 0 then
             added = placement.widen_rank(pm.gp, pm.placed, PLACEMENT_ADDK)
         end
         if added > 0 then

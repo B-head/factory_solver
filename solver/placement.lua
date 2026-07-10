@@ -124,6 +124,52 @@ function M.excludes(groups, placed)
 end
 
 --------------------------------------------------------------------------------
+-- Recipe activity floors
+--------------------------------------------------------------------------------
+
+---The base solve's recipe activity, for the placement floors. Bridges are
+---auto-generated temperature routing, not user-chosen lines, so they stay
+---free; dust-level activity is skipped.
+---@param problem Problem The all-elastic base build.
+---@param x table<string, number> PackedVariables.x of the finished base.
+---@return table<string, number> rates recipe primal key -> base activity
+function M.recipe_rates(problem, x)
+    local rates = {}
+    for key, p in pairs(problem.primals) do
+        if p.kind == "recipe" then
+            local v = x[key] or 0
+            if v > ACTIVE_EPS then rates[key] = v end
+        end
+    end
+    return rates
+end
+
+---Hold every recipe at (a fraction of) its base-solve activity: one
+---lower-limit row per recipe. This is the shipped analog of the research
+---protocol's forcerec: without it a sparse build "solves" the balance of any
+---subgraph the target does not need by shutting it down (rows with no escape
+---balance at 0 = 0), and the user's factory dies outside the target chain.
+---The floors are always satisfiable -- a recipe can run arbitrarily high, and
+---its material rows carry the escapes / artificials -- so the Phase-I build
+---applies them AFTER shape_phase1 and they get no artificials of their own
+---(an artificial would pay the floor instead of running the recipe).
+---@param problem Problem A placement build (Phase-I or restricted).
+---@param rates table<string, number> From M.recipe_rates.
+---@param fraction number The floor as a fraction of the base activity.
+function M.apply_rate_floors(problem, rates, fraction)
+    local keys = {}
+    for key in pairs(rates) do
+        if problem.primals[key] then keys[#keys + 1] = key end
+    end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local row = vk.placement_floor(key)
+        problem:add_lower_limit_constraint(row, rates[key] * fraction)
+        problem:add_subject_term(key, row, 1)
+    end
+end
+
+--------------------------------------------------------------------------------
 -- Phase-I ("batch" placement measurement)
 --------------------------------------------------------------------------------
 
@@ -140,8 +186,22 @@ end
 ---targets stay met" -- otherwise the LP would meet an expensive target by
 ---relaxing it (the all-zero collapse economics) and the artificial support
 ---would name nothing.
+---
+---The whole build is row-EQUILIBRATED first (every row divided by its
+---largest |coefficient|, constraint limits included): real problems mix rows
+---twelve orders of magnitude apart (a reactor's heat row carries 2e9 while a
+---catalyst row carries 5e-3), and on top of the all-zero costs that
+---conditioning left the IPM crawling past -- or flaking around -- the pump's
+---iterate limit (a py nuclear sample needed >1200 iterations and still
+---failed some runs at 1800). Row scaling changes NO primal semantics (the
+---x of every recipe/escape is untouched) and feasibility is invariant, so
+---the verdict is exact; it is unrelated to the rejected main-solve
+---equilibration, which changed answer quality on a priced objective. The
+---artificials then enter their O(1) rows at coefficient 1, and
+---M.phase1_support multiplies the row scale back so support and termination
+---stay in PHYSICAL units.
 ---@param problem Problem A create_problem build (no L2 shaping).
----@return {pos: string, neg: string, row: string}[] arts sorted by row
+---@return {pos: string, neg: string, row: string, scale: number}[] arts sorted by row
 function M.shape_phase1(problem)
     local target_rows = {} ---@type table<string, true>
     for key, p in pairs(problem.primals) do
@@ -149,6 +209,25 @@ function M.shape_phase1(problem)
             for row in pairs(problem.subject_terms[key] or {}) do
                 target_rows[row] = true
             end
+        end
+    end
+    local row_scale = {} ---@type table<string, number>
+    for _, terms in pairs(problem.subject_terms) do
+        for row, coefficient in pairs(terms) do
+            local a = math.abs(coefficient)
+            if a > (row_scale[row] or 0) then row_scale[row] = a end
+        end
+    end
+    for _, terms in pairs(problem.subject_terms) do
+        for row, coefficient in pairs(terms) do
+            local s = row_scale[row]
+            if s and s > 0 and s ~= 1 then terms[row] = coefficient / s end
+        end
+    end
+    for row, dual in pairs(problem.duals) do
+        local s = row_scale[row]
+        if s and s > 0 and s ~= 1 and dual.limit then
+            dual.limit = dual.limit / s
         end
     end
     for _, p in pairs(problem.primals) do
@@ -161,20 +240,23 @@ function M.shape_phase1(problem)
     table.sort(rows)
     local arts = {}
     for _, row in ipairs(rows) do
+        local scale = math.max(row_scale[row] or 1, 1e-9)
         local pos, neg = vk.phase1_art(row, 1), vk.phase1_art(row, -1)
         problem:add_objective(pos, 1, false, "slack")
         problem:add_subject_term(pos, row, 1)
         problem:add_objective(neg, 1, false, "slack")
         problem:add_subject_term(neg, row, -1)
-        arts[#arts + 1] = { pos = pos, neg = neg, row = row }
+        arts[#arts + 1] = { pos = pos, neg = neg, row = row, scale = scale }
     end
     return arts
 end
 
 ---Read a finished Phase-I solve: the total artificial mass and its support
 ---(rows whose artificial stays above `tol`), sorted largest first (key
----ascending as the tie-break).
----@param arts {pos: string, neg: string, row: string}[] From M.shape_phase1.
+---ascending as the tie-break). Artificials are stored row-scaled (see
+---M.shape_phase1); the scale is multiplied back here so `art`, `total`, and
+---`tol` are all in physical row units.
+---@param arts {pos: string, neg: string, row: string, scale: number}[] From M.shape_phase1.
 ---@param x table<string, number> PackedVariables.x
 ---@param tol number
 ---@return number total
@@ -182,7 +264,7 @@ end
 function M.phase1_support(arts, x, tol)
     local total, support = 0, {}
     for _, a in ipairs(arts) do
-        local v = math.abs(x[a.pos] or 0) + math.abs(x[a.neg] or 0)
+        local v = (math.abs(x[a.pos] or 0) + math.abs(x[a.neg] or 0)) * (a.scale or 1)
         total = total + v
         if v > tol then support[#support + 1] = { row = a.row, art = v } end
     end
@@ -207,24 +289,16 @@ local function value_base(value)
     return vk.material({ type = value.type, name = value.name, quality = value.quality or "normal" })
 end
 
----Derive the static "law" placement from the necessity law: one
----representative group per SCC unit of the material graph (variant-level
----Tarjan over the LP's own subject terms, plus the self-loop bases the net
----coefficients hide -- growth loops and perfect catalysts) and one per
----multi-output junction. The representative is the group with the largest
----base-solve physical flow (key ascending as the tie-break).
----
----Returns the placement plus the unit / junction member lists (base
----materials) the structural guard widening walks.
+---The variant-level material graph of a build, from the recipe/bridge
+---subject terms: coef > 0 produces the row, coef < 0 consumes it. Only rows
+---that are material rows (a violation group variant, or a free port) count;
+---limit / budget rows are recognized by NOT being in either map, no name
+---parsing. Shared by the "smart" law placement and the "candidates" set.
 ---@param problem Problem The all-elastic base build.
 ---@param lines NormalizedProductionLine[] The same lines the build came from.
----@param gp table<string, number> Per-group physical flow of the base solve.
----@return table<string, true> placed
----@return string[][] units SCC units as sorted base-material arrays.
----@return string[][] junctions Junction outputs as sorted base-material arrays.
-function M.law_placement(problem, lines, gp)
-    local groups = M.violation_groups(problem)
-    local mat2base = M.invert_groups(groups)
+---@param mat2base table<string, string> From M.invert_groups.
+---@return {free: table<string, true>, adj: table<string, table<string, true>>, sorted_nodes: string[], junction_outs: string[][], coprod: table<string, true>, cocons: table<string, true>, selfloop: table<string, true>, sccid: table<string, integer>, sccsize: table<integer, integer>}
+local function material_graph(problem, lines, mat2base)
     local free = {} ---@type table<string, true>  free-port material rows
     for _, p in pairs(problem.primals) do
         if (p.kind == "initial_source" or p.kind == "final_sink") and p.material then
@@ -232,13 +306,11 @@ function M.law_placement(problem, lines, gp)
         end
     end
 
-    -- The variant-level material graph from the recipe/bridge subject terms:
-    -- coef > 0 produces the row, coef < 0 consumes it. Only rows that are
-    -- material rows (a violation group variant, or a free port) count; limit /
-    -- budget rows are recognized by NOT being in either map, no name parsing.
     local adj = {} ---@type table<string, table<string, true>>
     local nodes = {} ---@type table<string, true>
     local junction_outs = {} ---@type string[][]
+    local coprod = {} ---@type table<string, true>  rows of multi-output recipes
+    local cocons = {} ---@type table<string, true>  rows of multi-input recipes
     local rkeys = {}
     for key, p in pairs(problem.primals) do
         if p.kind == "recipe" or p.kind == "bridge" then rkeys[#rkeys + 1] = key end
@@ -279,6 +351,7 @@ function M.law_placement(problem, lines, gp)
             -- A multi-output junction. Free co-products still make it a
             -- junction (a rigid ratio constrains the others), but only rows
             -- with a violation group are placement candidates.
+            for _, row in ipairs(prods) do coprod[row] = true end
             local outs, seen = {}, {}
             for _, row in ipairs(prods) do
                 local base = mat2base[row]
@@ -291,6 +364,9 @@ function M.law_placement(problem, lines, gp)
                 table.sort(outs)
                 junction_outs[#junction_outs + 1] = outs
             end
+        end
+        if #cons >= 2 then
+            for _, row in ipairs(cons) do cocons[row] = true end
         end
     end
 
@@ -366,14 +442,59 @@ function M.law_placement(problem, lines, gp)
         end
     end
 
+    return {
+        free = free, adj = adj, sorted_nodes = sorted_nodes,
+        junction_outs = junction_outs, coprod = coprod, cocons = cocons,
+        selfloop = selfloop, sccid = sccid, sccsize = sccsize,
+    }
+end
+
+---Whether a variant row sits on a material cycle: a size>=2 SCC, a net
+---self-edge, or a raw-line self-loop of its base.
+---@param g table From material_graph.
+---@param row string
+---@param base string
+---@return boolean
+local function in_cycle(g, row, base)
+    local id = g.sccid[row]
+    if id and g.sccsize[id] >= 2 then return true end
+    if g.adj[row] and g.adj[row][row] then return true end
+    return g.selfloop[base] == true
+end
+
+-- Exposed for the dissection probes (tests/research/): the classification a
+-- placement made is only debuggable with the graph it was made from.
+M.material_graph = material_graph
+M.in_cycle = in_cycle
+
+---Derive the static "law" placement from the necessity law: one
+---representative group per SCC unit of the material graph (variant-level
+---Tarjan over the LP's own subject terms, plus the self-loop bases the net
+---coefficients hide -- growth loops and perfect catalysts) and one per
+---multi-output junction. The representative is the group with the largest
+---base-solve physical flow (key ascending as the tie-break).
+---
+---Returns the placement plus the unit / junction member lists (base
+---materials) the structural guard widening walks.
+---@param problem Problem The all-elastic base build.
+---@param lines NormalizedProductionLine[] The same lines the build came from.
+---@param gp table<string, number> Per-group physical flow of the base solve.
+---@return table<string, true> placed
+---@return string[][] units SCC units as sorted base-material arrays.
+---@return string[][] junctions Junction outputs as sorted base-material arrays.
+function M.law_placement(problem, lines, gp)
+    local groups = M.violation_groups(problem)
+    local mat2base = M.invert_groups(groups)
+    local g = material_graph(problem, lines, mat2base)
+
     -- SCC units at group grain: size>=2 SCC members, plus the self-edge /
     -- self-loop bases as singleton units.
     local unit_sets = {} ---@type table<string|integer, table<string, true>>
-    for _, row in ipairs(sorted_nodes) do
+    for _, row in ipairs(g.sorted_nodes) do
         local base = mat2base[row]
         if base then
-            local id = sccid[row]
-            if id and sccsize[id] >= 2 then
+            local id = g.sccid[row]
+            if id and g.sccsize[id] >= 2 then
                 local set = unit_sets[id]
                 if not set then
                     set = {}
@@ -381,7 +502,7 @@ function M.law_placement(problem, lines, gp)
                 end
                 set[base] = true
             end
-            if (adj[row] and adj[row][row]) or selfloop[base] then
+            if (g.adj[row] and g.adj[row][row]) or g.selfloop[base] then
                 unit_sets["self|" .. base] = { [base] = true }
             end
         end
@@ -417,11 +538,11 @@ function M.law_placement(problem, lines, gp)
         local rep = rep_of(members)
         if rep then placed[rep] = true end
     end
-    for _, outs in ipairs(junction_outs) do
+    for _, outs in ipairs(g.junction_outs) do
         local rep = rep_of(outs)
         if rep then placed[rep] = true end
     end
-    return placed, units, junction_outs
+    return placed, units, g.junction_outs
 end
 
 --------------------------------------------------------------------------------

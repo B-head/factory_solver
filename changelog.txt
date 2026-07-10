@@ -5,12 +5,19 @@ Date: ????
     - Two experimental solver norms, "Sparse (Phase-I)" and "Sparse (static)":
       instead of allowing an import/dump escape on every intermediate (and
       letting the balanced spread activate most of them), they re-solve with
-      escapes only where the factory structurally cannot balance -- measured
-      by a Phase-I feasibility solve, or derived from the material cycles and
-      multi-output junctions without extra solves. The result lists far fewer
-      external channels. A guard compares the physical import/dump totals
-      against the all-escape solution and widens the placement (up to
-      restoring it entirely) when a too-sparse set would inflate them.
+      escapes only where the factory structurally cannot balance. "Sparse
+      (Phase-I)" measures the placement one escape at a time with Phase-I
+      feasibility solves and prunes it down to a set in which every escape
+      is provably necessary; that set is final -- the (possibly large)
+      concentrated import/dump amounts are the honest price, left to the
+      user to adjust. "Sparse (static)" derives its placement from the
+      material cycles and multi-output junctions without extra solves; being
+      a heuristic without a necessity proof, it keeps a physical guard that
+      widens the placement (up to restoring it entirely) when a too-sparse
+      set would inflate the totals. Under both, every line is held at least
+      as active as in the all-escape solution, so the sparse re-solve cannot
+      "balance" parts of the factory the target does not need by shutting
+      them down.
   Changes:
     - The "balanced" (L2) norm now folds sibling import/dump channels after it
       solves: when the even spread splits one material's imbalance across its

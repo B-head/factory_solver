@@ -54,6 +54,11 @@ local L2_LOCK = "|l2_lock|"
 -- placed escape can close.
 local PHASE1_ART_POS = "|phase1_art+|"
 local PHASE1_ART_NEG = "|phase1_art-|"
+-- Sparse-placement recipe activity floor (see solver/placement.lua
+-- M.apply_rate_floors): one lower-limit dual per recipe, holding it at the
+-- all-elastic base solve's rate so the sparse re-solve cannot shut down the
+-- parts of the factory whose escapes it removed.
+local PLACEMENT_FLOOR = "|placement_floor|"
 -- A bare |elastic| sits on a |limit| dual, so the composite a constraint
 -- relaxation carries is |elastic||limit|<material>.
 local ELASTIC_LIMIT = ELASTIC .. LIMIT
@@ -168,6 +173,12 @@ function M.l2_lock(group) return L2_LOCK .. group end
 function M.phase1_art(row, sign)
     return (sign > 0 and PHASE1_ART_POS or PHASE1_ART_NEG) .. row
 end
+
+---The lower-limit dual holding one recipe at its base-solve activity in a
+---sparse-placement build; keyed by the recipe primal it floors.
+---@param recipe string the recipe primal key
+---@return string
+function M.placement_floor(recipe) return PLACEMENT_FLOOR .. recipe end
 
 ---@param dual_variable string
 ---@return string

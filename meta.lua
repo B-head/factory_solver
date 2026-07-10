@@ -221,7 +221,7 @@ __factory_solver__storage = {}
 ---@field problem Problem?
 ---@field solver_state SolverState
 ---@field solver_iteration integer?
----@field solver_norm SolverNorm?  Per-solution import/dump balancing norm (manage/pre_solve.lua dispatch). "l1" un-gated baseline (linear elastic), "l2" QP least-norm on the violation elastics, "l2_baseline" the same QP shaping as "l2" but WITHOUT the post-solve mode-compression fold (a comparison baseline), "linf" lexicographic min-max, "batch" / "smart" the sparse elastic placements (all-elastic L2 base, then a restricted L2 on a Phase-I-measured / statically-derived escape placement with a physical guard), "legacy" the hard reachability gate + two-pass. "cascade" is the retired staged rescue, kept dispatchable (not exposed in the UI) so its fixtures keep validating. nil = "legacy" (the default; backfilled on load).
+---@field solver_norm SolverNorm?  Per-solution import/dump balancing norm (manage/pre_solve.lua dispatch). "l1" un-gated baseline (linear elastic), "l2" QP least-norm on the violation elastics, "l2_baseline" the same QP shaping as "l2" but WITHOUT the post-solve mode-compression fold (a comparison baseline), "linf" lexicographic min-max, "batch" / "smart" the sparse elastic placements (all-elastic L2 base, then a restricted L2 on a Phase-I-measured-and-pruned / representative-derived escape placement with a physical guard), "legacy" the hard reachability gate + two-pass. "cascade" is the retired staged rescue, kept dispatchable (not exposed in the UI) so its fixtures keep validating. nil = "legacy" (the default; backfilled on load).
 ---@field raw_variables PackedVariables?
 ---@field done_lines table<string, true>?
 ---@field forced_imports table<string, true>?  Legacy two-pass reclassify (manage/pre_solve.lua, used only when observe_price is disabled): avoidable cheats diagnosed from pass 1, re-seeded as |initial_source| imports for pass 2. nil during pass 1 / a clean solve.
@@ -242,16 +242,20 @@ __factory_solver__storage = {}
 ---@field pm_restart boolean?  Internal flag: set when the placement re-arms solver_state="ready", so the rebuild keeps the in-flight placement state AND the settled target rescue instead of dropping them as it would for a fresh edit (same preserve-list role as lf_restart / lc_restart / ll_restart).
 
 ---@class PlacementState
----@field phase "phase1"|"restricted"|"done"  "phase1" while a Phase-I feasibility measurement is in flight ("batch" only); "restricted" while a placement-restricted L2 re-solve runs; "done" once the sparse answer stands (or the base was restored).
+---@field phase "phase1"|"prune"|"restricted"|"done"  "phase1" while a Phase-I feasibility measurement is in flight ("batch" only; one group opened per solve); "prune" while the irreducibility probes re-close each opening solo and drop the redundant ones ("batch" only); "restricted" while a placement-restricted L2 re-solve runs; "done" once the sparse answer stands (or the base was restored).
+---@field prune_list string[]?  The openings still to probe (physically smallest first, so a substitutable pair keeps its larger carrier), while phase == "prune".
+---@field prune_index integer?  1-based cursor into prune_list.
 ---@field groups table<string, string[]>?  Violation-group index of the base build: base material (Primal.material_base grain) -> its variant material rows, the unit the placement/exclusion works in.
 ---@field placed table<string, true>?  The placement: groups whose escapes the restricted build keeps. Everything else is excluded via CreateProblemOptions.hatch_exclude / sink_exclude.
 ---@field gp table<string, number>?  Per-group physical violation of the base solve (the widening rank and the structural carriers' reference).
 ---@field base_imp number?  Physical import total of the base solve (guard reference).
 ---@field base_dmp number?  Physical dump total of the base solve (guard reference).
 ---@field t_limit number?  Target budget threaded into every placement build (the linf t_limit move): the settled rescue budget, else the base solve's achieved relaxation + margin -- neither the Phase-I nor a sparse re-solve may trade a target away past the base.
----@field rounds integer?  Guard widening rounds spent.
+---@field rates table<string, number>?  The base solve's recipe activity (solver/placement.lua M.recipe_rates), held as lower-limit floors on every placement build -- the shipped analog of the research forcerec, so the sparse re-solve cannot shut down the factory parts whose escapes it removed.
+---@field rounds integer?  Guard widening rounds spent ("smart" only; "batch" stands on its definition-exact set).
+---@field ratio number?  The finished restricted solve's physical import+dump total over the base's, recorded as information (a future UI hint; under "batch" a high ratio is the honest price of the definition-exact placement).
 ---@field p1iters integer?  Phase-I iterations spent ("batch").
----@field arts {pos: string, neg: string, row: string}[]?  The Phase-I artificial keys of the in-flight "phase1" build (solver/placement.lua M.shape_phase1), read back by M.phase1_support.
+---@field arts {pos: string, neg: string, row: string, scale: number}[]?  The Phase-I artificial keys of the in-flight "phase1" / "prune" build (solver/placement.lua M.shape_phase1; row-scaled, see there), read back by M.phase1_support.
 ---@field units string[][]?  SCC units (base-material member lists) of the static law placement ("smart"), walked by the structural widening.
 ---@field junctions string[][]?  Multi-output junction output lists ("smart"), same role as units.
 ---@field saved {problem: Problem, raw_variables: PackedVariables, machines: table<string, number>}?  The finished base answer, restored verbatim when the restricted solve cannot be widened back to convergence (the L2CompressState.saved pattern).
